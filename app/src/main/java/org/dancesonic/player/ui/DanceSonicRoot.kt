@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -35,6 +36,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.dancesonic.player.AppContainer
@@ -88,49 +95,132 @@ fun DanceSonicRoot(container: AppContainer) {
     }
 }
 
+private enum class ConnectMethod(val label: String) {
+    Qr("QR code"),
+    Password("Username & password"),
+    ApiKey("API key"),
+}
+
 @Composable
 fun ConnectScreen(vm: ConnectViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var method by rememberSaveable { mutableStateOf(ConnectMethod.Qr) }
     var address by rememberSaveable { mutableStateOf("https://") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
     var apiKey by rememberSaveable { mutableStateOf("") }
 
     Column(
-        Modifier.fillMaxWidth().padding(16.dp),
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Connect to Navidrome", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Create an API key in Navidrome (user settings) and paste it here. " +
-                "Only https:// addresses are accepted. Your password is never stored.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        OutlinedTextField(
-            value = address,
-            onValueChange = { address = it },
-            label = { Text("Server address") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("API key") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Text("Connect to your server", style = MaterialTheme.typography.headlineSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ConnectMethod.entries.forEach { entry ->
+                FilterChip(
+                    selected = method == entry,
+                    onClick = { method = entry },
+                    label = { Text(entry.label) },
+                )
+            }
+        }
+
+        when (method) {
+            ConnectMethod.Qr -> {
+                Text(
+                    "On the server's account page, create a pairing code and scan it here. " +
+                        "The code works once and expires after five minutes.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                scanQrCode(context.applicationContext)?.let { vm.pairWithCode(it) }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                vm.reportError("The code scanner is not available on this device.")
+                            }
+                        }
+                    },
+                    enabled = !state.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Scan pairing code") }
+            }
+
+            ConnectMethod.Password -> {
+                Text(
+                    "Sign in with your server account. The app stores only an API key, never your password.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                ServerAddressField(address) { address = it }
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("Username") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { vm.signInWithPassword(address, username, password) },
+                    enabled = !state.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Sign in") }
+            }
+
+            ConnectMethod.ApiKey -> {
+                Text(
+                    "Paste an API key created on the server. Only https:// addresses are accepted.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                ServerAddressField(address) { address = it }
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("API key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { vm.connectWithApiKey(address, apiKey) },
+                    enabled = !state.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Connect") }
+            }
+        }
+
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (state.busy) {
-            CircularProgressIndicator()
-        } else {
-            Button(
-                onClick = { vm.connect(address, apiKey) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Connect") }
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
     }
+}
+
+@Composable
+private fun ServerAddressField(value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text("Server address") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
