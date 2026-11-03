@@ -25,11 +25,12 @@ object PairingUri {
 
     /** @throws IllegalArgumentException if the text is not a valid pairing code. */
     fun parse(raw: String): PairingRequest {
-        val uri = try {
-            URI(raw.trim())
-        } catch (e: java.net.URISyntaxException) {
-            throw IllegalArgumentException("This is not a pairing code.", e)
-        }
+        val uri =
+            try {
+                URI(raw.trim())
+            } catch (e: java.net.URISyntaxException) {
+                throw IllegalArgumentException("This is not a pairing code.", e)
+            }
         require(uri.scheme == SCHEME && uri.host == HOST) { "This is not a pairing code." }
 
         val params = parseQuery(uri.rawQuery.orEmpty())
@@ -46,6 +47,7 @@ object PairingUri {
             .associate { pair ->
                 val key = pair.substringBefore('=')
                 val value = pair.substringAfter('=', missingDelimiterValue = "")
-                URLDecoder.decode(key, Charsets.UTF_8) to URLDecoder.decode(value, Charsets.UTF_8)
+                // The String-charset overload works on API 29; the Charset overload needs API 33.
+                URLDecoder.decode(key, "UTF-8") to URLDecoder.decode(value, "UTF-8")
             }
 }

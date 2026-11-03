@@ -20,21 +20,28 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
     abstract fun artistDao(): ArtistDao
+
     abstract fun albumDao(): AlbumDao
+
     abstract fun trackDao(): TrackDao
+
     abstract fun danceMetadataDao(): DanceMetadataDao
+
     abstract fun playlistDao(): PlaylistDao
+
     abstract fun playlistItemDao(): PlaylistItemDao
 
     companion object {
         fun create(context: Context): DanceSonicDatabase =
             Room.databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-                .addCallback(object : RoomDatabase.Callback() {
-                    override fun onOpen(db: SupportSQLiteDatabase) {
-                        db.execSQL("PRAGMA foreign_keys = ON")
-                    }
-                })
+                .addCallback(
+                    object : RoomDatabase.Callback() {
+                        override fun onOpen(db: SupportSQLiteDatabase) {
+                            db.execSQL("PRAGMA foreign_keys = ON")
+                        }
+                    },
+                )
                 // No fallbackToDestructiveMigration: playlists and cached metadata must survive upgrades.
                 .build()
     }

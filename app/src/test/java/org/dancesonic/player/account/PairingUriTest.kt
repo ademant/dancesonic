@@ -5,21 +5,22 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PairingUriTest {
-
     @Test
     fun `valid code yields server and token`() {
-        val request = PairingUri.parse(
-            "tinysonic://pair?server=https%3A%2F%2Fmusic.example.com%2F&token=tsp_abcdefgh12345",
-        )
+        val request =
+            PairingUri.parse(
+                "tinysonic://pair?server=https%3A%2F%2Fmusic.example.com%2F&token=tsp_abcdefgh12345",
+            )
         assertEquals("https://music.example.com/", request.server.toString())
         assertEquals("tsp_abcdefgh12345", request.token)
     }
 
     @Test
     fun `subpath deployments keep their path`() {
-        val request = PairingUri.parse(
-            "tinysonic://pair?server=https%3A%2F%2Fexample.com%2Ffolksonic&token=tsp_abcdefgh12345",
-        )
+        val request =
+            PairingUri.parse(
+                "tinysonic://pair?server=https%3A%2F%2Fexample.com%2Ffolksonic&token=tsp_abcdefgh12345",
+            )
         assertEquals("https://example.com/folksonic/", request.server.toString())
     }
 

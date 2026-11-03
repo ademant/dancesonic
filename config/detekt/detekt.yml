@@ -1,0 +1,32 @@
+# Project overrides on top of detekt's defaults (buildUponDefaultConfig = true).
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    # Compose screens are declarative trees; the longest one is ~100 lines.
+    threshold: 110
+  TooManyFunctions:
+    # Repositories and the ViewModels hold one small function per use case.
+    thresholdInClasses: 15
+    thresholdInFiles: 15
+    thresholdInObjects: 15
+
+naming:
+  FunctionNaming:
+    # Compose functions are PascalCase by convention.
+    ignoreAnnotated:
+      - 'Composable'
+
+style:
+  MaxLineLength:
+    maxLineLength: 120
+  WildcardImport:
+    active: true
+    excludeImports:
+      - 'java.util.*'
+  ReturnCount:
+    max: 3
+  ThrowsCount:
+    # SubsonicClient.call maps three transport errors plus the failed-envelope case.
+    max: 4

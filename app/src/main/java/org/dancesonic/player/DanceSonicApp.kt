@@ -2,9 +2,9 @@ package org.dancesonic.player
 
 import android.app.Application
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.datastore.core.DataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +23,6 @@ import org.dancesonic.player.subsonic.SubsonicHttp
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dancesonic_settings")
 
 class DanceSonicApp : Application() {
-
     lateinit var container: AppContainer
         private set
 
@@ -37,7 +36,6 @@ class DanceSonicApp : Application() {
  * Manual dependency container. Small enough that a DI framework is not yet warranted.
  */
 class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
-
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Current server settings, kept in memory for the HTTP interceptor. Written only by [settingsStore]'s flow. */

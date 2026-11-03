@@ -14,7 +14,6 @@ import org.dancesonic.player.DanceSonicApp
  */
 @UnstableApi
 class PlaybackService : MediaSessionService() {
-
     private var session: MediaSession? = null
 
     override fun onCreate() {
@@ -22,12 +21,14 @@ class PlaybackService : MediaSessionService() {
         val container = (application as DanceSonicApp).container
         // Streams go through the same authenticated OkHttp client as the API; the API key is added
         // by the interceptor, so media items carry no secrets.
-        val mediaSourceFactory = DefaultMediaSourceFactory(this)
-            .setDataSourceFactory(OkHttpDataSource.Factory(container.httpClient))
-        val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
+        val mediaSourceFactory =
+            DefaultMediaSourceFactory(this)
+                .setDataSourceFactory(OkHttpDataSource.Factory(container.httpClient))
+        val player =
+            ExoPlayer.Builder(this)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setHandleAudioBecomingNoisy(true)
+                .build()
         session = MediaSession.Builder(this, player).build()
     }
 

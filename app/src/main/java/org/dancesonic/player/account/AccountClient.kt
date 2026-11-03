@@ -8,13 +8,17 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.SubsonicHttp
 import retrofit2.HttpException
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
-import retrofit2.Response
-import org.dancesonic.player.subsonic.SubsonicHttp
+import retrofit2.http.Path
+import retrofit2.http.Query
 import java.io.IOException
 
 /**
@@ -23,7 +27,9 @@ import java.io.IOException
  */
 internal interface AccountService {
     @POST("api/login")
-    suspend fun login(@Body body: LoginRequest): LoginResponse
+    suspend fun login(
+        @Body body: LoginRequest,
+    ): LoginResponse
 
     @POST("api/keys")
     suspend fun createApiKey(
@@ -32,11 +38,39 @@ internal interface AccountService {
     ): CreateKeyResponse
 
     @POST("api/logout")
-    suspend fun logout(@Header("Authorization") bearer: String): Response<Unit>
+    suspend fun logout(
+        @Header("Authorization") bearer: String,
+    ): Response<Unit>
 
     @POST("api/pair/complete")
-    suspend fun completePairing(@Body body: PairCompleteRequest): PairCompleteResponse
+    suspend fun completePairing(
+        @Body body: PairCompleteRequest,
+    ): PairCompleteResponse
+
+    /** Keys can be listed and revoked with an API key, so the app needs no session for this. */
+    @GET("api/keys")
+    suspend fun listKeys(
+        @Query("apiKey") apiKey: String,
+    ): ListKeysResponse
+
+    @DELETE("api/keys/{id}")
+    suspend fun revokeKey(
+        @Path("id") id: Long,
+        @Query("apiKey") apiKey: String,
+    ): Response<Unit>
 }
+
+@Serializable
+internal data class ListKeysResponse(
+    val keys: List<KeyInfo> = emptyList(),
+)
+
+/** One key as the server lists it. `prefix` is the start of the secret, shown for identification. */
+@Serializable
+internal data class KeyInfo(
+    val id: Long,
+    val prefix: String,
+)
 
 @Serializable
 internal data class LoginRequest(
@@ -86,17 +120,23 @@ class AccountException(message: String, cause: Throwable? = null) : Exception(me
  * a pairing token from the QR code. The app stores only the resulting API key.
  */
 class AccountClient internal constructor(private val http: OkHttpClient) {
-
     constructor() : this(SubsonicHttp.okHttpClient { null })
 
     /** Signs in with a password and returns a short-lived session token. */
-    suspend fun login(server: HttpUrl, username: String, password: String): String =
+    suspend fun login(
+        server: HttpUrl,
+        username: String,
+        password: String,
+    ): String =
         call(unauthorized = "Wrong username or password.") {
             service(server).login(LoginRequest(username, password)).token
         }
 
     /** Creates a non-expiring API key for this app using a session token. */
-    suspend fun createApiKey(server: HttpUrl, sessionToken: String): String =
+    suspend fun createApiKey(
+        server: HttpUrl,
+        sessionToken: String,
+    ): String =
         call(unauthorized = "Your sign-in expired. Please try again.") {
             service(server).createApiKey("Bearer $sessionToken", CreateKeyRequest(DEVICE_LABEL, expiresDays = 0)).apiKey
         }
@@ -105,7 +145,10 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
      * Ends the session on the server. Callers use this after the API key is obtained, so a failure
      * here does not affect the connection. The session also expires on its own.
      */
-    suspend fun logout(server: HttpUrl, sessionToken: String) {
+    suspend fun logout(
+        server: HttpUrl,
+        sessionToken: String,
+    ) {
         call(unauthorized = "Your sign-in already expired.") {
             val response = service(server).logout("Bearer $sessionToken")
             if (!response.isSuccessful) throw HttpException(response)
@@ -118,6 +161,27 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             service(request.server).completePairing(PairCompleteRequest(request.token, DEVICE_LABEL)).apiKey
         }
 
+    /**
+     * Revokes this app's key on the server. Returns false when the key is no longer listed, which
+     * means it was already revoked. The key is matched by its prefix; if the prefix is ambiguous
+     * nothing is revoked, so no other key is touched.
+     */
+    suspend fun revokeOwnKey(
+        server: HttpUrl,
+        apiKey: String,
+    ): Boolean {
+        val keys =
+            call(unauthorized = "The stored key is no longer valid.") {
+                service(server).listKeys(apiKey).keys
+            }
+        val id = matchOwnKeyId(keys, apiKey) ?: return false
+        call(unauthorized = "The stored key is no longer valid.") {
+            val response = service(server).revokeKey(id, apiKey)
+            if (!response.isSuccessful) throw HttpException(response)
+        }
+        return true
+    }
+
     private fun service(server: HttpUrl): AccountService =
         Retrofit.Builder()
             .baseUrl(server)
@@ -126,12 +190,15 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             .build()
             .create(AccountService::class.java)
 
-    private suspend fun <T> call(unauthorized: String, block: suspend () -> T): T =
+    private suspend fun <T> call(
+        unauthorized: String,
+        block: suspend () -> T,
+    ): T =
         try {
             block()
         } catch (e: HttpException) {
             when (e.code()) {
-                401 -> throw AccountException(unauthorized, e)
+                HTTP_UNAUTHORIZED -> throw AccountException(unauthorized, e)
                 else -> throw AccountException("The server returned HTTP ${e.code()}.", e)
             }
         } catch (e: SerializationException) {
@@ -142,11 +209,23 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
 
     companion object {
         const val DEVICE_LABEL = "DanceSonic Android"
+        private const val HTTP_UNAUTHORIZED = 401
+
+        /** The id of the key whose prefix starts [apiKey], or null if zero or several match. */
+        internal fun matchOwnKeyId(
+            keys: List<KeyInfo>,
+            apiKey: String,
+        ): Long? {
+            val matches = keys.filter { it.prefix.isNotEmpty() && apiKey.startsWith(it.prefix) }
+            return matches.singleOrNull()?.id
+        }
+
         const val INVALID_PAIRING_CODE =
             "This pairing code is invalid or expired. Create a new one on the account page."
 
-        private val accountJson = Json {
-            ignoreUnknownKeys = true
-        }
+        private val accountJson =
+            Json {
+                ignoreUnknownKeys = true
+            }
     }
 }

@@ -20,8 +20,15 @@ datastore = "1.1.7"
 retrofit = "2.11.0"
 retrofitSerializationConverter = "1.0.0"
 playServicesCodeScanner = "16.1.0"
+detekt = "1.23.8"
+ktlint = "12.3.0"
+turbine = "1.2.1"
+composeUiTest = "1.9.4"
 
 [libraries]
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
@@ -53,6 +60,8 @@ play-services-code-scanner = { group = "com.google.android.gms", name = "play-se
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 
 [plugins]
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

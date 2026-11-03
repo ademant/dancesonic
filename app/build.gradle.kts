@@ -4,6 +4,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
+}
+
+detekt {
+    config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+    buildUponDefaultConfig = true
+    parallel = true
 }
 
 ksp {
@@ -79,6 +87,11 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.turbine)
+    androidTestImplementation(platform(libs.compose.bom))
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
 
 kotlin {

@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,8 +18,11 @@ interface ArtistDao {
     @Query("SELECT * FROM artist WHERE id = :id")
     suspend fun get(id: String): ArtistEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(artists: List<ArtistEntity>)
+
+    @Query("DELETE FROM artist")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM artist WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
@@ -32,8 +36,11 @@ interface AlbumDao {
     @Query("SELECT * FROM album WHERE id = :id")
     suspend fun get(id: String): AlbumEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(albums: List<AlbumEntity>)
+
+    @Query("DELETE FROM album")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM album WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
@@ -76,8 +83,11 @@ interface TrackDao {
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>)
+
+    @Query("DELETE FROM track")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM track WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
@@ -95,10 +105,17 @@ interface DanceMetadataDao {
 
     /** Replaces all dance types of one recording with the freshly fetched set. */
     @Transaction
-    suspend fun replaceFor(mbid: String, danceTypes: List<String>, fetchedAt: Long) {
+    suspend fun replaceFor(
+        mbid: String,
+        danceTypes: List<String>,
+        fetchedAt: Long,
+    ) {
         deleteFor(mbid)
         insertAll(danceTypes.map { DanceMetadataEntity(mbid, it, fetchedAt) })
     }
+
+    @Query("DELETE FROM dance_metadata")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM dance_metadata WHERE mbid = :mbid")
     suspend fun deleteFor(mbid: String)

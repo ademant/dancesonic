@@ -48,7 +48,10 @@ fun PlaylistsScreen(vm: PlaylistViewModel) {
 }
 
 @Composable
-private fun PlaylistList(vm: PlaylistViewModel, onOpen: (Long) -> Unit) {
+private fun PlaylistList(
+    vm: PlaylistViewModel,
+    onOpen: (Long) -> Unit,
+) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     var newName by rememberSaveable { mutableStateOf("") }
 
@@ -182,7 +185,10 @@ private fun GroupHeader(group: PlaylistGroup) {
 }
 
 @Composable
-private fun PlaylistItemRowView(item: PlaylistItemRow, onEdit: () -> Unit) {
+private fun PlaylistItemRowView(
+    item: PlaylistItemRow,
+    onEdit: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
