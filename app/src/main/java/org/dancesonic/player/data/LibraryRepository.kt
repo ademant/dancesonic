@@ -75,6 +75,19 @@ class LibraryRepository(
         )
     }
 
+    /**
+     * Removes the synced catalog and DanceBrainz data. Playlists are kept: they belong to the device,
+     * not to the server, and they survive a reconnect.
+     */
+    suspend fun clearCatalog() = withContext(Dispatchers.IO) {
+        db.withTransaction {
+            db.trackDao().deleteAll()
+            db.albumDao().deleteAll()
+            db.artistDao().deleteAll()
+            db.danceMetadataDao().deleteAll()
+        }
+    }
+
     private data class Fetched(
         val artists: List<ArtistEntity>,
         val albums: List<AlbumEntity>,

@@ -11,8 +11,12 @@ import okhttp3.OkHttpClient
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.Response
 import org.dancesonic.player.subsonic.SubsonicHttp
 import java.io.IOException
@@ -36,7 +40,26 @@ internal interface AccountService {
 
     @POST("api/pair/complete")
     suspend fun completePairing(@Body body: PairCompleteRequest): PairCompleteResponse
+
+    /** Keys can be listed and revoked with an API key, so the app needs no session for this. */
+    @GET("api/keys")
+    suspend fun listKeys(@Query("apiKey") apiKey: String): ListKeysResponse
+
+    @DELETE("api/keys/{id}")
+    suspend fun revokeKey(@Path("id") id: Long, @Query("apiKey") apiKey: String): Response<Unit>
 }
+
+@Serializable
+internal data class ListKeysResponse(
+    val keys: List<KeyInfo> = emptyList(),
+)
+
+/** One key as the server lists it. `prefix` is the start of the secret, shown for identification. */
+@Serializable
+internal data class KeyInfo(
+    val id: Long,
+    val prefix: String,
+)
 
 @Serializable
 internal data class LoginRequest(
@@ -118,6 +141,23 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             service(request.server).completePairing(PairCompleteRequest(request.token, DEVICE_LABEL)).apiKey
         }
 
+    /**
+     * Revokes this app's key on the server. Returns false when the key is no longer listed, which
+     * means it was already revoked. The key is matched by its prefix; if the prefix is ambiguous
+     * nothing is revoked, so no other key is touched.
+     */
+    suspend fun revokeOwnKey(server: HttpUrl, apiKey: String): Boolean {
+        val keys = call(unauthorized = "The stored key is no longer valid.") {
+            service(server).listKeys(apiKey).keys
+        }
+        val id = matchOwnKeyId(keys, apiKey) ?: return false
+        call(unauthorized = "The stored key is no longer valid.") {
+            val response = service(server).revokeKey(id, apiKey)
+            if (!response.isSuccessful) throw HttpException(response)
+        }
+        return true
+    }
+
     private fun service(server: HttpUrl): AccountService =
         Retrofit.Builder()
             .baseUrl(server)
@@ -142,6 +182,12 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
 
     companion object {
         const val DEVICE_LABEL = "DanceSonic Android"
+
+        /** The id of the key whose prefix starts [apiKey], or null if zero or several match. */
+        internal fun matchOwnKeyId(keys: List<KeyInfo>, apiKey: String): Long? {
+            val matches = keys.filter { it.prefix.isNotEmpty() && apiKey.startsWith(it.prefix) }
+            return matches.singleOrNull()?.id
+        }
         const val INVALID_PAIRING_CODE =
             "This pairing code is invalid or expired. Create a new one on the account page."
 

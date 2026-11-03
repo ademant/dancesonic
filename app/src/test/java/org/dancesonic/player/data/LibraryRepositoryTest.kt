@@ -16,6 +16,7 @@ import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -144,6 +145,23 @@ class LibraryRepositoryTest {
         assertEquals(1, result.albums)
         assertEquals(1, result.skippedAlbums)
         assertNull(db.albumDao().get("al-9"))
+    }
+
+    @Test
+    fun `clearing the catalog keeps playlists and their entries`() = runBlocking(Dispatchers.IO) {
+        enqueueSmallLibrary()
+        val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+        repo.sync(server.client)
+        val playlists = PlaylistRepository(db, clock = { 1_000L })
+        val playlistId = playlists.create("Waltz course")
+        playlists.addTrack(playlistId, "s-1", "Waltz")
+
+        repo.clearCatalog()
+
+        assertNull(db.trackDao().get("s-1"))
+        assertNull(db.artistDao().get("ar-1"))
+        assertNotNull(db.playlistDao().get(playlistId))
+        assertEquals(listOf("s-1"), playlists.orderedTrackIds(playlistId))
     }
 
     @Test

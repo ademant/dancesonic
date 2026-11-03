@@ -99,10 +99,27 @@ class ConnectViewModel(
         startSync(settings)
     }
 
+    /**
+     * Revokes this app's key on the server (best effort), clears the synced catalog and forgets the
+     * server. Playlists stay on the device. If the server cannot be reached, the local data is still
+     * removed and the user is told to revoke the key on the account page.
+     */
     fun disconnect() {
+        val settings = container.currentSettings
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { container.settingsStore.clear() }
-            _state.value = ConnectUiState()
+            var warning: String? = null
+            if (settings != null) {
+                try {
+                    account.revokeOwnKey(settings.baseUrl, settings.apiKey)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: AccountException) {
+                    warning = "Could not revoke the key on the server. Revoke it on the account page."
+                }
+            }
+            container.library.clearCatalog()
+            container.settingsStore.clear()
+            _state.value = ConnectUiState(error = warning)
         }
     }
 

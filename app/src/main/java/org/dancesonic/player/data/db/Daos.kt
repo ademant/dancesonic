@@ -21,6 +21,9 @@ interface ArtistDao {
     @Upsert
     suspend fun upsertAll(artists: List<ArtistEntity>)
 
+    @Query("DELETE FROM artist")
+    suspend fun deleteAll()
+
     @Query("DELETE FROM artist WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
 }
@@ -35,6 +38,9 @@ interface AlbumDao {
 
     @Upsert
     suspend fun upsertAll(albums: List<AlbumEntity>)
+
+    @Query("DELETE FROM album")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM album WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
@@ -80,6 +86,9 @@ interface TrackDao {
     @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>)
 
+    @Query("DELETE FROM track")
+    suspend fun deleteAll()
+
     @Query("DELETE FROM track WHERE syncedAt < :runStart")
     suspend fun deleteStale(runStart: Long)
 }
@@ -100,6 +109,9 @@ interface DanceMetadataDao {
         deleteFor(mbid)
         insertAll(danceTypes.map { DanceMetadataEntity(mbid, it, fetchedAt) })
     }
+
+    @Query("DELETE FROM dance_metadata")
+    suspend fun deleteAll()
 
     @Query("DELETE FROM dance_metadata WHERE mbid = :mbid")
     suspend fun deleteFor(mbid: String)

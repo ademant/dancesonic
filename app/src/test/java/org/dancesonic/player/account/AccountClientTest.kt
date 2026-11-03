@@ -125,6 +125,41 @@ class AccountClientTest {
     }
 
     @Test
+    fun `own key is revoked by id after matching its prefix`() = runBlocking<Unit> {
+        fake.server.enqueue(json("""{"keys":[{"id":7,"prefix":"tsk_other","label":"x"},{"id":42,"prefix":"tsk_mine","label":"DanceSonic Android"}]}"""))
+        fake.server.enqueue(json("""{"status":"revoked"}"""))
+
+        val revoked = account.revokeOwnKey(base, "tsk_mine_full_secret")
+
+        assertTrue(revoked)
+        val list = fake.server.takeRequest()
+        assertEquals("/api/keys", list.requestUrl!!.encodedPath)
+        assertEquals("tsk_mine_full_secret", list.requestUrl!!.queryParameter("apiKey"))
+        val delete = fake.server.takeRequest()
+        assertEquals("DELETE", delete.method)
+        assertEquals("/api/keys/42", delete.requestUrl!!.encodedPath)
+    }
+
+    @Test
+    fun `nothing is revoked when the key is no longer listed`() = runBlocking<Unit> {
+        fake.server.enqueue(json("""{"keys":[{"id":7,"prefix":"tsk_other"}]}"""))
+
+        assertFalse(account.revokeOwnKey(base, "tsk_mine_full_secret"))
+        assertEquals(1, fake.server.requestCount)
+    }
+
+    @Test
+    fun `ambiguous prefix revokes nothing`() {
+        val keys = listOf(KeyInfo(1, "tsk_same"), KeyInfo(2, "tsk_same"))
+        assertEquals(null, AccountClient.matchOwnKeyId(keys, "tsk_same_secret"))
+    }
+
+    @Test
+    fun `empty prefix never matches`() {
+        assertEquals(null, AccountClient.matchOwnKeyId(listOf(KeyInfo(1, "")), "anything"))
+    }
+
+    @Test
     fun `request objects never print secrets`() {
         val login = LoginRequest("ada", "s3cret").toString()
         val pair = PairCompleteRequest("tsp_abcdefgh12345", "phone").toString()
