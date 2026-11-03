@@ -15,6 +15,9 @@ import kotlinx.coroutines.Dispatchers
 import okhttp3.HttpUrl
 import org.dancesonic.player.AppContainer
 import org.dancesonic.player.data.db.PlaylistItemRow
+import org.dancesonic.player.account.AccountClient
+import org.dancesonic.player.account.AccountException
+import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicClient
@@ -26,8 +29,15 @@ data class ConnectUiState(
     val lastSync: String? = null,
 )
 
-/** Connection setup (URL + API key), catalog sync and disconnect. */
-class ConnectViewModel(private val container: AppContainer) : ViewModel() {
+/**
+ * Connection setup and catalog sync. Three ways in: a pairing QR code, a username and password
+ * (exchanged for an API key), or an API key typed in. Every path ends with the same check and
+ * only the API key is stored.
+ */
+class ConnectViewModel(
+    private val container: AppContainer,
+    private val account: AccountClient = AccountClient(),
+) : ViewModel() {
 
     val connected: StateFlow<Boolean> = container.settingsStore.settings
         .map { it != null }
@@ -36,29 +46,97 @@ class ConnectViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
 
-    /** Validates the address and key against the server, then stores them. */
-    fun connect(address: String, apiKey: String) {
+    /** Shows an error that happened outside the ViewModel, such as a failed scanner launch. */
+    fun reportError(message: String) {
+        _state.value = ConnectUiState(error = message)
+    }
+
+    /** Connects with a server address and an API key typed by the user. */
+    fun connectWithApiKey(address: String, apiKey: String) {
         val key = apiKey.trim()
-        val url: HttpUrl = try {
-            ServerUrl.parse(address)
-        } catch (e: IllegalArgumentException) {
-            _state.value = ConnectUiState(error = e.message)
-            return
-        }
         if (key.isBlank()) {
             _state.value = ConnectUiState(error = "Enter an API key.")
             return
         }
+        withAddress(address) { url -> ServerSettings(url, key) }
+    }
+
+    /** Signs in with a username and password, then keeps only the API key the server issues. */
+    fun signInWithPassword(address: String, username: String, password: String) {
+        if (username.isBlank() || password.isEmpty()) {
+            _state.value = ConnectUiState(error = "Enter your username and password.")
+            return
+        }
+        val url = parseAddress(address) ?: return
+        runConnect {
+            val session = account.login(url, username.trim(), password)
+            val key = try {
+                account.createApiKey(url, session)
+            } finally {
+                // The session is only needed to mint the key. Revoke it either way, best effort.
+                endSessionQuietly(url, session)
+            }
+            ServerSettings(url, key)
+        }
+    }
+
+    /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
+    fun pairWithCode(rawCode: String) {
+        val request = try {
+            PairingUri.parse(rawCode)
+        } catch (e: IllegalArgumentException) {
+            _state.value = ConnectUiState(error = e.message)
+            return
+        }
+        runConnect {
+            ServerSettings(request.server, account.redeemPairing(request))
+        }
+    }
+
+    /** Refreshes the local catalog and DanceBrainz metadata. Safe to call while playing. */
+    fun sync() {
+        val settings = container.currentSettings ?: return
+        startSync(settings)
+    }
+
+    fun disconnect() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.settingsStore.clear() }
+            _state.value = ConnectUiState()
+        }
+    }
+
+    private fun withAddress(address: String, build: (HttpUrl) -> ServerSettings) {
+        val url = parseAddress(address) ?: return
+        runConnect { build(url) }
+    }
+
+    private fun parseAddress(address: String): HttpUrl? =
+        try {
+            ServerUrl.parse(address)
+        } catch (e: IllegalArgumentException) {
+            _state.value = ConnectUiState(error = e.message)
+            null
+        }
+
+    /**
+     * Runs [obtain] to get settings, verifies them against the server, stores them and starts the
+     * first sync. The sync uses the verified settings directly, because the in-memory copy in the
+     * app container is updated asynchronously from the store.
+     */
+    private fun runConnect(obtain: suspend () -> ServerSettings) {
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
-                val settings = ServerSettings(url, key)
+                val settings = obtain()
                 SubsonicClient(settings).checkConnection()
                 container.settingsStore.save(settings)
                 _state.value = ConnectUiState()
-                sync()
+                startSync(settings)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: AccountException) {
+                _state.value = ConnectUiState(error = e.message)
             } catch (e: SubsonicException) {
                 _state.value = ConnectUiState(error = e.message ?: "Connection failed")
             } catch (e: IllegalArgumentException) {
@@ -67,9 +145,7 @@ class ConnectViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Refreshes the local catalog and DanceBrainz metadata. Safe to call while playing. */
-    fun sync() {
-        val settings = container.currentSettings ?: return
+    private fun startSync(settings: ServerSettings) {
         _state.value = _state.value.copy(busy = true, error = null)
         viewModelScope.launch {
             try {
@@ -90,10 +166,13 @@ class ConnectViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun disconnect() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { container.settingsStore.clear() }
-            _state.value = ConnectUiState()
+    private suspend fun endSessionQuietly(url: HttpUrl, session: String) {
+        try {
+            account.logout(url, session)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AccountException) {
+            // Deliberately ignored: the key is already issued and the session expires on its own.
         }
     }
 }

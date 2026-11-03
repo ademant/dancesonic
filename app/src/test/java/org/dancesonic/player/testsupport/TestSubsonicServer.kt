@@ -15,6 +15,8 @@ class TestSubsonicServer : AutoCloseable {
     val server = MockWebServer()
     val settings: ServerSettings
     val client: SubsonicClient
+    /** Trusts the test certificate; use for non-Subsonic endpoints such as the account API. */
+    val http: OkHttpClient
 
     init {
         val held = HeldCertificate.Builder()
@@ -27,7 +29,7 @@ class TestSubsonicServer : AutoCloseable {
 
         settings = ServerSettings(server.url("/"), "test-api-key")
         val trust = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
-        val http = OkHttpClient.Builder()
+        http = OkHttpClient.Builder()
             .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
             .addInterceptor(ApiKeyInterceptor { settings })
             .build()

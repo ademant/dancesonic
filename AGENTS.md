@@ -10,7 +10,7 @@ Code creation must be state of the art for **Kotlin**, the **Subsonic API**, and
 - Build with **Gradle Kotlin DSL** and a version catalog. Do not hard-code dependency versions in module build files.
 - Keep the footprint small: fewer dependencies, no unused libraries, no large frameworks for simple problems. Each new dependency needs a one-line justification in the PR description.
 - Prefer clear, boring code over clever code. Small, focused classes; explicit names; no `!!` (non-null assertion) outside tests; no swallowed exceptions.
-- Do not add features beyond the issue's scope. Out of scope for v1: other providers than Subsonic, username/password login, social features, cloud playlist sync, elaborate library management.
+- Do not add features beyond the issue's scope. Out of scope for v1: other providers than Subsonic, social features, cloud playlist sync, elaborate library management.
 
 ## Kotlin
 
@@ -27,7 +27,8 @@ Code creation must be state of the art for **Kotlin**, the **Subsonic API**, and
 
 - Target the **Subsonic REST API v1.16.x** and the **OpenSubsonic** extensions that Navidrome supports. Check what the server advertises (`getOpenSubsonicExtensions`, `ping`) rather than assuming a feature exists. Do not hard-code assumptions about the server version.
 - Always request JSON: `f=json`. Send the client name `c=DanceSonic` and an API version `v` that matches what you actually implement.
-- **Authentication: API key only in v1.** The app authenticates with an OpenSubsonic API key (`apikeyauth` extension) created by the user in Navidrome. Call `getOpenSubsonicExtensions` at login and refuse to continue with a clear error if `apikeyauth` is not advertised. Do not implement username/password login, token auth (`u`/`t`/`s`), or the legacy plaintext `p=` parameter in v1. Confirm the exact parameter name and minimum Navidrome version against the current Navidrome and OpenSubsonic docs before implementing.
+- **Authentication: API key only for `/rest` calls.** The app authenticates Subsonic requests with an OpenSubsonic API key (`apikeyauth` extension). Call `getOpenSubsonicExtensions` at connect time and refuse to continue with a clear error if `apikeyauth` is not advertised. Do not implement token auth (`u`/`t`/`s`) or the legacy plaintext `p=` parameter.
+- **Obtaining a key (issue #3).** Three ways in: a pairing QR code, a username and password, or a key typed in. A password is used only for the sign-in exchange (session token, then `POST /api/keys`, then the session is revoked). The password and session token are never stored or logged. The password exchange and QR pairing target folksonic/tinysonic `/api/*` endpoints, which Navidrome does not offer.
 - **Only HTTPS.** Enforce this in the network layer (reject `http://` base URLs) and in the Android network security config (`cleartextTrafficPermitted="false"`).
 - Build the HTTP stack on **Retrofit + OkHttp** with kotlinx.serialization (or Ktor Client if the team prefers; pick one and stay with it).
 - Required endpoints for the MVP typically include `ping`, `getArtists`/`getIndexes`, `getArtist`, `getAlbum`, `getSong`, `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `search3`, `getCoverArt`, and `stream`. Verify each against the server's actual response shape; Subsonic JSON wraps everything in a `subsonic-response` object and reports errors with a `status` of `failed` and an `error` object, which must be handled.
