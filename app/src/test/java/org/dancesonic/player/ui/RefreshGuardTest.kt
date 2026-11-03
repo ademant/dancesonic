@@ -8,7 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class RefreshGuardTest {
-
     @Test
     fun `refresh without saved settings gives a message instead of silently returning`() {
         val reason = refreshBlockedReason(null)

@@ -6,21 +6,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +60,6 @@ fun LibraryScreen(
             openAlbum != null -> {
                 val tracks by remember(openAlbum) { vm.tracks(openAlbum) }.collectAsStateWithLifecycle(emptyList())
                 TrackList(
-                    title = "Tracks",
                     tracks = tracks,
                     onPlay = { index -> player.play(tracks, index) },
                     playlistVm = playlistVm,
@@ -92,21 +91,26 @@ private fun LibraryToolbar(connectVm: ConnectViewModel) {
         }
         if (state.busy) {
             val progress = state.syncProgress
-            val text = if (progress == null || progress.total == 0) {
-                "Syncing…"
-            } else {
-                "Syncing ${progress.done} of ${progress.total} albums…"
-            }
+            val text =
+                if (progress == null || progress.total == 0) {
+                    "Syncing…"
+                } else {
+                    "Syncing ${progress.done} of ${progress.total} albums…"
+                }
             Text(text, style = MaterialTheme.typography.bodySmall)
         }
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        state.error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
-
 @Composable
-private fun ArtistList(artists: List<ArtistEntity>, onOpen: (ArtistEntity) -> Unit) {
+private fun ArtistList(
+    artists: List<ArtistEntity>,
+    onOpen: (ArtistEntity) -> Unit,
+) {
     if (artists.isEmpty()) {
         EmptyHint("No artists yet. Tap Refresh to sync from the server.")
         return
@@ -119,7 +123,10 @@ private fun ArtistList(artists: List<ArtistEntity>, onOpen: (ArtistEntity) -> Un
 }
 
 @Composable
-private fun AlbumList(albums: List<AlbumEntity>, onOpen: (AlbumEntity) -> Unit) {
+private fun AlbumList(
+    albums: List<AlbumEntity>,
+    onOpen: (AlbumEntity) -> Unit,
+) {
     if (albums.isEmpty()) {
         EmptyHint("No albums for this artist.")
         return
@@ -134,7 +141,6 @@ private fun AlbumList(albums: List<AlbumEntity>, onOpen: (AlbumEntity) -> Unit) 
 
 @Composable
 private fun TrackList(
-    title: String,
     tracks: List<TrackEntity>,
     onPlay: (Int) -> Unit,
     playlistVm: PlaylistViewModel,
@@ -163,7 +169,11 @@ private fun TrackList(
 }
 
 @Composable
-fun DanceScreen(vm: LibraryViewModel, player: PlayerController, playlistVm: PlaylistViewModel) {
+fun DanceScreen(
+    vm: LibraryViewModel,
+    player: PlayerController,
+    playlistVm: PlaylistViewModel,
+) {
     val danceTypes by vm.danceTypes.collectAsStateWithLifecycle()
     var danceType by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = danceType != null) { danceType = null }
@@ -197,7 +207,6 @@ fun DanceScreen(vm: LibraryViewModel, player: PlayerController, playlistVm: Play
         Column(Modifier.fillMaxSize()) {
             Text(selected, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
             TrackList(
-                title = selected,
                 tracks = tracks,
                 onPlay = { index -> player.play(tracks, index) },
                 playlistVm = playlistVm,
@@ -207,7 +216,11 @@ fun DanceScreen(vm: LibraryViewModel, player: PlayerController, playlistVm: Play
 }
 
 @Composable
-private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onAddToPlaylist: () -> Unit) {
+private fun TrackRow(
+    track: TrackEntity,
+    onPlay: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -223,7 +236,11 @@ private fun TrackRow(track: TrackEntity, onPlay: () -> Unit, onAddToPlaylist: ()
 }
 
 @Composable
-fun AddToPlaylistDialog(playlistVm: PlaylistViewModel, trackId: String, onDismiss: () -> Unit) {
+fun AddToPlaylistDialog(
+    playlistVm: PlaylistViewModel,
+    trackId: String,
+    onDismiss: () -> Unit,
+) {
     val playlists by playlistVm.playlists.collectAsStateWithLifecycle()
     var group by rememberSaveable { mutableStateOf("") }
 
@@ -259,7 +276,11 @@ fun AddToPlaylistDialog(playlistVm: PlaylistViewModel, trackId: String, onDismis
 }
 
 @Composable
-internal fun ListRow(title: String, subtitle: String? = null, onClick: () -> Unit) {
+internal fun ListRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit,
+) {
     Column(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
     ) {

@@ -1,6 +1,6 @@
 package org.dancesonic.player.subsonic
 
-import java.io.IOException
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -12,7 +12,7 @@ import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.http.GET
 import retrofit2.http.Query
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.io.IOException
 
 /** Connection details for one Subsonic-compatible server. The API key is a secret. */
 class ServerSettings(
@@ -62,10 +62,14 @@ internal interface SubsonicService {
     suspend fun artists(): SubsonicEnvelope
 
     @GET("rest/getArtist.view")
-    suspend fun artist(@Query("id") id: String): SubsonicEnvelope
+    suspend fun artist(
+        @Query("id") id: String,
+    ): SubsonicEnvelope
 
     @GET("rest/getAlbum.view")
-    suspend fun album(@Query("id") id: String): SubsonicEnvelope
+    suspend fun album(
+        @Query("id") id: String,
+    ): SubsonicEnvelope
 
     @GET("rest/getAlbumList2.view")
     suspend fun albumList2(
@@ -91,12 +95,13 @@ internal class ApiKeyInterceptor(
         if (settings == null || request.url.host != settings.baseUrl.host || request.url.scheme != "https") {
             return chain.proceed(request)
         }
-        val url = request.url.newBuilder()
-            .addQueryParameter("apiKey", settings.apiKey)
-            .addQueryParameter("c", CLIENT_NAME)
-            .addQueryParameter("v", API_VERSION)
-            .addQueryParameter("f", "json")
-            .build()
+        val url =
+            request.url.newBuilder()
+                .addQueryParameter("apiKey", settings.apiKey)
+                .addQueryParameter("c", CLIENT_NAME)
+                .addQueryParameter("v", API_VERSION)
+                .addQueryParameter("f", "json")
+                .build()
         return chain.proceed(request.newBuilder().url(url).build())
     }
 
@@ -107,22 +112,29 @@ internal class ApiKeyInterceptor(
 }
 
 @OptIn(ExperimentalSerializationApi::class)
-internal val subsonicJson: Json = Json {
-    ignoreUnknownKeys = true
-    explicitNulls = false
-    coerceInputValues = true
-}
+internal val subsonicJson: Json =
+    Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
 
 /** Builds HTTP clients and Retrofit services. Callers are responsible for keeping one client per app. */
 internal object SubsonicHttp {
+    private const val CONNECT_TIMEOUT_SECONDS = 15L
+    private const val READ_TIMEOUT_SECONDS = 30L
+
     fun okHttpClient(settingsProvider: () -> ServerSettings?): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(settingsProvider))
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             .build()
 
-    fun service(baseUrl: HttpUrl, client: OkHttpClient): SubsonicService =
+    fun service(
+        baseUrl: HttpUrl,
+        client: OkHttpClient,
+    ): SubsonicService =
         Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(client)

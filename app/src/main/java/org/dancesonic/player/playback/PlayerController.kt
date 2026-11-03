@@ -15,12 +15,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.suspendCancellableCoroutine
 import org.dancesonic.player.data.db.TrackEntity
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.streamUrl
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ExecutionException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -36,7 +38,10 @@ data class PlaybackUiState(
 /**
  * UI-side handle to [PlaybackService]. Commands go through a [MediaController], so playback
  * continues if the UI is destroyed.
+ * Media3 marks its session API as unstable. The lint check is suppressed here rather than with an
+ * opt-in marker, which would spread to every caller.
  */
+@Suppress("UnsafeOptInUsageError")
 class PlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -49,34 +54,44 @@ class PlayerController(
     private val connectLock = Mutex()
 
     /** Connects once; concurrent first calls wait for the same connection. */
-    private suspend fun connected(): MediaController = connectLock.withLock {
-        controller?.let { return@withLock it }
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val built = awaitFuture(MediaController.Builder(context, token).buildAsync())
-        built.addListener(
-            object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) = publish(built)
-                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = publish(built)
-                override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
-            },
-        )
-        controller = built
-        publish(built)
-        built
-    }
+    private suspend fun connected(): MediaController =
+        connectLock.withLock {
+            controller?.let { return@withLock it }
+            val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+            val built = awaitFuture(MediaController.Builder(context, token).buildAsync())
+            built.addListener(
+                object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) = publish(built)
+
+                    override fun onMediaItemTransition(
+                        mediaItem: MediaItem?,
+                        reason: Int,
+                    ) = publish(built)
+
+                    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
+                },
+            )
+            controller = built
+            publish(built)
+            built
+        }
 
     private fun publish(player: Player) {
         val metadata = player.mediaMetadata
-        _state.value = PlaybackUiState(
-            nowPlayingTitle = metadata.title?.toString(),
-            nowPlayingArtist = metadata.artist?.toString(),
-            isPlaying = player.isPlaying,
-            tempo = player.playbackParameters.speed,
-        )
+        _state.value =
+            PlaybackUiState(
+                nowPlayingTitle = metadata.title?.toString(),
+                nowPlayingArtist = metadata.artist?.toString(),
+                isPlaying = player.isPlaying,
+                tempo = player.playbackParameters.speed,
+            )
     }
 
     /** Replaces the queue with [tracks] and starts playing at [startIndex]. */
-    fun play(tracks: List<TrackEntity>, startIndex: Int = 0) {
+    fun play(
+        tracks: List<TrackEntity>,
+        startIndex: Int = 0,
+    ) {
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
         scope.launch(Dispatchers.Main) {
@@ -137,8 +152,10 @@ class PlayerController(
                     {
                         try {
                             cont.resume(future.get())
-                        } catch (e: Exception) {
-                            cont.resumeWithException(e)
+                        } catch (e: ExecutionException) {
+                            cont.resumeWithException(e.cause ?: e)
+                        } catch (e: CancellationException) {
+                            cont.cancel(e)
                         }
                     },
                     { it.run() },

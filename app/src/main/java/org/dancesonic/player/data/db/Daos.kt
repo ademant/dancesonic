@@ -105,7 +105,11 @@ interface DanceMetadataDao {
 
     /** Replaces all dance types of one recording with the freshly fetched set. */
     @Transaction
-    suspend fun replaceFor(mbid: String, danceTypes: List<String>, fetchedAt: Long) {
+    suspend fun replaceFor(
+        mbid: String,
+        danceTypes: List<String>,
+        fetchedAt: Long,
+    ) {
         deleteFor(mbid)
         insertAll(danceTypes.map { DanceMetadataEntity(mbid, it, fetchedAt) })
     }

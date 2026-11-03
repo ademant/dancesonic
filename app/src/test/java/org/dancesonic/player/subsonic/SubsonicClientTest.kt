@@ -17,32 +17,34 @@ import org.junit.Before
 import org.junit.Test
 
 class SubsonicClientTest {
-
     private lateinit var server: MockWebServer
     private lateinit var settings: ServerSettings
     private lateinit var client: SubsonicClient
 
     @Before
     fun setUp() {
-        val held = HeldCertificate.Builder()
-            .commonName("localhost")
-            .addSubjectAlternativeName("localhost")
-            .addSubjectAlternativeName("127.0.0.1")
-            .build()
+        val held =
+            HeldCertificate.Builder()
+                .commonName("localhost")
+                .addSubjectAlternativeName("localhost")
+                .addSubjectAlternativeName("127.0.0.1")
+                .build()
         val serverCerts = HandshakeCertificates.Builder().heldCertificate(held).build()
         val clientCerts = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
 
-        server = MockWebServer().apply {
-            useHttps(serverCerts.sslSocketFactory(), false)
-            start()
-        }
+        server =
+            MockWebServer().apply {
+                useHttps(serverCerts.sslSocketFactory(), false)
+                start()
+            }
 
         settings = ServerSettings(server.url("/"), API_KEY)
 
-        val okHttp = OkHttpClient.Builder()
-            .sslSocketFactory(clientCerts.sslSocketFactory(), clientCerts.trustManager)
-            .addInterceptor(ApiKeyInterceptor { settings })
-            .build()
+        val okHttp =
+            OkHttpClient.Builder()
+                .sslSocketFactory(clientCerts.sslSocketFactory(), clientCerts.trustManager)
+                .addInterceptor(ApiKeyInterceptor { settings })
+                .build()
         client = SubsonicClient(settings, SubsonicHttp.service(settings.baseUrl, okHttp))
     }
 
@@ -52,81 +54,92 @@ class SubsonicClientTest {
     }
 
     @Test
-    fun `every request carries the API key and no password-based parameters`() = runBlocking {
-        server.enqueue(okJson(PING_OK))
-        server.enqueue(okJson(EXTENSIONS_OK))
-        client.checkConnection()
+    fun `every request carries the API key and no password-based parameters`() =
+        runBlocking {
+            server.enqueue(okJson(PING_OK))
+            server.enqueue(okJson(EXTENSIONS_OK))
+            client.checkConnection()
 
-        assertKeyOnly(server.takeRequest())
-        assertKeyOnly(server.takeRequest())
-    }
-
-    @Test
-    fun `connection check passes when apiKeyAuthentication is advertised`() = runBlocking {
-        server.enqueue(okJson(PING_OK))
-        server.enqueue(okJson(EXTENSIONS_OK))
-        client.checkConnection()
-
-        assertEquals("/rest/ping.view", server.takeRequest().requestUrl!!.encodedPath)
-        assertEquals("/rest/getOpenSubsonicExtensions.view", server.takeRequest().requestUrl!!.encodedPath)
-    }
-
-    @Test
-    fun `connection check fails when the server does not advertise API key login`() = runBlocking {
-        server.enqueue(okJson(PING_OK))
-        server.enqueue(okJson(EXTENSIONS_WITHOUT_API_KEY))
-        val error = assertThrows(SubsonicException::class.java) {
-            runBlocking { client.checkConnection() }
+            assertKeyOnly(server.takeRequest())
+            assertKeyOnly(server.takeRequest())
         }
-        assertTrue(error.message!!.contains("does not support API key login"))
-    }
 
     @Test
-    fun `failed status is surfaced with the server error code`() = runBlocking {
-        server.enqueue(okJson(FAILED_WRONG_KEY))
-        val error = assertThrows(SubsonicException::class.java) {
-            runBlocking { client.checkConnection() }
+    fun `connection check passes when apiKeyAuthentication is advertised`() =
+        runBlocking {
+            server.enqueue(okJson(PING_OK))
+            server.enqueue(okJson(EXTENSIONS_OK))
+            client.checkConnection()
+
+            assertEquals("/rest/ping.view", server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals("/rest/getOpenSubsonicExtensions.view", server.takeRequest().requestUrl!!.encodedPath)
         }
-        assertEquals(44, error.code)
-    }
 
     @Test
-    fun `http error statuses become SubsonicException`() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
-        val error = assertThrows(SubsonicException::class.java) {
-            runBlocking { client.checkConnection() }
+    fun `connection check fails when the server does not advertise API key login`() =
+        runBlocking {
+            server.enqueue(okJson(PING_OK))
+            server.enqueue(okJson(EXTENSIONS_WITHOUT_API_KEY))
+            val error =
+                assertThrows(SubsonicException::class.java) {
+                    runBlocking { client.checkConnection() }
+                }
+            assertTrue(error.message!!.contains("does not support API key login"))
         }
-        assertNull(error.code)
-    }
 
     @Test
-    fun `artists are flattened from the index and optional fields may be absent`() = runBlocking {
-        server.enqueue(okJson(ARTISTS))
-        val artists = client.artists()
-        assertEquals(listOf("ar-1", "ar-2"), artists.map { it.id })
-        assertEquals("Ada", artists.first().name)
-    }
+    fun `failed status is surfaced with the server error code`() =
+        runBlocking {
+            server.enqueue(okJson(FAILED_WRONG_KEY))
+            val error =
+                assertThrows(SubsonicException::class.java) {
+                    runBlocking { client.checkConnection() }
+                }
+            assertEquals(44, error.code)
+        }
 
     @Test
-    fun `album songs expose the recording MBID when the server provides it`() = runBlocking {
-        server.enqueue(okJson(ALBUM))
-        val album = client.album("al-1")
-        assertEquals("rec-mbid-1", album.song[0].musicBrainzId)
-        assertNull(album.song[1].musicBrainzId)
-    }
+    fun `http error statuses become SubsonicException`() =
+        runBlocking {
+            server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+            val error =
+                assertThrows(SubsonicException::class.java) {
+                    runBlocking { client.checkConnection() }
+                }
+            assertNull(error.code)
+        }
 
     @Test
-    fun `album list is read page by page until an empty page`() = runBlocking<Unit> {
-        server.enqueue(okJson(ALBUM_LIST_PAGE_1))
-        server.enqueue(okJson(ALBUM_LIST_PAGE_2))
-        server.enqueue(okJson("""{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""))
+    fun `artists are flattened from the index and optional fields may be absent`() =
+        runBlocking {
+            server.enqueue(okJson(ARTISTS))
+            val artists = client.artists()
+            assertEquals(listOf("ar-1", "ar-2"), artists.map { it.id })
+            assertEquals("Ada", artists.first().name)
+        }
 
-        val albums = client.allAlbums()
+    @Test
+    fun `album songs expose the recording MBID when the server provides it`() =
+        runBlocking {
+            server.enqueue(okJson(ALBUM))
+            val album = client.album("al-1")
+            assertEquals("rec-mbid-1", album.song[0].musicBrainzId)
+            assertNull(album.song[1].musicBrainzId)
+        }
 
-        assertEquals(listOf("al-1", "al-2", "al-3"), albums.map { it.id })
-        val offsets = List(3) { server.takeRequest().requestUrl!!.queryParameter("offset") }
-        assertEquals(listOf("0", "2", "3"), offsets)
-    }
+    @Test
+    fun `album list is read page by page until an empty page`() =
+        runBlocking<Unit> {
+            server.enqueue(okJson(ALBUM_LIST_PAGE_1))
+            server.enqueue(okJson(ALBUM_LIST_PAGE_2))
+            server.enqueue(okJson("""{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""))
+
+            val albums = client.allAlbums()
+
+            assertEquals(listOf("al-1", "al-2", "al-3"), albums.map { it.id })
+            val offsets = List(3) { server.takeRequest().requestUrl!!.queryParameter("offset") }
+            assertEquals(listOf("0", "2", "3"), offsets)
+        }
 
     @Test
     fun `stream URL contains no API key`() {
@@ -161,9 +174,10 @@ class SubsonicClientTest {
         assertEquals("DanceSonic", request.requestUrl!!.queryParameter("c"))
     }
 
-    private fun okJson(body: String) = MockResponse()
-        .addHeader("Content-Type", "application/json")
-        .setBody(body)
+    private fun okJson(body: String) =
+        MockResponse()
+            .addHeader("Content-Type", "application/json")
+            .setBody(body)
 
     private companion object {
         const val API_KEY = "test-api-key-123"

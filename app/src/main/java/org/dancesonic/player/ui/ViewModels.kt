@@ -11,18 +11,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import okhttp3.HttpUrl
 import org.dancesonic.player.AppContainer
-import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.PairingUri
+import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
+
+private const val STOP_TIMEOUT_MILLIS = 5_000L
 
 data class ConnectUiState(
     val busy: Boolean = false,
@@ -50,10 +50,10 @@ class ConnectViewModel(
     private val container: AppContainer,
     private val account: AccountClient = AccountClient(),
 ) : ViewModel() {
-
-    val connected: StateFlow<Boolean> = container.settingsStore.settings
-        .map { it != null }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val connected: StateFlow<Boolean> =
+        container.settingsStore.settings
+            .map { it != null }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
@@ -64,7 +64,10 @@ class ConnectViewModel(
     }
 
     /** Connects with a server address and an API key typed by the user. */
-    fun connectWithApiKey(address: String, apiKey: String) {
+    fun connectWithApiKey(
+        address: String,
+        apiKey: String,
+    ) {
         val key = apiKey.trim()
         if (key.isBlank()) {
             _state.value = ConnectUiState(error = "Enter an API key.")
@@ -74,7 +77,11 @@ class ConnectViewModel(
     }
 
     /** Signs in with a username and password, then keeps only the API key the server issues. */
-    fun signInWithPassword(address: String, username: String, password: String) {
+    fun signInWithPassword(
+        address: String,
+        username: String,
+        password: String,
+    ) {
         if (username.isBlank() || password.isEmpty()) {
             _state.value = ConnectUiState(error = "Enter your username and password.")
             return
@@ -82,24 +89,26 @@ class ConnectViewModel(
         val url = parseAddress(address) ?: return
         runConnect {
             val session = account.login(url, username.trim(), password)
-            val key = try {
-                account.createApiKey(url, session)
-            } finally {
-                // The session is only needed to mint the key. Revoke it either way, best effort.
-                endSessionQuietly(url, session)
-            }
+            val key =
+                try {
+                    account.createApiKey(url, session)
+                } finally {
+                    // The session is only needed to mint the key. Revoke it either way, best effort.
+                    endSessionQuietly(url, session)
+                }
             ServerSettings(url, key)
         }
     }
 
     /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
     fun pairWithCode(rawCode: String) {
-        val request = try {
-            PairingUri.parse(rawCode)
-        } catch (e: IllegalArgumentException) {
-            _state.value = ConnectUiState(error = e.message)
-            return
-        }
+        val request =
+            try {
+                PairingUri.parse(rawCode)
+            } catch (e: IllegalArgumentException) {
+                _state.value = ConnectUiState(error = e.message)
+                return
+            }
         runConnect {
             ServerSettings(request.server, account.redeemPairing(request))
         }
@@ -130,7 +139,7 @@ class ConnectViewModel(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: AccountException) {
-                    warning = "Could not revoke the key on the server. Revoke it on the account page."
+                    warning = "Could not revoke the key on the server (${e.message}). Revoke it on the account page."
                 }
             }
             container.library.clearCatalog()
@@ -139,7 +148,10 @@ class ConnectViewModel(
         }
     }
 
-    private fun withAddress(address: String, build: (HttpUrl) -> ServerSettings) {
+    private fun withAddress(
+        address: String,
+        build: (HttpUrl) -> ServerSettings,
+    ) {
         val url = parseAddress(address) ?: return
         runConnect { build(url) }
     }
@@ -182,17 +194,22 @@ class ConnectViewModel(
         _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
             try {
-                val result = container.library.sync(SubsonicClient(settings)) { done, total ->
-                    _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
-                }
-                val danceNote = if (result.danceLookupsFailed > 0) {
-                    ", ${result.danceLookupsFailed} dance lookups failed"
-                } else {
-                    ""
-                }
-                _state.value = ConnectUiState(
-                    lastSync = "Synced ${result.artists} artists, ${result.albums} albums, ${result.tracks} tracks$danceNote",
-                )
+                val result =
+                    container.library.sync(SubsonicClient(settings)) { done, total ->
+                        _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
+                    }
+                val danceNote =
+                    if (result.danceLookupsFailed > 0) {
+                        ", ${result.danceLookupsFailed} dance lookups failed"
+                    } else {
+                        ""
+                    }
+                _state.value =
+                    ConnectUiState(
+                        lastSync =
+                            "Synced ${result.artists} artists, ${result.albums} albums, " +
+                                "${result.tracks} tracks$danceNote",
+                    )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
@@ -201,7 +218,11 @@ class ConnectViewModel(
         }
     }
 
-    private suspend fun endSessionQuietly(url: HttpUrl, session: String) {
+    @Suppress("SwallowedException")
+    private suspend fun endSessionQuietly(
+        url: HttpUrl,
+        session: String,
+    ) {
         try {
             account.logout(url, session)
         } catch (e: CancellationException) {
@@ -214,30 +235,42 @@ class ConnectViewModel(
 
 /** Passes library flows to the UI. Room is the source of truth; the UI never waits on the network. */
 class LibraryViewModel(private val container: AppContainer) : ViewModel() {
-    val artists = container.library.artists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val artists =
+        container.library.artists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
-    val danceTypes = container.library.danceTypes()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val danceTypes =
+        container.library.danceTypes()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     fun albums(artistId: String) = container.library.albums(artistId)
+
     fun tracks(albumId: String) = container.library.tracks(albumId)
+
     fun tracksForDance(danceType: String) = container.library.tracksForDance(danceType)
 }
 
 /** Course playlists, stored on the device. */
 class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
-    val playlists = container.playlists.playlists()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val playlists =
+        container.playlists.playlists()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     fun playlist(id: Long) = container.playlists.playlist(id)
+
     fun groups(playlistId: Long) = container.playlists.groups(playlistId)
 
-    fun create(name: String, onCreated: (Long) -> Unit) {
+    fun create(
+        name: String,
+        onCreated: (Long) -> Unit,
+    ) {
         viewModelScope.launch { onCreated(container.playlists.create(name)) }
     }
 
-    fun rename(playlistId: Long, name: String) {
+    fun rename(
+        playlistId: Long,
+        name: String,
+    ) {
         viewModelScope.launch { container.playlists.rename(playlistId, name) }
     }
 
@@ -245,11 +278,18 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { container.playlists.deleteById(playlistId) }
     }
 
-    fun addTrack(playlistId: Long, trackId: String, danceType: String?) {
+    fun addTrack(
+        playlistId: Long,
+        trackId: String,
+        danceType: String?,
+    ) {
         viewModelScope.launch { container.playlists.addTrack(playlistId, trackId, danceType) }
     }
 
-    fun moveToGroup(item: PlaylistItemRow, danceType: String?) {
+    fun moveToGroup(
+        item: PlaylistItemRow,
+        danceType: String?,
+    ) {
         viewModelScope.launch { container.playlists.moveToGroup(item, danceType) }
     }
 

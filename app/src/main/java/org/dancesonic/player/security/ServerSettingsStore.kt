@@ -9,9 +9,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.dancesonic.player.subsonic.ServerSettings
+import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -22,7 +25,6 @@ import javax.crypto.spec.GCMParameterSpec
  * The plaintext API key never touches DataStore.
  */
 internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
-
     private fun secretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -31,7 +33,7 @@ internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
             KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
+                .setKeySize(KEY_SIZE_BITS)
                 .build(),
         )
         return generator.generateKey()
@@ -44,13 +46,17 @@ internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
         return encode(cipher.iv) to encode(ciphertext)
     }
 
-    fun decrypt(ivB64: String, ciphertextB64: String): String {
+    fun decrypt(
+        ivB64: String,
+        ciphertextB64: String,
+    ): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(GCM_TAG_BITS, decode(ivB64)))
         return String(cipher.doFinal(decode(ciphertextB64)), Charsets.UTF_8)
     }
 
     private fun encode(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+
     private fun decode(text: String): ByteArray = Base64.decode(text, Base64.NO_WRAP)
 
     private companion object {
@@ -58,6 +64,7 @@ internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
         const val KEY_ALIAS = "dancesonic.navidrome.apikey.v1"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val GCM_TAG_BITS = 128
+        const val KEY_SIZE_BITS = 256
     }
 }
 
@@ -92,16 +99,32 @@ class ServerSettingsStore internal constructor(
     }
 
     private fun read(prefs: Preferences): ServerSettings? {
-        val url = prefs[BASE_URL]?.toHttpUrlOrNull() ?: return null
-        val iv = prefs[API_KEY_IV] ?: return null
-        val ciphertext = prefs[API_KEY_CIPHERTEXT] ?: return null
-        return try {
+        val url = prefs[BASE_URL]?.toHttpUrlOrNull()
+        val iv = prefs[API_KEY_IV]
+        val ciphertext = prefs[API_KEY_CIPHERTEXT]
+        if (url == null || iv == null || ciphertext == null) return null
+        return decryptOrNull(url, iv, ciphertext)
+    }
+
+    /**
+     * Keystore key lost or data corrupted: treat as not connected and let the user reconnect. The
+     * failure is expected, so it is reported as "no settings" rather than thrown into the flow.
+     */
+    @Suppress("SwallowedException")
+    private fun decryptOrNull(
+        url: HttpUrl,
+        iv: String,
+        ciphertext: String,
+    ): ServerSettings? =
+        try {
             ServerSettings(url, cipher.decrypt(iv, ciphertext))
-        } catch (e: Exception) {
-            // Keystore key lost or data corrupted: treat as not connected; the user must reconnect.
+        } catch (e: GeneralSecurityException) {
+            null
+        } catch (e: ProviderException) {
+            null
+        } catch (e: IllegalArgumentException) {
             null
         }
-    }
 
     private companion object {
         val BASE_URL = stringPreferencesKey("server_base_url")

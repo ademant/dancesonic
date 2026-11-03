@@ -37,7 +37,10 @@ class PlaylistRepository(
         )
     }
 
-    suspend fun rename(playlistId: Long, name: String) {
+    suspend fun rename(
+        playlistId: Long,
+        name: String,
+    ) {
         val current = db.playlistDao().get(playlistId) ?: return
         db.playlistDao().update(current.copy(name = name.trim().ifBlank { current.name }, updatedAt = clock()))
     }
@@ -47,7 +50,11 @@ class PlaylistRepository(
     }
 
     /** Appends a track to the end of the playlist, in the given dance-type group. */
-    suspend fun addTrack(playlistId: Long, trackId: String, danceType: String?) {
+    suspend fun addTrack(
+        playlistId: Long,
+        trackId: String,
+        danceType: String?,
+    ) {
         db.withTransaction {
             val position = db.playlistItemDao().maxPosition(playlistId) + 1
             db.playlistItemDao().insert(
@@ -62,7 +69,10 @@ class PlaylistRepository(
         }
     }
 
-    suspend fun moveToGroup(item: PlaylistItemRow, danceType: String?) {
+    suspend fun moveToGroup(
+        item: PlaylistItemRow,
+        danceType: String?,
+    ) {
         val entity = db.playlistItemDao().get(item.id) ?: return
         db.playlistItemDao().update(entity.copy(danceType = danceType?.trim()?.ifBlank { null }))
         touch(item.playlistId)
@@ -74,8 +84,7 @@ class PlaylistRepository(
     }
 
     /** Track IDs of a playlist in play order. */
-    suspend fun orderedTrackIds(playlistId: Long): List<String> =
-        db.playlistItemDao().orderedTrackIds(playlistId)
+    suspend fun orderedTrackIds(playlistId: Long): List<String> = db.playlistItemDao().orderedTrackIds(playlistId)
 
     private suspend fun touch(playlistId: Long) {
         val current = db.playlistDao().get(playlistId) ?: return
@@ -87,14 +96,18 @@ class PlaylistRepository(
         fun groupByDanceType(items: List<PlaylistItemRow>): List<PlaylistGroup> {
             val (ungrouped, grouped) = items.partition { it.danceType == null }
             // Group case-insensitively so "Waltz" and "waltz" share one group; display the first spelling.
-            val named = grouped.groupBy { it.danceType!!.lowercase() }
-                .toSortedMap()
-                .map { (_, list) ->
-                    val sorted = list.sortedBy { it.position }
-                    PlaylistGroup(sorted.first().danceType, sorted)
-                }
-            return if (ungrouped.isEmpty()) named
-            else named + PlaylistGroup(null, ungrouped.sortedBy { it.position })
+            val named =
+                grouped.groupBy { it.danceType!!.lowercase() }
+                    .toSortedMap()
+                    .map { (_, list) ->
+                        val sorted = list.sortedBy { it.position }
+                        PlaylistGroup(sorted.first().danceType, sorted)
+                    }
+            return if (ungrouped.isEmpty()) {
+                named
+            } else {
+                named + PlaylistGroup(null, ungrouped.sortedBy { it.position })
+            }
         }
     }
 }
