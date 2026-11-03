@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,18 @@ data class ConnectUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val lastSync: String? = null,
+    /** Albums fetched so far in the running sync, or null when no sync is running. */
+    val syncProgress: SyncProgress? = null,
 )
+
+data class SyncProgress(val done: Int, val total: Int)
+
+/**
+ * Why a refresh cannot start, or null if it can. A refresh without saved settings used to return
+ * without any message, which looked like a broken button.
+ */
+internal fun refreshBlockedReason(settings: ServerSettings?): String? =
+    if (settings == null) "Not connected to a server. Connect again to sync." else null
 
 /**
  * Connection setup and catalog sync. Three ways in: a pairing QR code, a username and password
@@ -95,7 +107,11 @@ class ConnectViewModel(
 
     /** Refreshes the local catalog and DanceBrainz metadata. Safe to call while playing. */
     fun sync() {
-        val settings = container.currentSettings ?: return
+        val settings = container.currentSettings
+        if (settings == null) {
+            _state.value = _state.value.copy(error = refreshBlockedReason(null))
+            return
+        }
         startSync(settings)
     }
 
@@ -163,10 +179,12 @@ class ConnectViewModel(
     }
 
     private fun startSync(settings: ServerSettings) {
-        _state.value = _state.value.copy(busy = true, error = null)
+        _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
             try {
-                val result = container.library.sync(SubsonicClient(settings))
+                val result = container.library.sync(SubsonicClient(settings)) { done, total ->
+                    _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
+                }
                 val danceNote = if (result.danceLookupsFailed > 0) {
                     ", ${result.danceLookupsFailed} dance lookups failed"
                 } else {

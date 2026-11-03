@@ -1,6 +1,7 @@
 package org.dancesonic.player.data
 
 import androidx.room.withTransaction
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -50,10 +51,13 @@ class LibraryRepository(
      * every recording MBID. Rows not seen in this run are removed. Network work happens before any
      * write, so a failed fetch leaves the previous catalog intact.
      */
-    suspend fun sync(client: SubsonicClient): SyncResult = withContext(Dispatchers.IO) {
+    suspend fun sync(
+        client: SubsonicClient,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): SyncResult = withContext(Dispatchers.IO) {
         val runStart = clock()
 
-        val fetched = fetchCatalog(client, runStart)
+        val fetched = fetchCatalog(client, runStart, onProgress)
 
         db.withTransaction {
             db.artistDao().upsertAll(fetched.artists)
@@ -100,15 +104,25 @@ class LibraryRepository(
      * songs. Albums whose artist is not in the index are skipped and counted, because a row must
      * have a parent to satisfy the foreign key.
      */
-    private suspend fun fetchCatalog(client: SubsonicClient, runStart: Long): Fetched = coroutineScope {
+    private suspend fun fetchCatalog(
+        client: SubsonicClient,
+        runStart: Long,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): Fetched = coroutineScope {
         val permits = Semaphore(MAX_PARALLEL_REQUESTS)
         val artistDtos = client.artists()
         val artistNames = artistDtos.associate { it.id to it.name.orEmpty().ifBlank { "Unknown artist" } }
         val albumStubs = client.allAlbums()
 
         val known = albumStubs.filter { it.artistId != null && it.artistId in artistNames }
+        val done = AtomicInteger(0)
+        onProgress(0, known.size)
         val fullAlbums = known.map { stub ->
-            async { stub to permits.withPermit { client.album(stub.id) } }
+            async {
+                val album = permits.withPermit { client.album(stub.id) }
+                onProgress(done.incrementAndGet(), known.size)
+                stub to album
+            }
         }.awaitAll()
 
         val artists = artistNames.map { (id, name) -> ArtistEntity(id = id, name = name, syncedAt = runStart) }

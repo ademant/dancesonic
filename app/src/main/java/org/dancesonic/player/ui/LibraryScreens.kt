@@ -90,6 +90,15 @@ private fun LibraryToolbar(connectVm: ConnectViewModel) {
                 TextButton(onClick = { connectVm.disconnect() }) { Text("Disconnect") }
             }
         }
+        if (state.busy) {
+            val progress = state.syncProgress
+            val text = if (progress == null || progress.total == 0) {
+                "Syncing…"
+            } else {
+                "Syncing ${progress.done} of ${progress.total} albums…"
+            }
+            Text(text, style = MaterialTheme.typography.bodySmall)
+        }
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }

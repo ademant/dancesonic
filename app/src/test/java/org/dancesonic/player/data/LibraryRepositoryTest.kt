@@ -165,6 +165,17 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun `sync reports album progress from zero to the total`() = runBlocking(Dispatchers.IO) {
+        enqueueSmallLibrary()
+        val reports = mutableListOf<Pair<Int, Int>>()
+        val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+
+        repo.sync(server.client) { done, total -> synchronized(reports) { reports += done to total } }
+
+        assertEquals(listOf(0 to 1, 1 to 1), reports)
+    }
+
+    @Test
     fun `re-sync does not delete catalog rows`() = runBlocking(Dispatchers.IO) {
         // Regression for #13: REPLACE deleted parent rows, and the foreign-key cascade removed
         // their children, so every sync deleted and reinserted the whole catalog.
