@@ -48,6 +48,21 @@ class SubsonicClient internal constructor(
     suspend fun artist(id: String): ArtistDto =
         call { artist(id) }.artist ?: throw SubsonicException(null, "Artist response was empty")
 
+    /**
+     * Every album, fetched in pages of [ALBUM_PAGE_SIZE]. Paging stops at the first empty page
+     * rather than a short one, because a server may cap the page size below what was requested.
+     */
+    suspend fun allAlbums(): List<AlbumDto> {
+        val albums = mutableListOf<AlbumDto>()
+        while (true) {
+            val page = call {
+                albumList2(type = "alphabeticalByName", size = ALBUM_PAGE_SIZE, offset = albums.size)
+            }.albumList2?.album.orEmpty()
+            if (page.isEmpty()) return albums
+            albums += page
+        }
+    }
+
     /** One album with its songs. */
     suspend fun album(id: String): AlbumDto =
         call { album(id) }.album ?: throw SubsonicException(null, "Album response was empty")
@@ -73,6 +88,9 @@ class SubsonicClient internal constructor(
     }
 
     companion object {
+        /** Largest page the Subsonic spec allows for getAlbumList2. */
+        const val ALBUM_PAGE_SIZE = 500
+
         /** Extension name from the OpenSubsonic apikeyauth spec. Verify against the spec before release. */
         const val API_KEY_EXTENSION = "apiKeyAuthentication"
     }

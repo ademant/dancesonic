@@ -24,6 +24,7 @@ data class SyncResult(
     val albums: Int,
     val tracks: Int,
     val danceLookupsFailed: Int,
+    val skippedAlbums: Int,
 )
 
 /**
@@ -70,6 +71,7 @@ class LibraryRepository(
             albums = fetched.albums.size,
             tracks = fetched.tracks.size,
             danceLookupsFailed = danceFailures,
+            skippedAlbums = fetched.skippedAlbums,
         )
     }
 
@@ -77,54 +79,53 @@ class LibraryRepository(
         val artists: List<ArtistEntity>,
         val albums: List<AlbumEntity>,
         val tracks: List<TrackEntity>,
+        val skippedAlbums: Int,
     )
 
+    /**
+     * Artists from the index, albums from paged album lists, then one getAlbum per album for its
+     * songs. Albums whose artist is not in the index are skipped and counted, because a row must
+     * have a parent to satisfy the foreign key.
+     */
     private suspend fun fetchCatalog(client: SubsonicClient, runStart: Long): Fetched = coroutineScope {
         val permits = Semaphore(MAX_PARALLEL_REQUESTS)
-        val artistStubs = client.artists()
+        val artistDtos = client.artists()
+        val artistNames = artistDtos.associate { it.id to it.name.orEmpty().ifBlank { "Unknown artist" } }
+        val albumStubs = client.allAlbums()
 
-        // A permit is held only around each request. Holding it while waiting for child requests
-        // (which also need permits) deadlocks once there are more artists than permits.
-        val artistsWithAlbums = artistStubs.map { stub ->
-            async {
-                val artist = permits.withPermit { client.artist(stub.id) }
-                val albums = artist.album.map { albumStub ->
-                    async { permits.withPermit { client.album(albumStub.id) } }
-                }.awaitAll()
-                artist to albums
-            }
+        val known = albumStubs.filter { it.artistId != null && it.artistId in artistNames }
+        val fullAlbums = known.map { stub ->
+            async { stub to permits.withPermit { client.album(stub.id) } }
         }.awaitAll()
 
-        val artists = mutableListOf<ArtistEntity>()
+        val artists = artistNames.map { (id, name) -> ArtistEntity(id = id, name = name, syncedAt = runStart) }
         val albums = mutableListOf<AlbumEntity>()
         val tracks = mutableListOf<TrackEntity>()
-
-        for ((artist, albumDtos) in artistsWithAlbums) {
-            val artistName = artist.name.orEmpty().ifBlank { "Unknown artist" }
-            artists += ArtistEntity(id = artist.id, name = artistName, syncedAt = runStart)
-            for (album in albumDtos) {
-                albums += AlbumEntity(
-                    id = album.id,
-                    artistId = artist.id,
-                    name = album.name.orEmpty().ifBlank { "Unknown album" },
-                    year = album.year,
+        for ((stub, album) in fullAlbums) {
+            // The album list is the reliable source for the parent artist.
+            val artistId = checkNotNull(stub.artistId)
+            val artistName = artistNames.getValue(artistId)
+            albums += AlbumEntity(
+                id = album.id,
+                artistId = artistId,
+                name = album.name.orEmpty().ifBlank { "Unknown album" },
+                year = album.year,
+                syncedAt = runStart,
+            )
+            for (song in album.song) {
+                tracks += TrackEntity(
+                    id = song.id,
+                    albumId = album.id,
+                    artistName = song.artist ?: album.artist ?: artistName,
+                    title = song.title.orEmpty().ifBlank { "Untitled" },
+                    trackNumber = song.track,
+                    durationSec = song.duration,
+                    mbid = song.musicBrainzId?.takeIf { it.isNotBlank() },
                     syncedAt = runStart,
                 )
-                for (song in album.song) {
-                    tracks += TrackEntity(
-                        id = song.id,
-                        albumId = album.id,
-                        artistName = song.artist ?: album.artist ?: artistName,
-                        title = song.title.orEmpty().ifBlank { "Untitled" },
-                        trackNumber = song.track,
-                        durationSec = song.duration,
-                        mbid = song.musicBrainzId?.takeIf { it.isNotBlank() },
-                        syncedAt = runStart,
-                    )
-                }
             }
         }
-        Fetched(artists, albums, tracks)
+        Fetched(artists, albums, tracks, skippedAlbums = albumStubs.size - known.size)
     }
 
     /** Returns the number of recordings whose DanceBrainz lookup failed. Cached data is kept on failure. */

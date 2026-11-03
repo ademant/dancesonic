@@ -116,6 +116,19 @@ class SubsonicClientTest {
     }
 
     @Test
+    fun `album list is read page by page until an empty page`() = runBlocking<Unit> {
+        server.enqueue(okJson(ALBUM_LIST_PAGE_1))
+        server.enqueue(okJson(ALBUM_LIST_PAGE_2))
+        server.enqueue(okJson("""{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""))
+
+        val albums = client.allAlbums()
+
+        assertEquals(listOf("al-1", "al-2", "al-3"), albums.map { it.id })
+        val offsets = List(3) { server.takeRequest().requestUrl!!.queryParameter("offset") }
+        assertEquals(listOf("0", "2", "3"), offsets)
+    }
+
+    @Test
     fun `stream URL contains no API key`() {
         val url = client.streamUrl("song-42").toString()
         assertTrue(url.endsWith("/rest/stream.view?id=song-42"))
@@ -171,6 +184,13 @@ class SubsonicClientTest {
               {"name":"A","artist":[{"id":"ar-1","name":"Ada","albumCount":1}]},
               {"name":"B","artist":[{"id":"ar-2","name":"Bo"}]}
             ]}}}"""
+
+        const val ALBUM_LIST_PAGE_1 = """{"subsonic-response":{"status":"ok","albumList2":{"album":[
+            {"id":"al-1","name":"One","artist":"Ada","artistId":"ar-1"},
+            {"id":"al-2","name":"Two","artist":"Ada","artistId":"ar-1"}]}}}"""
+
+        const val ALBUM_LIST_PAGE_2 = """{"subsonic-response":{"status":"ok","albumList2":{"album":[
+            {"id":"al-3","name":"Three","artist":"Bo","artistId":"ar-2"}]}}}"""
 
         const val ALBUM = """{"subsonic-response":{"status":"ok","version":"1.16.1",
             "album":{"id":"al-1","name":"Night","artist":"Ada","year":1999,"song":[

@@ -68,7 +68,8 @@ class LibraryRepositoryTest {
 
         // Second run: the album no longer contains s-2.
         server.enqueueJson(ARTISTS)
-        server.enqueueJson(ARTIST_AR1)
+        server.enqueueJson(ALBUM_LIST_ONE)
+        server.enqueueJson(EMPTY_ALBUM_LIST)
         server.enqueueJson(ALBUM_WITHOUT_SECOND_SONG)
         LibraryRepository(db, NoDanceMetadataSource, clock = { 2_000L }).sync(server.client)
 
@@ -82,7 +83,9 @@ class LibraryRepositoryTest {
         LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L }).sync(server.client)
 
         server.enqueueJson(ARTISTS)
-        server.enqueueError(500) // artist request fails mid-sync
+        server.enqueueJson(ALBUM_LIST_ONE)
+        server.enqueueJson(EMPTY_ALBUM_LIST)
+        server.enqueueError(500) // album request fails mid-sync
         val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 2_000L })
 
         assertThrows(SubsonicException::class.java) {
@@ -125,6 +128,25 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun `albums whose artist is not in the index are skipped and counted`() = runBlocking(Dispatchers.IO) {
+        server.enqueueJson(ARTISTS)
+        server.enqueueJson(
+            """{"subsonic-response":{"status":"ok","albumList2":{"album":[
+              {"id":"al-1","name":"Night","artist":"Ada","artistId":"ar-1"},
+              {"id":"al-9","name":"Orphan","artist":"Ghost","artistId":"ar-missing"}]}}}""",
+        )
+        server.enqueueJson(EMPTY_ALBUM_LIST)
+        server.enqueueJson(ALBUM_AL1)
+        val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+
+        val result = repo.sync(server.client)
+
+        assertEquals(1, result.albums)
+        assertEquals(1, result.skippedAlbums)
+        assertNull(db.albumDao().get("al-9"))
+    }
+
+    @Test
     fun `re-sync does not delete catalog rows`() = runBlocking(Dispatchers.IO) {
         // Regression for #13: REPLACE deleted parent rows, and the foreign-key cascade removed
         // their children, so every sync deleted and reinserted the whole catalog.
@@ -163,7 +185,11 @@ class LibraryRepositoryTest {
                 val id = url.queryParameter("id")
                 val body = when (url.encodedPath) {
                     "/rest/getArtists.view" -> artistIndex(artists)
-                    "/rest/getArtist.view" -> artistWithOneAlbum(id!!)
+                    "/rest/getAlbumList2.view" -> if (url.queryParameter("offset") == "0") {
+                        albumList(artists)
+                    } else {
+                        EMPTY_ALBUM_LIST
+                    }
                     "/rest/getAlbum.view" -> albumWithOneSong(id!!)
                     else -> return MockResponse().setResponseCode(404)
                 }
@@ -184,21 +210,23 @@ class LibraryRepositoryTest {
         return """{"subsonic-response":{"status":"ok","artists":{"index":[{"name":"A","artist":[$entries]}]}}}"""
     }
 
-    private fun artistWithOneAlbum(artistId: String): String {
-        val n = artistId.removePrefix("ar-")
-        return """{"subsonic-response":{"status":"ok","artist":{"id":"$artistId","name":"Artist $n",
-            "album":[{"id":"al-$n","name":"Album $n"}]}}}"""
+    private fun albumList(count: Int): String {
+        val entries = (1..count).joinToString(",") {
+            """{"id":"al-$it","name":"Album $it","artist":"Artist $it","artistId":"ar-$it"}"""
+        }
+        return """{"subsonic-response":{"status":"ok","albumList2":{"album":[$entries]}}}"""
     }
 
     private fun albumWithOneSong(albumId: String): String {
         val n = albumId.removePrefix("al-")
         return """{"subsonic-response":{"status":"ok","album":{"id":"$albumId","name":"Album $n",
-            "artist":"Artist $n","song":[{"id":"s-$n","title":"Song $n","track":1,"duration":100}]}}}"""
+            "artist":"Artist $n","artistId":"ar-$n","song":[{"id":"s-$n","title":"Song $n","track":1,"duration":100}]}}}"""
     }
 
     private fun enqueueSmallLibrary() {
         server.enqueueJson(ARTISTS)
-        server.enqueueJson(ARTIST_AR1)
+        server.enqueueJson(ALBUM_LIST_ONE)
+        server.enqueueJson(EMPTY_ALBUM_LIST)
         server.enqueueJson(ALBUM_AL1)
     }
 
@@ -206,8 +234,10 @@ class LibraryRepositoryTest {
         val ARTISTS = """{"subsonic-response":{"status":"ok","artists":{"index":[
             {"name":"A","artist":[{"id":"ar-1","name":"Ada"}]}]}}}"""
 
-        val ARTIST_AR1 = """{"subsonic-response":{"status":"ok","artist":
-            {"id":"ar-1","name":"Ada","album":[{"id":"al-1","name":"Night","year":1999}]}}}"""
+        val ALBUM_LIST_ONE = """{"subsonic-response":{"status":"ok","albumList2":{"album":[
+            {"id":"al-1","name":"Night","artist":"Ada","artistId":"ar-1","year":1999}]}}}"""
+
+        val EMPTY_ALBUM_LIST = """{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""
 
         val ALBUM_AL1 = """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night",
             "artist":"Ada","year":1999,"song":[

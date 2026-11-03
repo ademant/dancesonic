@@ -66,6 +66,13 @@ internal interface SubsonicService {
 
     @GET("rest/getAlbum.view")
     suspend fun album(@Query("id") id: String): SubsonicEnvelope
+
+    @GET("rest/getAlbumList2.view")
+    suspend fun albumList2(
+        @Query("type") type: String,
+        @Query("size") size: Int,
+        @Query("offset") offset: Int,
+    ): SubsonicEnvelope
 }
 
 /**

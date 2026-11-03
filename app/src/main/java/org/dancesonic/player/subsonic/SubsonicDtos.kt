@@ -18,6 +18,7 @@ data class SubsonicResponse(
     val artists: ArtistsIndexDto? = null,
     val artist: ArtistDto? = null,
     val album: AlbumDto? = null,
+    val albumList2: AlbumListDto? = null,
 )
 
 @Serializable
@@ -31,6 +32,11 @@ data class SubsonicErrorDto(
 data class OpenSubsonicExtensionDto(
     val name: String,
     val versions: List<Int> = emptyList(),
+)
+
+@Serializable
+data class AlbumListDto(
+    val album: List<AlbumDto> = emptyList(),
 )
 
 @Serializable
