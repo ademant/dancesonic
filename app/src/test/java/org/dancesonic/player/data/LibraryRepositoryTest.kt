@@ -125,6 +125,34 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    fun `re-sync does not delete catalog rows`() = runBlocking(Dispatchers.IO) {
+        // Regression for #13: REPLACE deleted parent rows, and the foreign-key cascade removed
+        // their children, so every sync deleted and reinserted the whole catalog.
+        enqueueSmallLibrary()
+        val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+        repo.sync(server.client)
+
+        val writable = db.openHelper.writableDatabase
+        writable.execSQL("CREATE TABLE delete_log (tbl TEXT NOT NULL)")
+        for (table in listOf("artist", "album", "track")) {
+            writable.execSQL(
+                "CREATE TRIGGER log_${table}_delete AFTER DELETE ON $table " +
+                    "BEGIN INSERT INTO delete_log (tbl) VALUES ('$table'); END",
+            )
+        }
+
+        enqueueSmallLibrary()
+        repo.sync(server.client)
+
+        val deleted = db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM delete_log").use {
+            it.moveToFirst()
+            it.getInt(0)
+        }
+        assertEquals(0, deleted)
+        assertEquals(2, db.trackDao().getAll(listOf("s-1", "s-2")).size)
+    }
+
+    @Test
     fun `sync finishes with more artists than concurrent requests`() = runBlocking(Dispatchers.IO) {
         // Regression: artist tasks used to hold a permit while waiting for their album tasks,
         // which needed permits too. With more artists than permits, the sync never finished.

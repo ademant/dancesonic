@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,7 +18,7 @@ interface ArtistDao {
     @Query("SELECT * FROM artist WHERE id = :id")
     suspend fun get(id: String): ArtistEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(artists: List<ArtistEntity>)
 
     @Query("DELETE FROM artist WHERE syncedAt < :runStart")
@@ -32,7 +33,7 @@ interface AlbumDao {
     @Query("SELECT * FROM album WHERE id = :id")
     suspend fun get(id: String): AlbumEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(albums: List<AlbumEntity>)
 
     @Query("DELETE FROM album WHERE syncedAt < :runStart")
@@ -76,7 +77,7 @@ interface TrackDao {
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>)
 
     @Query("DELETE FROM track WHERE syncedAt < :runStart")
