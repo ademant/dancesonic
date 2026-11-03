@@ -83,15 +83,15 @@ class LibraryRepository(
         val permits = Semaphore(MAX_PARALLEL_REQUESTS)
         val artistStubs = client.artists()
 
+        // A permit is held only around each request. Holding it while waiting for child requests
+        // (which also need permits) deadlocks once there are more artists than permits.
         val artistsWithAlbums = artistStubs.map { stub ->
             async {
-                permits.withPermit {
-                    val artist = client.artist(stub.id)
-                    val albums = artist.album.map { albumStub ->
-                        async { permits.withPermit { client.album(albumStub.id) } }
-                    }.awaitAll()
-                    artist to albums
-                }
+                val artist = permits.withPermit { client.artist(stub.id) }
+                val albums = artist.album.map { albumStub ->
+                    async { permits.withPermit { client.album(albumStub.id) } }
+                }.awaitAll()
+                artist to albums
             }
         }.awaitAll()
 

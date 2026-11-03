@@ -5,6 +5,10 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.RecordedRequest
 import org.dancesonic.player.dance.DanceMetadataSource
 import org.dancesonic.player.dance.NoDanceMetadataSource
 import org.dancesonic.player.data.db.DanceSonicDatabase
@@ -118,6 +122,50 @@ class LibraryRepositoryTest {
         assertEquals(1, result.danceLookupsFailed)
         assertEquals(2, repo.tracks(listOf("s-1", "s-2")).size)
         assertEquals(emptyList<String>(), repo.danceTypes().first().map { it.danceType })
+    }
+
+    @Test
+    fun `sync finishes with more artists than concurrent requests`() = runBlocking(Dispatchers.IO) {
+        // Regression: artist tasks used to hold a permit while waiting for their album tasks,
+        // which needed permits too. With more artists than permits, the sync never finished.
+        val artists = 6
+        server.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val url = request.requestUrl!!
+                val id = url.queryParameter("id")
+                val body = when (url.encodedPath) {
+                    "/rest/getArtists.view" -> artistIndex(artists)
+                    "/rest/getArtist.view" -> artistWithOneAlbum(id!!)
+                    "/rest/getAlbum.view" -> albumWithOneSong(id!!)
+                    else -> return MockResponse().setResponseCode(404)
+                }
+                return MockResponse().addHeader("Content-Type", "application/json").setBody(body)
+            }
+        }
+        val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+
+        val result = withTimeout(10_000) { repo.sync(server.client) }
+
+        assertEquals(artists, result.artists)
+        assertEquals(artists, result.albums)
+        assertEquals(artists, result.tracks)
+    }
+
+    private fun artistIndex(count: Int): String {
+        val entries = (1..count).joinToString(",") { """{"id":"ar-$it","name":"Artist $it"}""" }
+        return """{"subsonic-response":{"status":"ok","artists":{"index":[{"name":"A","artist":[$entries]}]}}}"""
+    }
+
+    private fun artistWithOneAlbum(artistId: String): String {
+        val n = artistId.removePrefix("ar-")
+        return """{"subsonic-response":{"status":"ok","artist":{"id":"$artistId","name":"Artist $n",
+            "album":[{"id":"al-$n","name":"Album $n"}]}}}"""
+    }
+
+    private fun albumWithOneSong(albumId: String): String {
+        val n = albumId.removePrefix("al-")
+        return """{"subsonic-response":{"status":"ok","album":{"id":"$albumId","name":"Album $n",
+            "artist":"Artist $n","song":[{"id":"s-$n","title":"Song $n","track":1,"duration":100}]}}}"""
     }
 
     private fun enqueueSmallLibrary() {
