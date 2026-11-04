@@ -20,6 +20,7 @@ data class SubsonicResponse(
     val album: AlbumDto? = null,
     val albumList2: AlbumListDto? = null,
     val song: SongDto? = null,
+    val searchResult3: SearchResult3Dto? = null,
     /** folksonic vendor extension `tinysonicLibraryInfo`. */
     val tinysonicLibraryInfo: LibraryInfoDto? = null,
     /** folksonic vendor extension `tinysonicLibraryChanges`. */
@@ -77,6 +78,11 @@ data class SubsonicErrorDto(
 data class OpenSubsonicExtensionDto(
     val name: String,
     val versions: List<Int> = emptyList(),
+)
+
+@Serializable
+data class SearchResult3Dto(
+    val song: List<SongDto> = emptyList(),
 )
 
 @Serializable

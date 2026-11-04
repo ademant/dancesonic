@@ -127,6 +127,28 @@ class SubsonicClient internal constructor(
         }
     }
 
+    /**
+     * Every song in the library, paged with search3 and an empty query. Pages are requested until the server
+     * returns an empty one, which also covers servers that cap the page size below what was asked.
+     */
+    suspend fun allSongs(): List<SongDto> {
+        val songs = mutableListOf<SongDto>()
+        while (true) {
+            val page =
+                call {
+                    searchSongs(
+                        query = "",
+                        songCount = SONG_PAGE_SIZE,
+                        songOffset = songs.size,
+                        albumCount = 0,
+                        artistCount = 0,
+                    )
+                }.searchResult3?.song.orEmpty()
+            if (page.isEmpty()) return songs
+            songs += page
+        }
+    }
+
     /** One album with its songs. */
     suspend fun album(id: String): AlbumDto =
         call { album(id) }.album ?: throw SubsonicException(null, "Album response was empty")
@@ -172,6 +194,9 @@ class SubsonicClient internal constructor(
 
         /** Delay before the first retry; doubles after each further failure. */
         const val INITIAL_BACKOFF_MILLIS = 500L
+
+        /** Songs per search3 page. Servers may cap this lower; paging stops at the first empty page. */
+        const val SONG_PAGE_SIZE = 500
 
         /** Largest page the Subsonic spec allows for getAlbumList2. */
         const val ALBUM_PAGE_SIZE = 500

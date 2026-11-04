@@ -14,6 +14,7 @@ import org.dancesonic.player.dance.NoDanceMetadataSource
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.testsupport.TestSubsonicServer
+import org.dancesonic.player.testsupport.songPageOf
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -73,7 +74,7 @@ class LibraryRepositoryTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_WITHOUT_SECOND_SONG)
+            server.enqueueSongsOf(ALBUM_WITHOUT_SECOND_SONG)
             LibraryRepository(db, NoDanceMetadataSource, clock = { 2_000L }).sync(server.client)
 
             assertNull(db.trackDao().get("s-2"))
@@ -89,7 +90,7 @@ class LibraryRepositoryTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueError(500) // album request fails mid-sync
+            server.enqueueError(500) // song listing fails mid-sync
             val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 2_000L })
 
             assertThrows(SubsonicException::class.java) {
@@ -145,7 +146,7 @@ class LibraryRepositoryTest {
               {"id":"al-9","name":"Orphan","artist":"Ghost","artistId":"ar-missing"}]}}}""",
             )
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_AL1)
+            server.enqueueSongsOf(ALBUM_AL1)
             val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
 
             val result = repo.sync(server.client)
@@ -174,7 +175,7 @@ class LibraryRepositoryTest {
         }
 
     @Test
-    fun `sync reports album progress from zero to the total`() =
+    fun `sync reports progress with no count, since the number of albums is known only after the songs`() =
         runBlocking(Dispatchers.IO) {
             enqueueSmallLibrary()
             val reports = mutableListOf<Pair<Int, Int>>()
@@ -182,7 +183,7 @@ class LibraryRepositoryTest {
 
             repo.sync(server.client) { done, total -> synchronized(reports) { reports += done to total } }
 
-            assertEquals(listOf(0 to 1, 1 to 1), reports)
+            assertEquals(listOf(0 to 0), reports)
         }
 
     @Test
@@ -225,7 +226,6 @@ class LibraryRepositoryTest {
                 object : Dispatcher() {
                     override fun dispatch(request: RecordedRequest): MockResponse {
                         val url = request.requestUrl!!
-                        val id = url.queryParameter("id")
                         val body =
                             when (url.encodedPath) {
                                 "/rest/getArtists.view" -> artistIndex(artists)
@@ -235,7 +235,12 @@ class LibraryRepositoryTest {
                                     } else {
                                         EMPTY_ALBUM_LIST
                                     }
-                                "/rest/getAlbum.view" -> albumWithOneSong(id!!)
+                                "/rest/search3.view" ->
+                                    if (url.queryParameter("songOffset") == "0") {
+                                        songPageOf(*(1..artists).map { albumWithOneSong("al-$it") }.toTypedArray())
+                                    } else {
+                                        songPageOf()
+                                    }
                                 else -> return MockResponse().setResponseCode(404)
                             }
                         return MockResponse().addHeader("Content-Type", "application/json").setBody(body)
@@ -293,7 +298,7 @@ class LibraryRepositoryTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_AL1.replace("\"Two\"", "\"Two (live)\""))
+            server.enqueueSongsOf(ALBUM_AL1.replace("\"Two\"", "\"Two (live)\""))
 
             val result = repo.sync(server.client)
 
@@ -310,7 +315,7 @@ class LibraryRepositoryTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_WITHOUT_SECOND_SONG)
+            server.enqueueSongsOf(ALBUM_WITHOUT_SECOND_SONG)
 
             val result = repo.sync(server.client)
 
@@ -328,7 +333,7 @@ class LibraryRepositoryTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(
+            server.enqueueSongsOf(
                 """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night","artist":"Ada",""" +
                     """"artistId":"ar-1","song":[$songs]}}}""",
             )
@@ -345,7 +350,7 @@ class LibraryRepositoryTest {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
         server.enqueueJson(EMPTY_ALBUM_LIST)
-        server.enqueueJson(ALBUM_AL1)
+        server.enqueueSongsOf(ALBUM_AL1)
     }
 
     private companion object {

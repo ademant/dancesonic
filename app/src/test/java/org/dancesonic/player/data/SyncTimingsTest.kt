@@ -39,12 +39,12 @@ class SyncTimingsTest {
     }
 
     @Test
-    fun `a full sync reports each phase and one timing per album request`() =
+    fun `a full sync reports each phase and reads songs in one listing, not one request per album`() =
         runBlocking(Dispatchers.IO) {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_WITH_SONG)
+            server.enqueueSongsOf(ALBUM_WITH_SONG)
             val recorded = mutableListOf<Pair<String, Long>>()
 
             LibraryRepository(
@@ -55,8 +55,8 @@ class SyncTimingsTest {
             ).sync(server.client)
 
             val phases = recorded.map { it.first }
-            assertEquals(1, phases.count { it == "album-request" })
-            for (phase in listOf("checkpoint", "index", "album-list", "listing", "write", "dance")) {
+            assertEquals(0, phases.count { it == "album-request" })
+            for (phase in listOf("checkpoint", "index", "album-list", "song-list", "listing", "write", "dance")) {
                 assertTrue("missing $phase in $phases", phase in phases)
             }
             assertTrue(recorded.all { it.second >= 0L })

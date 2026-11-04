@@ -78,6 +78,16 @@ internal interface SubsonicService {
         @Query("offset") offset: Int,
     ): SubsonicEnvelope
 
+    /** Songs only: album and artist counts are zero, so each page is a list of songs. */
+    @GET("rest/search3.view")
+    suspend fun searchSongs(
+        @Query("query") query: String,
+        @Query("songCount") songCount: Int,
+        @Query("songOffset") songOffset: Int,
+        @Query("albumCount") albumCount: Int,
+        @Query("artistCount") artistCount: Int,
+    ): SubsonicEnvelope
+
     @GET("rest/getSong.view")
     suspend fun song(
         @Query("id") id: String,

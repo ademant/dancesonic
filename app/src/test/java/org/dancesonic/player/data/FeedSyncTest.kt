@@ -106,7 +106,7 @@ class FeedSyncTest {
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
-            server.enqueueJson(ALBUM_FULL)
+            server.enqueueSongsOf(ALBUM_FULL)
 
             val result = repo.syncIncremental(server.client)
 
@@ -204,7 +204,7 @@ class FeedSyncTest {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
         server.enqueueJson(EMPTY_ALBUM_LIST)
-        server.enqueueJson(ALBUM_FULL)
+        server.enqueueSongsOf(ALBUM_FULL)
     }
 
     private fun serverUrl(): String = server.settings.baseUrl.toString()
