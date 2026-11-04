@@ -34,6 +34,7 @@ class SyncStateStore(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { prefs ->
             if (prefs[SERVER_URL] != serverUrl) {
                 prefs.remove(SERVER_TIME)
+                prefs.remove(LAST_FULL)
             }
             prefs[SERVER_URL] = serverUrl
             if (serverTime != null) prefs[SERVER_TIME] = serverTime
@@ -47,6 +48,24 @@ class SyncStateStore(private val dataStore: DataStore<Preferences>) {
             prefs.remove(SERVER_URL)
             prefs.remove(SERVER_TIME)
             prefs.remove(LAST_CHECK)
+            prefs.remove(LAST_FULL)
+        }
+    }
+
+    /** Epoch ms of the last full listing for [serverUrl], or null when none ran. */
+    suspend fun lastFull(serverUrl: String): Long? {
+        val prefs = dataStore.data.first()
+        return if (prefs[SERVER_URL] == serverUrl) prefs[LAST_FULL] else null
+    }
+
+    /** Records that a full listing finished for [serverUrl] at [at]. */
+    suspend fun markFull(
+        serverUrl: String,
+        at: Long,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[SERVER_URL] = serverUrl
+            prefs[LAST_FULL] = at
         }
     }
 
@@ -54,5 +73,6 @@ class SyncStateStore(private val dataStore: DataStore<Preferences>) {
         val SERVER_URL = stringPreferencesKey("sync_server_url")
         val SERVER_TIME = longPreferencesKey("sync_server_time")
         val LAST_CHECK = longPreferencesKey("sync_last_check")
+        val LAST_FULL = longPreferencesKey("sync_last_full")
     }
 }

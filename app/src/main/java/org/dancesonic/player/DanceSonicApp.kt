@@ -2,14 +2,17 @@ package org.dancesonic.player
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.dancesonic.player.dance.NoDanceMetadataSource
 import org.dancesonic.player.data.LibraryRepository
@@ -21,7 +24,11 @@ import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.ServerSettings
+import org.dancesonic.player.subsonic.SubsonicClient
+import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.SubsonicHttp
+
+private const val TAG = "DanceSonicApp"
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dancesonic_settings")
 
@@ -65,7 +72,26 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
         )
     val playlists = PlaylistRepository(database)
 
-    val player = PlayerController(context, appScope) { currentSettings }
+    val player =
+        PlayerController(context, appScope, { currentSettings }, onTrackStarted = ::refreshPlayingTrack)
+
+    /**
+     * Compares a track that just started with the server, in the background. Playback never waits for it,
+     * and a failed check only leaves the stored rows as they were.
+     */
+    private fun refreshPlayingTrack(songId: String) {
+        val settings = currentSettings ?: return
+        appScope.launch {
+            try {
+                library.refreshTrack(SubsonicClient(settings), songId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SubsonicException) {
+                // Deliberately not shown: the stored track still plays, and the next sync corrects it.
+                Log.d(TAG, "Play-time refresh skipped: ${e.javaClass.simpleName}")
+            }
+        }
+    }
 
     init {
         settingsStore.settings

@@ -29,6 +29,9 @@ private const val STOP_TIMEOUT_MILLIS = 5_000L
 /** How long a successful check stays fresh before the next automatic check on start. */
 private const val CHECK_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
 
+/** How long a full listing stays fresh before the automatic check runs one. */
+private const val FULL_SYNC_INTERVAL_MILLIS = 7L * 24 * 60 * 60 * 1000
+
 data class ConnectUiState(
     val busy: Boolean = false,
     val error: String? = null,
@@ -208,8 +211,11 @@ class ConnectViewModel(
         val settings = container.currentSettings ?: return
         if (_state.value.busy) return
         viewModelScope.launch {
-            if (container.library.incrementalCheckDue(settings.baseUrl.toString(), CHECK_INTERVAL_MILLIS)) {
-                runSync(settings, incremental = true)
+            val url = settings.baseUrl.toString()
+            if (container.library.incrementalCheckDue(url, CHECK_INTERVAL_MILLIS)) {
+                // Once a week the check is a full listing, which also picks up tag-only edits.
+                val weeklyFull = container.library.fullSyncDue(url, FULL_SYNC_INTERVAL_MILLIS)
+                runSync(settings, incremental = !weeklyFull)
             }
         }
     }

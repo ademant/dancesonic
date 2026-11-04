@@ -100,6 +100,7 @@ class LibraryRepository(
             val rowsWritten = timed("write") { db.withTransaction { writeChangedRows(fetched) } }
 
             saveSyncPoint(client, checkpoint)
+            syncState?.markFull(client.settings.baseUrl.toString(), clock())
             val danceFailures = timed("dance") { refreshDanceMetadata(db.trackDao().allMbids()) }
 
             SyncResult(
@@ -156,6 +157,69 @@ class LibraryRepository(
                 }
             }
         }
+
+    /** True when no full listing has run for [serverUrl] within [maxAgeMillis]. */
+    suspend fun fullSyncDue(
+        serverUrl: String,
+        maxAgeMillis: Long,
+    ): Boolean {
+        val last = syncState?.lastFull(serverUrl) ?: return true
+        return clock() - last >= maxAgeMillis
+    }
+
+    /**
+     * Compares a track that just started playing with the server. Updates the stored track when it
+     * differs, and its album when the album name differs. Costs one request when nothing differs.
+     * A track not in the catalog is left alone; the catalog sync adds it.
+     */
+    suspend fun refreshTrack(
+        client: SubsonicClient,
+        songId: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            val stored = db.trackDao().get(songId) ?: return@withContext
+            val song = client.song(songId)
+            val albumId = song.albumId ?: return@withContext
+            val now = clock()
+
+            val storedAlbum = db.albumDao().get(albumId) ?: return@withContext
+            if (storedAlbum.name != albumName(song.album)) {
+                refreshAlbum(client, albumId, storedAlbum.artistId, now)
+            }
+
+            val fresh =
+                TrackEntity(
+                    id = songId,
+                    albumId = albumId,
+                    artistName = song.artist ?: stored.artistName,
+                    title = song.title.orEmpty().ifBlank { "Untitled" },
+                    trackNumber = song.track,
+                    durationSec = song.duration,
+                    mbid = song.musicBrainzId?.takeIf { it.isNotBlank() },
+                    syncedAt = now,
+                )
+            val current = db.trackDao().get(songId) ?: stored
+            if (current.copy(syncedAt = now) != fresh) {
+                db.trackDao().upsertAll(listOf(fresh))
+            }
+            fresh.mbid?.takeIf { it != stored.mbid }?.let { refreshDanceMetadata(listOf(it)) }
+        }
+    }
+
+    /** Fetches one album with all its songs and writes it, replacing its song list. */
+    private suspend fun refreshAlbum(
+        client: SubsonicClient,
+        albumId: String,
+        artistId: String,
+        now: Long,
+    ) {
+        val parentName = db.artistDao().get(artistId)?.name ?: return
+        val album = client.album(albumId).copy(artistId = artistId)
+        val (albumRow, songRows) = album.toEntities(mapOf(artistId to parentName), now) ?: return
+        db.withTransaction {
+            writePatch(Patch(emptyList(), listOf(albumRow to songRows), emptySet(), emptySet(), emptySet()))
+        }
+    }
 
     /** True when no incremental check has run for [serverUrl] within [minAgeMillis]. */
     suspend fun incrementalCheckDue(
@@ -352,16 +416,22 @@ class LibraryRepository(
         patch.deletedAlbumIds.chunked(WRITE_BATCH_SIZE).forEach { albumDao.deleteByIds(it) }
         patch.deletedArtistIds.chunked(WRITE_BATCH_SIZE).forEach { artistDao.deleteByIds(it) }
         patch.artists.chunked(WRITE_BATCH_SIZE).forEach { artistDao.upsertAll(it) }
-        var songsWritten = 0
+        var written = 0
         for ((albumRow, songRows) in patch.albums) {
-            albumDao.upsertAll(listOf(albumRow))
-            // Replace the album's songs, so a song removed on the server does not linger.
-            trackDao.deleteForAlbum(albumRow.id)
-            songRows.chunked(WRITE_BATCH_SIZE).forEach { trackDao.upsertAll(it) }
-            songsWritten += songRows.size
+            if (albumDao.get(albumRow.id)?.copy(syncedAt = albumRow.syncedAt) != albumRow) {
+                albumDao.upsertAll(listOf(albumRow))
+                written++
+            }
+            // Only songs that differ are written; songs the server no longer lists for this album are removed.
+            val stored = trackDao.forAlbum(albumRow.id).associateBy { it.id }
+            val changed = songRows.filter { stored[it.id]?.copy(syncedAt = it.syncedAt) != it }
+            val removed = stored.keys - songRows.mapTo(mutableSetOf()) { it.id }
+            removed.toList().chunked(WRITE_BATCH_SIZE).forEach { trackDao.deleteByIds(it) }
+            changed.chunked(WRITE_BATCH_SIZE).forEach { trackDao.upsertAll(it) }
+            written += changed.size + removed.size
         }
         return patch.deletedSongIds.size + patch.deletedAlbumIds.size + patch.deletedArtistIds.size +
-            patch.artists.size + patch.albums.size + songsWritten
+            patch.artists.size + written
     }
 
     /**

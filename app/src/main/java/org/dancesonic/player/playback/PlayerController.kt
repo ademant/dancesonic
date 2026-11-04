@@ -46,6 +46,8 @@ class PlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val settingsProvider: () -> ServerSettings?,
+    /** Called on the main thread when a track starts; the argument is its song id. */
+    private val onTrackStarted: (songId: String) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
@@ -66,7 +68,10 @@ class PlayerController(
                     override fun onMediaItemTransition(
                         mediaItem: MediaItem?,
                         reason: Int,
-                    ) = publish(built)
+                    ) {
+                        publish(built)
+                        mediaItem?.mediaId?.let(onTrackStarted)
+                    }
 
                     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
                 },

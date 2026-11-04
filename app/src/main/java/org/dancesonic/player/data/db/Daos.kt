@@ -112,9 +112,9 @@ interface TrackDao {
     @Query("DELETE FROM track WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
 
-    /** Removes an album's songs before its fresh list is written, so songs removed on the server go too. */
-    @Query("DELETE FROM track WHERE albumId = :albumId")
-    suspend fun deleteForAlbum(albumId: String)
+    /** The stored songs of one album, compared with its fresh song list so only changed songs are written. */
+    @Query("SELECT * FROM track WHERE albumId = :albumId")
+    suspend fun forAlbum(albumId: String): List<TrackEntity>
 
     /** Song count and total duration per album, compared with the album listing to spot changes. */
     @Query(

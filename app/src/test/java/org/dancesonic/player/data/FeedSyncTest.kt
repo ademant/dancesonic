@@ -11,9 +11,11 @@ import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.dancesonic.player.testsupport.newTestSyncStateStore
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -167,6 +169,34 @@ class FeedSyncTest {
             assertNull(store.serverTime(serverUrl()))
         }
 
+    @Test
+    fun `a tag-only edit rewrites only the changed song`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueFirstSync()
+            repo.syncIncremental(server.client)
+            server.enqueueJson(INFO_NEW)
+            server.enqueueJson(FEED_ALBUM_ONLY)
+            server.enqueueJson(ALBUM_RETITLED_SONG)
+
+            val result = repo.syncIncremental(server.client)
+
+            assertEquals(1, result.rowsWritten)
+            assertEquals("Uno", db.trackDao().get("s-1")!!.title)
+        }
+
+    @Test
+    fun `a full listing is due when none ran or the last one is a week old`() =
+        runBlocking(Dispatchers.IO) {
+            val week = 7L * 24 * 60 * 60 * 1000
+            assertTrue(repo.fullSyncDue(serverUrl(), week))
+            enqueueFirstSync()
+            repo.syncIncremental(server.client)
+
+            assertFalse(repo.fullSyncDue(serverUrl(), week))
+            val weekLater = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L + week }, syncState = store)
+            assertTrue(weekLater.fullSyncDue(serverUrl(), week))
+        }
+
     /** Extensions, sync point, artists, two album pages and one album: what a first sync reads. */
     private fun enqueueFirstSync() {
         server.enqueueJson(EXTENSIONS_WITH_FEED)
@@ -184,6 +214,19 @@ class FeedSyncTest {
             """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
                 """{"name":"apiKeyAuthentication","versions":[1]},""" +
                 """{"name":"tinysonicLibraryChanges","versions":[1]}]}}"""
+
+        const val FEED_ALBUM_ONLY =
+            """{"subsonic-response":{"status":"ok","libraryChanges":{"full":false,"serverTime":2000,""" +
+                """"artists":[],"albums":[{"id":"al-1","updated":1500}],"songs":[],"playlists":[],""" +
+                """"starred":[],"deleted":[]}}}"""
+
+        const val ALBUM_RETITLED_SONG =
+            """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night","artist":"Ada",""" +
+                """"artistId":"ar-1","year":1999,"songCount":2,"duration":380,"song":[""" +
+                """{"id":"s-1","title":"Uno","album":"Night","artist":"Ada","albumId":"al-1","track":1,""" +
+                """"duration":200,"musicBrainzId":"rec-1"},""" +
+                """{"id":"s-2","title":"Two","album":"Night","artist":"Ada","albumId":"al-1","track":2,""" +
+                """"duration":180}]}}}"""
 
         const val EXTENSIONS_WITHOUT_FEED =
             """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
