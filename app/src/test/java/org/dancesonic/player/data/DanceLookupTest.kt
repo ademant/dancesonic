@@ -88,7 +88,7 @@ class DanceLookupTest {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
         server.enqueueJson(EMPTY_ALBUM_LIST)
-        server.enqueueJson(ALBUM_WITH_MBID)
+        server.enqueueSongsOf(ALBUM_WITH_MBID)
     }
 
     /** Records each lookup. Returns no information, and fails the first [failNext] lookups. */

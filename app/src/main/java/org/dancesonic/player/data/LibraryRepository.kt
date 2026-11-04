@@ -24,7 +24,6 @@ import org.dancesonic.player.subsonic.LibraryChangesDto
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicInteger
 
 /** How a sync obtained its data. */
 enum class SyncMode {
@@ -469,45 +468,37 @@ class LibraryRepository(
     }
 
     /**
-     * Artists from the index, albums from paged album lists, then one getAlbum per album for its
-     * songs. Albums whose artist is not in the index are skipped and counted, because a row must
-     * have a parent to satisfy the foreign key.
+     * Artists from the index, albums from paged album lists, and songs from paged search3. Songs are joined to
+     * their album by id. Albums whose artist is not in the index are skipped and counted, because a row must
+     * have a parent to satisfy the foreign key. Songs of unknown albums are dropped for the same reason.
      */
     private suspend fun fetchCatalog(
         client: SubsonicClient,
         runStart: Long,
         onProgress: (done: Int, total: Int) -> Unit,
-    ): Fetched =
-        coroutineScope {
-            val permits = Semaphore(MAX_PARALLEL_REQUESTS)
-            val artistNames = timed("index") { client.artists() }.associate { it.id to artistName(it.name) }
-            val albumStubs = timed("album-list") { client.allAlbums() }
+    ): Fetched {
+        val artistNames = timed("index") { client.artists() }.associate { it.id to artistName(it.name) }
+        val albumStubs = timed("album-list") { client.allAlbums() }
+        val songs = timed("song-list") { client.allSongs() }
+        // The number of albums is not known until the songs are read, so there is no count to report.
+        onProgress(0, 0)
 
-            val known = albumStubs.filter { it.hasArtistIn(artistNames) }
-            val done = AtomicInteger(0)
-            onProgress(0, known.size)
-            val fullAlbums =
-                known.map { stub ->
-                    async {
-                        // The album list is the reliable source for the parent artist.
-                        val album =
-                            permits.withPermit { timed("album-request") { client.album(stub.id) } }
-                                .copy(artistId = stub.artistId)
-                        onProgress(done.incrementAndGet(), known.size)
-                        album
-                    }
-                }.awaitAll()
-
-            val artists = artistNames.map { (id, name) -> artistRow(id, name, runStart) }
-            val albums = mutableListOf<AlbumEntity>()
-            val tracks = mutableListOf<TrackEntity>()
-            for (album in fullAlbums) {
-                val (albumRow, songRows) = album.toEntities(artistNames, runStart) ?: continue
-                albums += albumRow
-                tracks += songRows
-            }
-            Fetched(artists, albums, tracks, skippedAlbums = albumStubs.size - albums.size)
+        val songsByAlbum =
+            songs.mapNotNull { song -> song.albumId?.let { it to song } }.groupBy(
+                { it.first },
+                { it.second },
+            )
+        val artists = artistNames.map { (id, name) -> artistRow(id, name, runStart) }
+        val albums = mutableListOf<AlbumEntity>()
+        val tracks = mutableListOf<TrackEntity>()
+        for (stub in albumStubs) {
+            val withSongs = stub.copy(song = songsByAlbum[stub.id].orEmpty())
+            val (albumRow, songRows) = withSongs.toEntities(artistNames, runStart) ?: continue
+            albums += albumRow
+            tracks += songRows
         }
+        return Fetched(artists, albums, tracks, skippedAlbums = albumStubs.size - albums.size)
+    }
 
     /**
      * Whether this album, as listed, differs from the stored album: its header, or the song count or

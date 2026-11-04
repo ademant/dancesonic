@@ -233,7 +233,7 @@ class ConnectViewModel(
         _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
             try {
-                val client = SubsonicClient(settings)
+                val client = container.catalogClient(settings)
                 val result =
                     if (incremental) {
                         container.library.syncIncremental(client)
