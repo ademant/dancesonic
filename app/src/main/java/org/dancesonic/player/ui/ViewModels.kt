@@ -16,6 +16,8 @@ import org.dancesonic.player.AppContainer
 import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.PairingUri
+import org.dancesonic.player.data.SyncMode
+import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
@@ -23,6 +25,9 @@ import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
+
+/** How long a successful check stays fresh before the next automatic check on start. */
+private const val CHECK_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
 
 data class ConnectUiState(
     val busy: Boolean = false,
@@ -143,6 +148,7 @@ class ConnectViewModel(
                 }
             }
             container.library.clearCatalog()
+            container.syncState.clear()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
         }
@@ -190,31 +196,59 @@ class ConnectViewModel(
         }
     }
 
-    private fun startSync(settings: ServerSettings) {
+    /**
+     * Asks the server whether anything changed, at most once a day. Runs without a Refresh tap, so it
+     * is quiet when nothing changed. Skipped while another sync runs.
+     */
+    fun checkForChanges() {
+        val settings = container.currentSettings ?: return
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            if (container.library.incrementalCheckDue(settings.baseUrl.toString(), CHECK_INTERVAL_MILLIS)) {
+                runSync(settings, incremental = true)
+            }
+        }
+    }
+
+    private fun startSync(settings: ServerSettings) = runSync(settings, incremental = false)
+
+    /**
+     * An incremental sync asks the server for changes and fetches only those; without a saved sync point
+     * it does a full listing. A full sync lists everything, and shows progress per album.
+     */
+    private fun runSync(
+        settings: ServerSettings,
+        incremental: Boolean,
+    ) {
         _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
             try {
+                val client = SubsonicClient(settings)
                 val result =
-                    container.library.sync(SubsonicClient(settings)) { done, total ->
-                        _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
-                    }
-                val danceNote =
-                    if (result.danceLookupsFailed > 0) {
-                        ", ${result.danceLookupsFailed} dance lookups failed"
+                    if (incremental) {
+                        container.library.syncIncremental(client)
                     } else {
-                        ""
+                        container.library.sync(client) { done, total ->
+                            _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
+                        }
                     }
-                _state.value =
-                    ConnectUiState(
-                        lastSync =
-                            "Synced ${result.artists} artists, ${result.albums} albums, " +
-                                "${result.tracks} tracks$danceNote",
-                    )
+                _state.value = ConnectUiState(lastSync = syncMessage(result))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
                 _state.value = ConnectUiState(error = "Sync failed: ${e.message}")
             }
+        }
+    }
+
+    private fun syncMessage(result: SyncResult): String {
+        val danceNote =
+            if (result.danceLookupsFailed > 0) ", ${result.danceLookupsFailed} dance lookups failed" else ""
+        return when (result.mode) {
+            SyncMode.Unchanged -> "No changes on the server since the last sync."
+            SyncMode.Changes -> "Applied ${result.rowsWritten} changes$danceNote"
+            SyncMode.Full ->
+                "Synced ${result.artists} artists, ${result.albums} albums, ${result.tracks} tracks$danceNote"
         }
     }
 

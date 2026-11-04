@@ -28,6 +28,9 @@ interface ArtistDao {
     @Query("SELECT * FROM artist")
     suspend fun all(): List<ArtistEntity>
 
+    @Query("SELECT COUNT(*) FROM artist")
+    suspend fun count(): Int
+
     @Query("DELETE FROM artist WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
 }
@@ -49,10 +52,14 @@ interface AlbumDao {
     @Query("SELECT * FROM album")
     suspend fun all(): List<AlbumEntity>
 
+    @Query("SELECT COUNT(*) FROM album")
+    suspend fun count(): Int
+
     @Query("DELETE FROM album WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
 }
 
+@Suppress("TooManyFunctions") // One method per query; a DAO is a list of queries.
 @Dao
 interface TrackDao {
     @Query("SELECT * FROM track WHERE albumId = :albumId ORDER BY trackNumber, title COLLATE NOCASE")
@@ -99,9 +106,32 @@ interface TrackDao {
     @Query("SELECT * FROM track")
     suspend fun all(): List<TrackEntity>
 
+    @Query("SELECT COUNT(*) FROM track")
+    suspend fun count(): Int
+
     @Query("DELETE FROM track WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
+
+    /** Removes an album's songs before its fresh list is written, so songs removed on the server go too. */
+    @Query("DELETE FROM track WHERE albumId = :albumId")
+    suspend fun deleteForAlbum(albumId: String)
+
+    /** Song count and total duration per album, compared with the album listing to spot changes. */
+    @Query(
+        """
+        SELECT albumId AS albumId, COUNT(*) AS songCount, COALESCE(SUM(durationSec), 0) AS duration
+        FROM track GROUP BY albumId
+        """,
+    )
+    suspend fun totalsByAlbum(): List<AlbumSongTotals>
 }
+
+/** Stored song count and summed song duration (seconds) of one album. */
+data class AlbumSongTotals(
+    val albumId: String,
+    val songCount: Int,
+    val duration: Long,
+)
 
 data class DanceTypeCount(
     val danceType: String,

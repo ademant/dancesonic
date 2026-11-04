@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,7 @@ fun LibraryScreen(
 @Composable
 private fun LibraryToolbar(connectVm: ConnectViewModel) {
     val state by connectVm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { connectVm.checkForChanges() }
     Column(Modifier.fillMaxWidth().padding(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Library", style = MaterialTheme.typography.titleMedium)
