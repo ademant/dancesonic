@@ -5,7 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/** Catalog rows mirror the Subsonic server. `syncedAt` marks the last sync run that saw the row. */
+/** Catalog rows mirror the Subsonic server. `syncedAt` marks the last sync run that changed the row. */
 
 @Entity(tableName = "artist")
 data class ArtistEntity(

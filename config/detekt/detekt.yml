@@ -28,5 +28,4 @@ style:
   ReturnCount:
     max: 3
   ThrowsCount:
-    # SubsonicClient.call maps three transport errors plus the failed-envelope case.
-    max: 4
+    max: 3

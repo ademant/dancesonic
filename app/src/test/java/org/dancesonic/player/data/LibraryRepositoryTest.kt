@@ -270,6 +270,77 @@ class LibraryRepositoryTest {
             "song":[{"id":"s-$n","title":"Song $n","track":1,"duration":100}]}}}"""
     }
 
+    @Test
+    fun `re-sync of an unchanged server writes no rows`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueSmallLibrary()
+            val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+            repo.sync(server.client)
+            enqueueSmallLibrary()
+
+            val result = repo.sync(server.client)
+
+            assertEquals(0, result.rowsWritten)
+            assertEquals(2, result.tracks)
+        }
+
+    @Test
+    fun `a changed song is the only row written`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueSmallLibrary()
+            val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+            repo.sync(server.client)
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_AL1.replace("\"Two\"", "\"Two (live)\""))
+
+            val result = repo.sync(server.client)
+
+            assertEquals(1, result.rowsWritten)
+            assertEquals("Two (live)", db.trackDao().get("s-2")?.title)
+        }
+
+    @Test
+    fun `a song removed from the server is the only row removed`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueSmallLibrary()
+            val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+            repo.sync(server.client)
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_WITHOUT_SECOND_SONG)
+
+            val result = repo.sync(server.client)
+
+            assertEquals(1, result.rowsWritten)
+            assertNull(db.trackDao().get("s-2"))
+        }
+
+    @Test
+    fun `an album with more songs than one write batch is stored in full`() =
+        runBlocking(Dispatchers.IO) {
+            val songs =
+                (1..1201).joinToString(
+                    ",",
+                ) { """{"id":"s-$it","title":"Song $it","track":$it,"duration":60}""" }
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(
+                """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night","artist":"Ada",""" +
+                    """"artistId":"ar-1","song":[$songs]}}}""",
+            )
+            val repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
+
+            val result = repo.sync(server.client)
+
+            assertEquals(1201, result.tracks)
+            assertEquals(1201, db.trackDao().all().size)
+            assertEquals(1203, result.rowsWritten)
+        }
+
     private fun enqueueSmallLibrary() {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)

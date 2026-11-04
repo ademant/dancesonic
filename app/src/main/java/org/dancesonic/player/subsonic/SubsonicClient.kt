@@ -1,5 +1,6 @@
 package org.dancesonic.player.subsonic
 
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerializationException
 import okhttp3.HttpUrl
 import retrofit2.HttpException
@@ -12,6 +13,7 @@ import java.io.IOException
 class SubsonicClient internal constructor(
     val settings: ServerSettings,
     private val service: SubsonicService,
+    private val retryBackoffMillis: Long = INITIAL_BACKOFF_MILLIS,
 ) {
     constructor(settings: ServerSettings) : this(
         settings,
@@ -70,17 +72,39 @@ class SubsonicClient internal constructor(
     /** See [ServerSettings.streamUrl]. */
     fun streamUrl(songId: String): HttpUrl = settings.streamUrl(songId)
 
+    /**
+     * Runs one request. Every Subsonic call here is a GET, so a transient failure (no connection,
+     * HTTP 429 or 5xx) is retried with exponential backoff. A `status: failed` answer and other HTTP
+     * errors are not retried: repeating them would not change the answer.
+     */
     private suspend fun call(block: suspend SubsonicService.() -> SubsonicEnvelope): SubsonicResponse {
-        val response =
-            try {
-                service.block().response
-            } catch (e: HttpException) {
-                throw SubsonicException(null, "Server returned HTTP ${e.code()}", e)
-            } catch (e: SerializationException) {
-                throw SubsonicException(null, "Unexpected response from server", e)
-            } catch (e: IOException) {
-                throw SubsonicException(null, "Could not reach server", e)
-            }
+        var attempt = 1
+        var backoffMillis = retryBackoffMillis
+        while (true) {
+            // Only the transport step is inside the try: SubsonicException is an IOException, so an
+            // envelope error caught here would be retried and reported as "could not reach server".
+            val envelope: SubsonicResponse? =
+                try {
+                    service.block().response
+                } catch (e: HttpException) {
+                    if (!e.isTransient() || attempt >= MAX_ATTEMPTS) {
+                        throw SubsonicException(null, "Server returned HTTP ${e.code()}", e)
+                    }
+                    null
+                } catch (e: SerializationException) {
+                    throw SubsonicException(null, "Unexpected response from server", e)
+                } catch (e: IOException) {
+                    if (attempt >= MAX_ATTEMPTS) throw SubsonicException(null, "Could not reach server", e)
+                    null
+                }
+            if (envelope != null) return unwrap(envelope)
+            delay(backoffMillis)
+            backoffMillis *= 2
+            attempt++
+        }
+    }
+
+    private fun unwrap(response: SubsonicResponse): SubsonicResponse {
         if (response.status != "ok") {
             val error = response.error
             throw SubsonicException(error?.code, error?.message ?: "Server reported an error")
@@ -88,7 +112,18 @@ class SubsonicClient internal constructor(
         return response
     }
 
+    private fun HttpException.isTransient(): Boolean = code() == HTTP_TOO_MANY_REQUESTS || code() >= HTTP_SERVER_ERROR
+
     companion object {
+        /** Attempts per request, including the first. */
+        const val MAX_ATTEMPTS = 3
+
+        /** Delay before the first retry; doubles after each further failure. */
+        const val INITIAL_BACKOFF_MILLIS = 500L
+
+        private const val HTTP_TOO_MANY_REQUESTS = 429
+        private const val HTTP_SERVER_ERROR = 500
+
         /** Largest page the Subsonic spec allows for getAlbumList2. */
         const val ALBUM_PAGE_SIZE = 500
 
