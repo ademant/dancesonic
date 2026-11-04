@@ -624,7 +624,7 @@ class LibraryRepository(
         }
 
     private companion object {
-        const val MAX_PARALLEL_REQUESTS = 4
+        const val MAX_PARALLEL_REQUESTS = 6
 
         /** Rows per insert or delete statement; keeps each statement and its bind list small. */
         const val WRITE_BATCH_SIZE = 500
