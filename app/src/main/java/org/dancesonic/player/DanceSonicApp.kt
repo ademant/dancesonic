@@ -75,6 +75,19 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     val player =
         PlayerController(context, appScope, { currentSettings }, onTrackStarted = ::refreshPlayingTrack)
 
+    private var cachedCatalogClient: SubsonicClient? = null
+
+    /**
+     * The client for catalog sync. Reused while the server and key are unchanged, so the server's extension
+     * list is asked for once rather than on every Refresh.
+     */
+    @Synchronized
+    fun catalogClient(settings: ServerSettings): SubsonicClient {
+        val cached = cachedCatalogClient ?: return SubsonicClient(settings).also { cachedCatalogClient = it }
+        if (cached.settings.baseUrl == settings.baseUrl && cached.settings.apiKey == settings.apiKey) return cached
+        return SubsonicClient(settings).also { cachedCatalogClient = it }
+    }
+
     /**
      * Compares a track that just started with the server, in the background. Playback never waits for it,
      * and a failed check only leaves the stored rows as they were.
