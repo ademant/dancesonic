@@ -19,6 +19,51 @@ data class SubsonicResponse(
     val artist: ArtistDto? = null,
     val album: AlbumDto? = null,
     val albumList2: AlbumListDto? = null,
+    val song: SongDto? = null,
+    /** folksonic vendor extension `tinysonicLibraryInfo`. */
+    val tinysonicLibraryInfo: LibraryInfoDto? = null,
+    /** folksonic vendor extension `tinysonicLibraryChanges`. */
+    val libraryChanges: LibraryChangesDto? = null,
+)
+
+/** Library totals and the last library change, as an ISO-8601 UTC string (second precision). */
+@Serializable
+data class LibraryInfoDto(
+    val artists: Int = 0,
+    val albums: Int = 0,
+    val songs: Int = 0,
+    val lastModified: String? = null,
+)
+
+/**
+ * One page of the change feed. `playlists` and `starred` are per account and are not part of the
+ * catalog, so they are not read. Ids only: the client fetches changed items with the usual endpoints.
+ */
+@Serializable
+data class LibraryChangesDto(
+    val full: Boolean = false,
+    /** Sync point for the next request, epoch milliseconds. Same on every page of one snapshot. */
+    val serverTime: Long = 0,
+    val artists: List<ChangedIdDto> = emptyList(),
+    val albums: List<ChangedIdDto> = emptyList(),
+    val songs: List<ChangedIdDto> = emptyList(),
+    val deleted: List<DeletedDto> = emptyList(),
+    val nextCursor: String? = null,
+)
+
+@Serializable
+data class ChangedIdDto(
+    val id: String,
+    /** Epoch milliseconds of the last change. */
+    val updated: Long = 0,
+)
+
+@Serializable
+data class DeletedDto(
+    /** `artist`, `album`, `song`, `playlist` or `starred`. */
+    val type: String,
+    val id: String,
+    val deleted: Long = 0,
 )
 
 @Serializable
@@ -64,6 +109,10 @@ data class AlbumDto(
     val artist: String? = null,
     val artistId: String? = null,
     val year: Int? = null,
+    /** Number of songs; changes when songs are added or removed. Used to skip unchanged albums. */
+    val songCount: Int? = null,
+    /** Total duration in seconds. */
+    val duration: Int? = null,
     val song: List<SongDto> = emptyList(),
 )
 
