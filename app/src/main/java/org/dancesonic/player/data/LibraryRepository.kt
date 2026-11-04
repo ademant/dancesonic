@@ -26,6 +26,8 @@ data class SyncResult(
     val tracks: Int,
     val danceLookupsFailed: Int,
     val skippedAlbums: Int,
+    /** Rows inserted, updated or removed. Zero when the server catalog did not change. */
+    val rowsWritten: Int,
 )
 
 /**
@@ -65,14 +67,7 @@ class LibraryRepository(
 
             val fetched = fetchCatalog(client, runStart, onProgress)
 
-            db.withTransaction {
-                db.artistDao().upsertAll(fetched.artists)
-                db.albumDao().upsertAll(fetched.albums)
-                db.trackDao().upsertAll(fetched.tracks)
-                db.trackDao().deleteStale(runStart)
-                db.albumDao().deleteStale(runStart)
-                db.artistDao().deleteStale(runStart)
-            }
+            val rowsWritten = db.withTransaction { writeChangedRows(fetched) }
 
             val danceFailures = refreshDanceMetadata()
 
@@ -82,6 +77,7 @@ class LibraryRepository(
                 tracks = fetched.tracks.size,
                 danceLookupsFailed = danceFailures,
                 skippedAlbums = fetched.skippedAlbums,
+                rowsWritten = rowsWritten,
             )
         }
 
@@ -105,6 +101,40 @@ class LibraryRepository(
         val tracks: List<TrackEntity>,
         val skippedAlbums: Int,
     )
+
+    /**
+     * Writes only what differs from the stored catalog, inside the caller's transaction. A row is
+     * unchanged when everything except [syncedAt] matches, so unchanged rows are not written at all.
+     * Rows missing from the server are removed by id. Returns the number of rows written or removed.
+     */
+    private suspend fun writeChangedRows(fetched: Fetched): Int {
+        val artistDao = db.artistDao()
+        val albumDao = db.albumDao()
+        val trackDao = db.trackDao()
+
+        val storedArtists = artistDao.all().associateBy { it.id }
+        val storedAlbums = albumDao.all().associateBy { it.id }
+        val storedTracks = trackDao.all().associateBy { it.id }
+
+        val changedArtists = fetched.artists.filter { storedArtists[it.id]?.copy(syncedAt = it.syncedAt) != it }
+        val changedAlbums = fetched.albums.filter { storedAlbums[it.id]?.copy(syncedAt = it.syncedAt) != it }
+        val changedTracks = fetched.tracks.filter { storedTracks[it.id]?.copy(syncedAt = it.syncedAt) != it }
+
+        val staleTrackIds = storedTracks.keys - fetched.tracks.mapTo(mutableSetOf()) { it.id }
+        val staleAlbumIds = storedAlbums.keys - fetched.albums.mapTo(mutableSetOf()) { it.id }
+        val staleArtistIds = storedArtists.keys - fetched.artists.mapTo(mutableSetOf()) { it.id }
+
+        // Parents before children for inserts; children before parents for deletes.
+        changedArtists.chunked(WRITE_BATCH_SIZE).forEach { artistDao.upsertAll(it) }
+        changedAlbums.chunked(WRITE_BATCH_SIZE).forEach { albumDao.upsertAll(it) }
+        changedTracks.chunked(WRITE_BATCH_SIZE).forEach { trackDao.upsertAll(it) }
+        staleTrackIds.toList().chunked(WRITE_BATCH_SIZE).forEach { trackDao.deleteByIds(it) }
+        staleAlbumIds.toList().chunked(WRITE_BATCH_SIZE).forEach { albumDao.deleteByIds(it) }
+        staleArtistIds.toList().chunked(WRITE_BATCH_SIZE).forEach { artistDao.deleteByIds(it) }
+
+        return changedArtists.size + changedAlbums.size + changedTracks.size +
+            staleTrackIds.size + staleAlbumIds.size + staleArtistIds.size
+    }
 
     /**
      * Artists from the index, albums from paged album lists, then one getAlbum per album for its
@@ -197,5 +227,8 @@ class LibraryRepository(
 
     private companion object {
         const val MAX_PARALLEL_REQUESTS = 4
+
+        /** Rows per insert or delete statement; keeps each statement and its bind list small. */
+        const val WRITE_BATCH_SIZE = 500
     }
 }

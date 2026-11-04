@@ -24,8 +24,12 @@ interface ArtistDao {
     @Query("DELETE FROM artist")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM artist WHERE syncedAt < :runStart")
-    suspend fun deleteStale(runStart: Long)
+    /** Every stored artist, read once per sync so unchanged rows can be skipped without a write. */
+    @Query("SELECT * FROM artist")
+    suspend fun all(): List<ArtistEntity>
+
+    @Query("DELETE FROM artist WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }
 
 @Dao
@@ -42,8 +46,11 @@ interface AlbumDao {
     @Query("DELETE FROM album")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM album WHERE syncedAt < :runStart")
-    suspend fun deleteStale(runStart: Long)
+    @Query("SELECT * FROM album")
+    suspend fun all(): List<AlbumEntity>
+
+    @Query("DELETE FROM album WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }
 
 @Dao
@@ -89,8 +96,11 @@ interface TrackDao {
     @Query("DELETE FROM track")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM track WHERE syncedAt < :runStart")
-    suspend fun deleteStale(runStart: Long)
+    @Query("SELECT * FROM track")
+    suspend fun all(): List<TrackEntity>
+
+    @Query("DELETE FROM track WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 }
 
 data class DanceTypeCount(
