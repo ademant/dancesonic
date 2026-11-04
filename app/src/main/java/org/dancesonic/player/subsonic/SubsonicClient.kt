@@ -29,18 +29,80 @@ class SubsonicClient internal constructor(
      */
     suspend fun checkConnection() {
         call { ping() }
-        val extensions = call { openSubsonicExtensions() }.openSubsonicExtensions.orEmpty()
-        val supportsApiKey =
-            extensions.any { ext ->
-                ext.name == API_KEY_EXTENSION && ext.versions.contains(1)
-            }
-        if (!supportsApiKey) {
+        if (!supports(API_KEY_EXTENSION)) {
             throw SubsonicException(
                 code = null,
                 message = "This server does not support API key login (OpenSubsonic $API_KEY_EXTENSION).",
             )
         }
     }
+
+    @Volatile
+    private var extensionsCache: List<OpenSubsonicExtensionDto>? = null
+
+    /** Whether the server advertises extension [name] at version 1. Asked once per client. */
+    suspend fun supports(name: String): Boolean {
+        val extensions =
+            extensionsCache ?: call { openSubsonicExtensions() }.openSubsonicExtensions.orEmpty().also {
+                extensionsCache = it
+            }
+        return extensions.any { it.name == name && it.versions.contains(1) }
+    }
+
+    /** Library totals and the last library change (folksonic `tinysonicLibraryInfo`). */
+    suspend fun libraryInfo(): LibraryInfoDto =
+        call { libraryInfo() }.tinysonicLibraryInfo
+            ?: throw SubsonicException(null, "Library info response was empty")
+
+    /**
+     * The current change-feed point, read from a single page. Take it before a full listing: a change
+     * made during the listing is then picked up by the next sync, not missed.
+     */
+    suspend fun changeCheckpoint(): Long = fetchChangesPage(since = null, cursor = null, size = 1).serverTime
+
+    /**
+     * Every change since [since] (epoch milliseconds), or the whole library when [since] is null.
+     * Pages are read until the server reports no next cursor, so the result is one snapshot.
+     */
+    suspend fun libraryChanges(since: Long?): LibraryChangesDto {
+        var page = fetchChangesPage(since = since, cursor = null)
+        val artists = page.artists.toMutableList()
+        val albums = page.albums.toMutableList()
+        val songs = page.songs.toMutableList()
+        val deleted = page.deleted.toMutableList()
+        while (page.nextCursor != null) {
+            page = fetchChangesPage(since = null, cursor = page.nextCursor)
+            artists += page.artists
+            albums += page.albums
+            songs += page.songs
+            deleted += page.deleted
+        }
+        return LibraryChangesDto(
+            full = page.full,
+            serverTime = page.serverTime,
+            artists = artists,
+            albums = albums,
+            songs = songs,
+            deleted = deleted,
+        )
+    }
+
+    private suspend fun fetchChangesPage(
+        since: Long?,
+        cursor: String?,
+        size: Int = CHANGES_PAGE_SIZE,
+    ): LibraryChangesDto =
+        call {
+            if (cursor == null) {
+                libraryChanges(since, size, null)
+            } else {
+                libraryChanges(null, size, cursor)
+            }
+        }.libraryChanges ?: throw SubsonicException(null, "Change feed response was empty")
+
+    /** One song, including its album id. */
+    suspend fun song(id: String): SongDto =
+        call { song(id) }.song ?: throw SubsonicException(null, "Song response was empty")
 
     /** All artists, flattened from the alphabetical index. */
     suspend fun artists(): List<ArtistDto> = call { artists() }.artists?.index.orEmpty().flatMap { it.artist }
@@ -87,7 +149,7 @@ class SubsonicClient internal constructor(
                 try {
                     service.block().response
                 } catch (e: HttpException) {
-                    if (!e.isTransient() || attempt >= MAX_ATTEMPTS) {
+                    if (!isTransient(e) || attempt >= MAX_ATTEMPTS) {
                         throw SubsonicException(null, "Server returned HTTP ${e.code()}", e)
                     }
                     null
@@ -104,16 +166,6 @@ class SubsonicClient internal constructor(
         }
     }
 
-    private fun unwrap(response: SubsonicResponse): SubsonicResponse {
-        if (response.status != "ok") {
-            val error = response.error
-            throw SubsonicException(error?.code, error?.message ?: "Server reported an error")
-        }
-        return response
-    }
-
-    private fun HttpException.isTransient(): Boolean = code() == HTTP_TOO_MANY_REQUESTS || code() >= HTTP_SERVER_ERROR
-
     companion object {
         /** Attempts per request, including the first. */
         const val MAX_ATTEMPTS = 3
@@ -121,13 +173,28 @@ class SubsonicClient internal constructor(
         /** Delay before the first retry; doubles after each further failure. */
         const val INITIAL_BACKOFF_MILLIS = 500L
 
-        private const val HTTP_TOO_MANY_REQUESTS = 429
-        private const val HTTP_SERVER_ERROR = 500
-
         /** Largest page the Subsonic spec allows for getAlbumList2. */
         const val ALBUM_PAGE_SIZE = 500
+
+        /** Largest page the folksonic change feed accepts (`size`, 1–500). */
+        const val CHANGES_PAGE_SIZE = 500
 
         /** Extension name from the OpenSubsonic apikeyauth spec. Verify against the spec before release. */
         const val API_KEY_EXTENSION = "apiKeyAuthentication"
     }
 }
+
+/** Throws for a `status: failed` envelope; returns the response otherwise. */
+private fun unwrap(response: SubsonicResponse): SubsonicResponse {
+    if (response.status != "ok") {
+        val error = response.error
+        throw SubsonicException(error?.code, error?.message ?: "Server reported an error")
+    }
+    return response
+}
+
+/** HTTP 429 and 5xx are worth retrying; other HTTP errors are not. */
+private fun isTransient(e: HttpException): Boolean = e.code() == HTTP_TOO_MANY_REQUESTS || e.code() >= HTTP_SERVER_ERROR
+
+private const val HTTP_TOO_MANY_REQUESTS = 429
+private const val HTTP_SERVER_ERROR = 500

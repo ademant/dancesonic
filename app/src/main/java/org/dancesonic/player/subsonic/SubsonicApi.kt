@@ -77,6 +77,22 @@ internal interface SubsonicService {
         @Query("size") size: Int,
         @Query("offset") offset: Int,
     ): SubsonicEnvelope
+
+    @GET("rest/getSong.view")
+    suspend fun song(
+        @Query("id") id: String,
+    ): SubsonicEnvelope
+
+    @GET("rest/tinysonicLibraryInfo.view")
+    suspend fun libraryInfo(): SubsonicEnvelope
+
+    /** Either [since] for the first page, or [cursor] alone for the next page of the same snapshot. */
+    @GET("rest/getLibraryChanges.view")
+    suspend fun libraryChanges(
+        @Query("since") since: Long?,
+        @Query("size") size: Int?,
+        @Query("cursor") cursor: String?,
+    ): SubsonicEnvelope
 }
 
 /**
@@ -123,10 +139,15 @@ internal val subsonicJson: Json =
 internal object SubsonicHttp {
     private const val CONNECT_TIMEOUT_SECONDS = 15L
     private const val READ_TIMEOUT_SECONDS = 30L
+    private const val PREFER_MINIMAL = "tinysonic-minimal"
 
     fun okHttpClient(settingsProvider: () -> ServerSettings?): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(settingsProvider))
+            // Asks folksonic for minimal responses (RFC 7240). Other servers ignore the Prefer header.
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().header("Prefer", PREFER_MINIMAL).build())
+            }
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             .build()
