@@ -119,14 +119,18 @@ class ConnectViewModel(
         }
     }
 
-    /** Refreshes the local catalog and DanceBrainz metadata. Safe to call while playing. */
-    fun sync() {
+    /**
+     * Brings the local catalog up to date. By default only what changed on the server is fetched.
+     * [full] re-lists the whole catalog: it repairs what the change feed cannot see, and is slow on large
+     * libraries. Safe to call while playing.
+     */
+    fun sync(full: Boolean = false) {
         val settings = container.currentSettings
         if (settings == null) {
             _state.value = _state.value.copy(error = refreshBlockedReason(null))
             return
         }
-        startSync(settings)
+        runSync(settings, incremental = !full)
     }
 
     /**

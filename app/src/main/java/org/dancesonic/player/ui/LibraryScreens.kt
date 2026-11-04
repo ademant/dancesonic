@@ -88,6 +88,8 @@ private fun LibraryToolbar(connectVm: ConnectViewModel) {
             Row {
                 OutlinedButton(onClick = { connectVm.sync() }, enabled = !state.busy) { Text("Refresh") }
                 Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { connectVm.sync(full = true) }, enabled = !state.busy) { Text("Full rebuild") }
+                Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { connectVm.disconnect() }) { Text("Disconnect") }
             }
         }
