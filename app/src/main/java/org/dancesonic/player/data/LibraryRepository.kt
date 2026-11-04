@@ -66,6 +66,7 @@ class LibraryRepository(
     private val danceSource: DanceMetadataSource,
     private val clock: () -> Long = System::currentTimeMillis,
     private val syncState: SyncStateStore? = null,
+    private val timings: SyncTimings = SyncTimings.None,
 ) {
     fun artists(): Flow<List<ArtistEntity>> = db.artistDao().observeAll()
 
@@ -93,13 +94,14 @@ class LibraryRepository(
     ): SyncResult =
         withContext(Dispatchers.IO) {
             val runStart = clock()
-            val checkpoint = changeCheckpoint(client)
+            val checkpoint = timed("checkpoint") { changeCheckpoint(client) }
 
-            val fetched = fetchCatalog(client, runStart, onProgress)
-            val rowsWritten = db.withTransaction { writeChangedRows(fetched) }
+            val fetched = timed("listing") { fetchCatalog(client, runStart, onProgress) }
+            val rowsWritten = timed("write") { db.withTransaction { writeChangedRows(fetched) } }
 
             saveSyncPoint(client, checkpoint)
-            val danceFailures = refreshDanceMetadata(db.trackDao().allMbids())
+            syncState?.markFull(client.settings.baseUrl.toString(), clock())
+            val danceFailures = timed("dance") { refreshDanceMetadata(db.trackDao().allMbids()) }
 
             SyncResult(
                 artists = fetched.artists.size,
@@ -156,6 +158,69 @@ class LibraryRepository(
             }
         }
 
+    /** True when no full listing has run for [serverUrl] within [maxAgeMillis]. */
+    suspend fun fullSyncDue(
+        serverUrl: String,
+        maxAgeMillis: Long,
+    ): Boolean {
+        val last = syncState?.lastFull(serverUrl) ?: return true
+        return clock() - last >= maxAgeMillis
+    }
+
+    /**
+     * Compares a track that just started playing with the server. Updates the stored track when it
+     * differs, and its album when the album name differs. Costs one request when nothing differs.
+     * A track not in the catalog is left alone; the catalog sync adds it.
+     */
+    suspend fun refreshTrack(
+        client: SubsonicClient,
+        songId: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            val stored = db.trackDao().get(songId) ?: return@withContext
+            val song = client.song(songId)
+            val albumId = song.albumId ?: return@withContext
+            val now = clock()
+
+            val storedAlbum = db.albumDao().get(albumId) ?: return@withContext
+            if (storedAlbum.name != albumName(song.album)) {
+                refreshAlbum(client, albumId, storedAlbum.artistId, now)
+            }
+
+            val fresh =
+                TrackEntity(
+                    id = songId,
+                    albumId = albumId,
+                    artistName = song.artist ?: stored.artistName,
+                    title = song.title.orEmpty().ifBlank { "Untitled" },
+                    trackNumber = song.track,
+                    durationSec = song.duration,
+                    mbid = song.musicBrainzId?.takeIf { it.isNotBlank() },
+                    syncedAt = now,
+                )
+            val current = db.trackDao().get(songId) ?: stored
+            if (current.copy(syncedAt = now) != fresh) {
+                db.trackDao().upsertAll(listOf(fresh))
+            }
+            fresh.mbid?.takeIf { it != stored.mbid }?.let { refreshDanceMetadata(listOf(it)) }
+        }
+    }
+
+    /** Fetches one album with all its songs and writes it, replacing its song list. */
+    private suspend fun refreshAlbum(
+        client: SubsonicClient,
+        albumId: String,
+        artistId: String,
+        now: Long,
+    ) {
+        val parentName = db.artistDao().get(artistId)?.name ?: return
+        val album = client.album(albumId).copy(artistId = artistId)
+        val (albumRow, songRows) = album.toEntities(mapOf(artistId to parentName), now) ?: return
+        db.withTransaction {
+            writePatch(Patch(emptyList(), listOf(albumRow to songRows), emptySet(), emptySet(), emptySet()))
+        }
+    }
+
     /** True when no incremental check has run for [serverUrl] within [minAgeMillis]. */
     suspend fun incrementalCheckDue(
         serverUrl: String,
@@ -179,6 +244,19 @@ class LibraryRepository(
                 db.danceLookupDao().deleteAll()
             }
         }
+
+    /** Runs [block] and reports how long it took, even when it fails. */
+    private suspend fun <T> timed(
+        phase: String,
+        block: suspend () -> T,
+    ): T {
+        val started = System.nanoTime()
+        try {
+            return block()
+        } finally {
+            timings.record(phase, (System.nanoTime() - started) / NANOS_PER_MILLI)
+        }
+    }
 
     /** Everything a full listing read, ready to be compared with the store. */
     private data class Fetched(
@@ -338,16 +416,22 @@ class LibraryRepository(
         patch.deletedAlbumIds.chunked(WRITE_BATCH_SIZE).forEach { albumDao.deleteByIds(it) }
         patch.deletedArtistIds.chunked(WRITE_BATCH_SIZE).forEach { artistDao.deleteByIds(it) }
         patch.artists.chunked(WRITE_BATCH_SIZE).forEach { artistDao.upsertAll(it) }
-        var songsWritten = 0
+        var written = 0
         for ((albumRow, songRows) in patch.albums) {
-            albumDao.upsertAll(listOf(albumRow))
-            // Replace the album's songs, so a song removed on the server does not linger.
-            trackDao.deleteForAlbum(albumRow.id)
-            songRows.chunked(WRITE_BATCH_SIZE).forEach { trackDao.upsertAll(it) }
-            songsWritten += songRows.size
+            if (albumDao.get(albumRow.id)?.copy(syncedAt = albumRow.syncedAt) != albumRow) {
+                albumDao.upsertAll(listOf(albumRow))
+                written++
+            }
+            // Only songs that differ are written; songs the server no longer lists for this album are removed.
+            val stored = trackDao.forAlbum(albumRow.id).associateBy { it.id }
+            val changed = songRows.filter { stored[it.id]?.copy(syncedAt = it.syncedAt) != it }
+            val removed = stored.keys - songRows.mapTo(mutableSetOf()) { it.id }
+            removed.toList().chunked(WRITE_BATCH_SIZE).forEach { trackDao.deleteByIds(it) }
+            changed.chunked(WRITE_BATCH_SIZE).forEach { trackDao.upsertAll(it) }
+            written += changed.size + removed.size
         }
         return patch.deletedSongIds.size + patch.deletedAlbumIds.size + patch.deletedArtistIds.size +
-            patch.artists.size + patch.albums.size + songsWritten
+            patch.artists.size + written
     }
 
     /**
@@ -396,8 +480,8 @@ class LibraryRepository(
     ): Fetched =
         coroutineScope {
             val permits = Semaphore(MAX_PARALLEL_REQUESTS)
-            val artistNames = client.artists().associate { it.id to artistName(it.name) }
-            val albumStubs = client.allAlbums()
+            val artistNames = timed("index") { client.artists() }.associate { it.id to artistName(it.name) }
+            val albumStubs = timed("album-list") { client.allAlbums() }
 
             val known = albumStubs.filter { it.hasArtistIn(artistNames) }
             val done = AtomicInteger(0)
@@ -406,7 +490,9 @@ class LibraryRepository(
                 known.map { stub ->
                     async {
                         // The album list is the reliable source for the parent artist.
-                        val album = permits.withPermit { client.album(stub.id) }.copy(artistId = stub.artistId)
+                        val album =
+                            permits.withPermit { timed("album-request") { client.album(stub.id) } }
+                                .copy(artistId = stub.artistId)
                         onProgress(done.incrementAndGet(), known.size)
                         album
                     }
@@ -538,7 +624,7 @@ class LibraryRepository(
         }
 
     private companion object {
-        const val MAX_PARALLEL_REQUESTS = 4
+        const val MAX_PARALLEL_REQUESTS = 6
 
         /** Rows per insert or delete statement; keeps each statement and its bind list small. */
         const val WRITE_BATCH_SIZE = 500
@@ -548,6 +634,8 @@ class LibraryRepository(
 
         /** Subsonic error code for "data not found". */
         const val NOT_FOUND_CODE = 70
+
+        const val NANOS_PER_MILLI = 1_000_000L
 
         /** A recording is looked up again once its last lookup is this old. */
         const val DANCE_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000
