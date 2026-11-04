@@ -69,6 +69,13 @@ data class DanceMetadataEntity(
     val fetchedAt: Long,
 )
 
+/** When each recording was last looked up in DanceBrainz, including lookups that found nothing. */
+@Entity(tableName = "dance_lookup")
+data class DanceLookupEntity(
+    @PrimaryKey val mbid: String,
+    val checkedAt: Long,
+)
+
 @Entity(tableName = "playlist")
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

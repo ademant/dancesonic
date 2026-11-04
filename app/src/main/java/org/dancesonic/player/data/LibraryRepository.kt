@@ -14,6 +14,7 @@ import org.dancesonic.player.dance.DanceMetadataSource
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.AlbumSongTotals
 import org.dancesonic.player.data.db.ArtistEntity
+import org.dancesonic.player.data.db.DanceLookupEntity
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.DanceTypeCount
 import org.dancesonic.player.data.db.TrackEntity
@@ -175,6 +176,7 @@ class LibraryRepository(
                 db.albumDao().deleteAll()
                 db.artistDao().deleteAll()
                 db.danceMetadataDao().deleteAll()
+                db.danceLookupDao().deleteAll()
             }
         }
 
@@ -487,28 +489,38 @@ class LibraryRepository(
         }
 
     /**
-     * Looks up DanceBrainz types for [mbids]. Returns the number of lookups that failed. Cached types
-     * are kept on failure.
+     * Looks up DanceBrainz types for the recordings in [mbids] that were not checked within
+     * [DANCE_MAX_AGE_MILLIS]. A recording with no information is recorded too, so it is not asked again
+     * every sync. A failed lookup records nothing and is retried next time. Returns the number of
+     * failed lookups; previously cached types are kept.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private suspend fun refreshDanceMetadata(mbids: List<String>): Int =
         coroutineScope {
-            val permits = Semaphore(MAX_PARALLEL_REQUESTS)
             val now = clock()
+            val fresh =
+                mbids.chunked(WRITE_BATCH_SIZE).flatMapTo(mutableSetOf()) {
+                    db.danceLookupDao().checkedSince(it, since = now - DANCE_MAX_AGE_MILLIS)
+                }
+            val due = mbids.distinct().filter { it !in fresh }
+            val permits = Semaphore(MAX_PARALLEL_REQUESTS)
             val results =
-                mbids.map { mbid ->
+                due.map { mbid ->
                     async {
                         permits.withPermit {
                             try {
                                 val types = danceSource.danceTypesFor(mbid)
-                                if (types != null) {
-                                    db.danceMetadataDao().replaceFor(mbid, types.distinct().sorted(), now)
+                                db.withTransaction {
+                                    if (types != null) {
+                                        db.danceMetadataDao().replaceFor(mbid, types.distinct().sorted(), now)
+                                    }
+                                    db.danceLookupDao().upsert(DanceLookupEntity(mbid, checkedAt = now))
                                 }
                                 false
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
-                                // Lookup failures are counted and reported; previously cached types are kept.
+                                // Counted and reported; nothing is recorded, so the next sync retries it.
                                 true
                             }
                         }
@@ -536,6 +548,9 @@ class LibraryRepository(
 
         /** Subsonic error code for "data not found". */
         const val NOT_FOUND_CODE = 70
+
+        /** A recording is looked up again once its last lookup is this old. */
+        const val DANCE_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000
 
         /** `lastModified` is truncated to whole seconds. */
         const val LAST_MODIFIED_PRECISION_MS = 1_000L

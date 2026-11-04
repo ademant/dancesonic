@@ -165,6 +165,22 @@ interface DanceMetadataDao {
 }
 
 @Dao
+interface DanceLookupDao {
+    /** The MBIDs among [mbids] that were looked up at or after [since]. */
+    @Query("SELECT mbid FROM dance_lookup WHERE mbid IN (:mbids) AND checkedAt >= :since")
+    suspend fun checkedSince(
+        mbids: List<String>,
+        since: Long,
+    ): List<String>
+
+    @Upsert
+    suspend fun upsert(row: DanceLookupEntity)
+
+    @Query("DELETE FROM dance_lookup")
+    suspend fun deleteAll()
+}
+
+@Dao
 interface PlaylistDao {
     @Query("SELECT * FROM playlist ORDER BY name COLLATE NOCASE")
     fun observeAll(): Flow<List<PlaylistEntity>>

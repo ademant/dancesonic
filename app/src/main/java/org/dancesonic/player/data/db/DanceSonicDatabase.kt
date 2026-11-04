@@ -12,10 +12,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AlbumEntity::class,
         TrackEntity::class,
         DanceMetadataEntity::class,
+        DanceLookupEntity::class,
         PlaylistEntity::class,
         PlaylistItemEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -27,6 +28,8 @@ abstract class DanceSonicDatabase : RoomDatabase() {
 
     abstract fun danceMetadataDao(): DanceMetadataDao
 
+    abstract fun danceLookupDao(): DanceLookupDao
+
     abstract fun playlistDao(): PlaylistDao
 
     abstract fun playlistItemDao(): PlaylistItemDao
@@ -34,6 +37,7 @@ abstract class DanceSonicDatabase : RoomDatabase() {
     companion object {
         fun create(context: Context): DanceSonicDatabase =
             Room.databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
+                .addMigrations(MIGRATION_1_2)
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addCallback(
                     object : RoomDatabase.Callback() {
