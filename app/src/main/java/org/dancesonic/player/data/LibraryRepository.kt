@@ -66,6 +66,7 @@ class LibraryRepository(
     private val danceSource: DanceMetadataSource,
     private val clock: () -> Long = System::currentTimeMillis,
     private val syncState: SyncStateStore? = null,
+    private val timings: SyncTimings = SyncTimings.None,
 ) {
     fun artists(): Flow<List<ArtistEntity>> = db.artistDao().observeAll()
 
@@ -93,13 +94,13 @@ class LibraryRepository(
     ): SyncResult =
         withContext(Dispatchers.IO) {
             val runStart = clock()
-            val checkpoint = changeCheckpoint(client)
+            val checkpoint = timed("checkpoint") { changeCheckpoint(client) }
 
-            val fetched = fetchCatalog(client, runStart, onProgress)
-            val rowsWritten = db.withTransaction { writeChangedRows(fetched) }
+            val fetched = timed("listing") { fetchCatalog(client, runStart, onProgress) }
+            val rowsWritten = timed("write") { db.withTransaction { writeChangedRows(fetched) } }
 
             saveSyncPoint(client, checkpoint)
-            val danceFailures = refreshDanceMetadata(db.trackDao().allMbids())
+            val danceFailures = timed("dance") { refreshDanceMetadata(db.trackDao().allMbids()) }
 
             SyncResult(
                 artists = fetched.artists.size,
@@ -179,6 +180,19 @@ class LibraryRepository(
                 db.danceLookupDao().deleteAll()
             }
         }
+
+    /** Runs [block] and reports how long it took, even when it fails. */
+    private suspend fun <T> timed(
+        phase: String,
+        block: suspend () -> T,
+    ): T {
+        val started = System.nanoTime()
+        try {
+            return block()
+        } finally {
+            timings.record(phase, (System.nanoTime() - started) / NANOS_PER_MILLI)
+        }
+    }
 
     /** Everything a full listing read, ready to be compared with the store. */
     private data class Fetched(
@@ -396,8 +410,8 @@ class LibraryRepository(
     ): Fetched =
         coroutineScope {
             val permits = Semaphore(MAX_PARALLEL_REQUESTS)
-            val artistNames = client.artists().associate { it.id to artistName(it.name) }
-            val albumStubs = client.allAlbums()
+            val artistNames = timed("index") { client.artists() }.associate { it.id to artistName(it.name) }
+            val albumStubs = timed("album-list") { client.allAlbums() }
 
             val known = albumStubs.filter { it.hasArtistIn(artistNames) }
             val done = AtomicInteger(0)
@@ -406,7 +420,9 @@ class LibraryRepository(
                 known.map { stub ->
                     async {
                         // The album list is the reliable source for the parent artist.
-                        val album = permits.withPermit { client.album(stub.id) }.copy(artistId = stub.artistId)
+                        val album =
+                            permits.withPermit { timed("album-request") { client.album(stub.id) } }
+                                .copy(artistId = stub.artistId)
                         onProgress(done.incrementAndGet(), known.size)
                         album
                     }
@@ -548,6 +564,8 @@ class LibraryRepository(
 
         /** Subsonic error code for "data not found". */
         const val NOT_FOUND_CODE = 70
+
+        const val NANOS_PER_MILLI = 1_000_000L
 
         /** A recording is looked up again once its last lookup is this old. */
         const val DANCE_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000

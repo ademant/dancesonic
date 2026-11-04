@@ -13,8 +13,10 @@ import kotlinx.coroutines.flow.onEach
 import okhttp3.OkHttpClient
 import org.dancesonic.player.dance.NoDanceMetadataSource
 import org.dancesonic.player.data.LibraryRepository
+import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
 import org.dancesonic.player.data.SyncStateStore
+import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.security.ServerSettingsStore
@@ -54,7 +56,13 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
     val syncState = SyncStateStore(dataStore)
 
-    val library = LibraryRepository(database, NoDanceMetadataSource, syncState = syncState)
+    val library =
+        LibraryRepository(
+            database,
+            NoDanceMetadataSource,
+            syncState = syncState,
+            timings = if (BuildConfig.DEBUG) LogcatSyncTimings() else SyncTimings.None,
+        )
     val playlists = PlaylistRepository(database)
 
     val player = PlayerController(context, appScope) { currentSettings }
