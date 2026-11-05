@@ -103,6 +103,23 @@ fun ConfigScreen(
                 )
                 ConnectionQr(current, danceUrl)
             }
+            Text("Library", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.sync() }, enabled = !state.busy) { Text("Refresh") }
+                OutlinedButton(onClick = { vm.sync(full = true) }, enabled = !state.busy) { Text("Full rebuild") }
+            }
+            TextButton(onClick = { vm.disconnect() }) { Text("Disconnect") }
+            if (state.busy) {
+                val progress = state.syncProgress
+                Text(
+                    if (progress == null || progress.total == 0) {
+                        "Syncing…"
+                    } else {
+                        "Syncing ${progress.done} of ${progress.total} albums…"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
 
         Text("Re-enter connection", style = MaterialTheme.typography.titleMedium)
