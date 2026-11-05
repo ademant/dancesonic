@@ -8,6 +8,7 @@ import org.dancesonic.player.dance.DanceMetadataSource
 import org.dancesonic.player.dance.RecordingDance
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.testsupport.TestSubsonicServer
+import org.dancesonic.player.testsupport.newTestSyncStateStore
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -125,6 +126,34 @@ class DanceLookupTest {
             assertEquals(listOf("rec-1"), source.lookedUp)
         }
 
+    @Test
+    fun `lookups from another source are dropped and looked up again within the maximum age`() =
+        runBlocking(Dispatchers.IO) {
+            // The source is recorded in the sync state, so a change of source is noticed only with one.
+            val withState =
+                LibraryRepository(
+                    db,
+                    source,
+                    clock = { now },
+                    syncState = newTestSyncStateStore(ApplicationProvider.getApplicationContext()),
+                )
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = 120, raters = 2))
+            // A sync with a state store asks for the extension list once; the client keeps the answer.
+            server.enqueueJson(NO_EXTENSIONS)
+            enqueueLibrary()
+            withState.sync(server.client)
+            source.key = "source-b"
+            source.answers = emptyMap()
+            enqueueLibrary()
+            now = 2_000L
+
+            withState.sync(server.client)
+
+            assertEquals(listOf("rec-1", "rec-1"), source.lookedUp)
+            assertEquals(emptyList<String>(), db.danceMetadataDao().danceTypesFor("rec-1"))
+            assertNull(db.danceLookupDao().bpmFor("rec-1"))
+        }
+
     private fun enqueueLibrary() {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
@@ -140,6 +169,10 @@ class DanceLookupTest {
         val lookedUp = mutableListOf<String>()
         var failNext = 0
         var answers: Map<String, RecordingDance> = emptyMap()
+        var key = "source-a"
+
+        override val sourceKey: String
+            get() = key
 
         override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> {
             lookedUp += mbids
@@ -159,6 +192,8 @@ class DanceLookupTest {
         const val ALBUM_LIST_ONE =
             """{"subsonic-response":{"status":"ok","albumList2":{"album":[{"id":"al-1","name":"Night",""" +
                 """"artistId":"ar-1","artist":"Ada","year":1999,"songCount":1,"duration":200}]}}}"""
+
+        const val NO_EXTENSIONS = """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[]}}"""
 
         const val EMPTY_ALBUM_LIST = """{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""
 

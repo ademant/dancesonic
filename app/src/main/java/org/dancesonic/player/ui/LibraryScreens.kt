@@ -35,7 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.ArtistEntity
 import org.dancesonic.player.data.db.DanceTypeCount
-import org.dancesonic.player.data.db.TrackEntity
+import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.playback.PlayerController
 
 /** Library hierarchy: Artist → Release → Track. Back navigates up one level. */
@@ -153,28 +153,28 @@ private fun AlbumList(
 
 @Composable
 private fun TrackList(
-    tracks: List<TrackEntity>,
+    tracks: List<TrackWithTempo>,
     onPlay: (Int) -> Unit,
     playlistVm: PlaylistViewModel,
 ) {
-    var addingTrack by remember { mutableStateOf<TrackEntity?>(null) }
+    var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
     if (tracks.isEmpty()) {
         EmptyHint("No tracks.")
         return
     }
     LazyColumn {
-        items(tracks, key = { it.id }) { track ->
+        items(tracks, key = { it.track.id }) { row ->
             TrackRow(
-                track = track,
-                onPlay = { onPlay(tracks.indexOf(track)) },
-                onAddToPlaylist = { addingTrack = track },
+                row = row,
+                onPlay = { onPlay(tracks.indexOf(row)) },
+                onAddToPlaylist = { addingTrack = row },
             )
         }
     }
-    addingTrack?.let { track ->
+    addingTrack?.let { row ->
         AddToPlaylistDialog(
             playlistVm = playlistVm,
-            trackId = track.id,
+            trackId = row.track.id,
             onDismiss = { addingTrack = null },
         )
     }
@@ -229,10 +229,11 @@ fun DanceScreen(
 
 @Composable
 private fun TrackRow(
-    track: TrackEntity,
+    row: TrackWithTempo,
     onPlay: () -> Unit,
     onAddToPlaylist: () -> Unit,
 ) {
+    val track = row.track
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -240,7 +241,8 @@ private fun TrackRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(track.title, style = MaterialTheme.typography.bodyLarge)
-            Text(track.artistName, style = MaterialTheme.typography.bodySmall)
+            val tempo = row.tempoBpm?.let { " · $it BPM" }.orEmpty()
+            Text(track.artistName + tempo, style = MaterialTheme.typography.bodySmall)
         }
         TextButton(onClick = onAddToPlaylist) { Text("+ Playlist") }
     }

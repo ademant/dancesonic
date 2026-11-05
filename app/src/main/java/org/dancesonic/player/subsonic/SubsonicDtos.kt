@@ -134,4 +134,15 @@ data class SongDto(
     val duration: Int? = null,
     /** OpenSubsonic extension: recording MusicBrainz ID. Optional; may be absent. */
     val musicBrainzId: String? = null,
+    /** Beats per minute from folksonic: from the file's tags or calculated. Absent when the file has none. */
+    val bpm: Int? = null,
+    /** OpenSubsonic ReplayGain values from folksonic. Absent when the file has none. */
+    val replayGain: ReplayGainDto? = null,
+)
+
+/** The OpenSubsonic replayGain object. Gains are in dB; peaks are linear. Each value is optional. */
+@Serializable
+data class ReplayGainDto(
+    val trackGain: Double? = null,
+    val trackPeak: Double? = null,
 )

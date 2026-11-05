@@ -65,7 +65,7 @@ class LibraryViewModelTest {
                 assertEquals(listOf("Night"), awaitItem().map { it.name })
             }
             vm.tracks("al-1").test {
-                assertEquals(listOf("One"), awaitItem().map { it.title })
+                assertEquals(listOf("One"), awaitItem().map { it.track.title })
             }
         }
 
@@ -83,7 +83,7 @@ class LibraryViewModelTest {
                 )
             }
             vm.tracksForDance("Waltz").test {
-                assertEquals(listOf("One"), awaitItem().map { it.title })
+                assertEquals(listOf("One"), awaitItem().map { it.track.title })
             }
         }
 

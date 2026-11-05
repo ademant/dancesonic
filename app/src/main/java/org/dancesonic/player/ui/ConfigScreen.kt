@@ -2,6 +2,7 @@ package org.dancesonic.player.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +13,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,9 +37,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
 import org.dancesonic.player.BuildConfig
 import org.dancesonic.player.account.ConnectionUri
-import org.dancesonic.player.dance.DanceBrainzClient
+import org.dancesonic.player.playback.TempoMode
 import org.dancesonic.player.subsonic.ServerSettings
 
 private const val MASKED_KEY = "••••••••"
@@ -44,18 +48,21 @@ private const val QR_PIXELS = 768
 private val QR_SIZE = 240.dp
 
 /**
- * App version, the stored connection and DanceBrainz settings. The API key stays masked until the user
+ * App version, the stored connection and the DanceBrainz server. The API key stays masked until the user
  * reveals it. A connection can be re-entered by hand or by scanning; both are checked with the server
- * before they replace the stored one.
+ * before they replace the stored one. The QR code carries the DanceBrainz server as well.
  */
 @Composable
 fun ConfigScreen(
     vm: ConnectViewModel,
+    danceVm: DanceBrainzViewModel,
+    playbackVm: PlaybackSettingsViewModel,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val settings by vm.settings.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
+    val danceUrl by danceVm.baseUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var revealKey by rememberSaveable { mutableStateOf(false) }
@@ -94,7 +101,7 @@ fun ConfigScreen(
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                ConnectionQr(current)
+                ConnectionQr(current, danceUrl)
             }
         }
 
@@ -125,14 +132,88 @@ fun ConfigScreen(
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Connect with this key") }
 
-        Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
-        Text("Server: ${DanceBrainzClient.DEFAULT_BASE_URL}")
+        state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (state.busy) {
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        }
+
+        PlaybackSection(playbackVm)
+
+        DanceBrainzSection(danceVm)
+    }
+}
+
+/** ReplayGain and the tempo control. Each choice is saved and applied to the player at once. */
+@Composable
+private fun PlaybackSection(playbackVm: PlaybackSettingsViewModel) {
+    val settings by playbackVm.settings.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Playback", style = MaterialTheme.typography.titleMedium)
+        Row(
+            Modifier.fillMaxWidth().clickable { playbackVm.setReplayGain(!settings.replayGain) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = settings.replayGain, onCheckedChange = null)
+            Text("Use ReplayGain when the track has it")
+        }
         Text(
-            "Dance types and tempo are looked up anonymously. No key is sent to DanceBrainz.",
+            "ReplayGain lowers loud tracks to a common level. It never raises quiet ones, " +
+                "and the phone volume stays under your control.",
             style = MaterialTheme.typography.bodySmall,
         )
+        Text("Tempo control", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = settings.tempoMode == TempoMode.Multiplier,
+                onClick = { playbackVm.setTempoMode(TempoMode.Multiplier) },
+                label = { Text("Multiplier") },
+            )
+            FilterChip(
+                selected = settings.tempoMode == TempoMode.Bpm,
+                onClick = { playbackVm.setTempoMode(TempoMode.Bpm) },
+                label = { Text("BPM") },
+            )
+        }
+        Text(
+            if (settings.tempoMode == TempoMode.Bpm) {
+                "The player bar sets a target BPM. A track with a known tempo plays at that BPM; " +
+                    "a track without one plays at the last multiplier."
+            } else {
+                "The player bar sets a multiplier. Every track plays at that speed."
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
 
-        state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+/** The DanceBrainz server: its address is checked, then saved, and the dance data is refreshed from it. */
+@Composable
+private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
+    val url by danceVm.baseUrl.collectAsStateWithLifecycle()
+    val state by danceVm.state.collectAsStateWithLifecycle()
+    var address by rememberSaveable { mutableStateOf(danceVm.baseUrl.value.toString()) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
+        Text("Server: $url")
+        Text(
+            "Dance types and tempo are looked up anonymously. No key is sent to DanceBrainz. " +
+                "Saving a different server replaces the dance data with the new server's.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        ServerAddressField(address) { address = it }
+        Button(
+            onClick = { danceVm.save(address) },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Save DanceBrainz server") }
+        OutlinedButton(
+            onClick = { danceVm.useDefault() },
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Use the public server") }
+        state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (state.busy) {
             CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
@@ -142,11 +223,17 @@ fun ConfigScreen(
 
 /** The connection as a QR code, rendered in memory for as long as it is composed. */
 @Composable
-private fun ConnectionQr(settings: ServerSettings) {
-    val bitmap = remember(settings) { QrCodes.bitmap(ConnectionUri.build(settings), QR_PIXELS).asImageBitmap() }
+private fun ConnectionQr(
+    settings: ServerSettings,
+    danceUrl: HttpUrl,
+) {
+    val bitmap =
+        remember(settings, danceUrl) {
+            QrCodes.bitmap(ConnectionUri.build(settings, danceUrl), QR_PIXELS).asImageBitmap()
+        }
     Image(
         bitmap = bitmap,
-        contentDescription = "QR code with the server address and API key",
+        contentDescription = "QR code with the server address, API key and DanceBrainz address",
         modifier = Modifier.size(QR_SIZE),
     )
 }

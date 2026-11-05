@@ -18,6 +18,8 @@ import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
+import org.dancesonic.player.dance.DanceBrainzClient
+import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.db.PlaylistItemRow
@@ -133,15 +135,15 @@ class ConnectViewModel(
             pairWithCode(rawCode)
             return
         }
-        // A connection code from another device carries the server address and key itself.
-        val settings =
+        // A connection code from another device carries the server addresses and key itself.
+        val shared =
             try {
                 ConnectionUri.parse(rawCode)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message)
                 return
             }
-        runConnect { settings }
+        runConnect(danceBrainz = shared.danceBrainz) { shared.server }
     }
 
     /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
@@ -219,17 +221,22 @@ class ConnectViewModel(
      * app container is updated asynchronously from the store. Nothing is stored or cleared until the
      * check passes, so a failed attempt leaves the current connection untouched.
      */
-    private fun runConnect(obtain: suspend () -> ServerSettings) {
+    private fun runConnect(
+        danceBrainz: HttpUrl? = null,
+        obtain: suspend () -> ServerSettings,
+    ) {
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
                 val settings = obtain()
                 SubsonicClient(settings).checkConnection()
+                danceBrainz?.let { DanceBrainzClient(it).checkServer() }
                 if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
                     container.library.clearCatalog()
                     container.syncState.clear()
                 }
                 container.settingsStore.save(settings)
+                danceBrainz?.let { container.danceBrainzSettings.save(it) }
                 _state.value = ConnectUiState()
                 runSync(settings, incremental = false)
             } catch (e: CancellationException) {
@@ -238,6 +245,8 @@ class ConnectViewModel(
                 _state.value = ConnectUiState(error = e.message)
             } catch (e: SubsonicException) {
                 _state.value = ConnectUiState(error = e.message ?: "Connection failed")
+            } catch (e: DanceBrainzException) {
+                _state.value = ConnectUiState(error = e.message)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message ?: "Invalid settings")
             }
@@ -328,9 +337,9 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     fun albums(artistId: String) = container.library.albums(artistId)
 
-    fun tracks(albumId: String) = container.library.tracks(albumId)
+    fun tracks(albumId: String) = container.library.tracksWithTempo(albumId)
 
-    fun tracksForDance(danceType: String) = container.library.tracksForDance(danceType)
+    fun tracksForDance(danceType: String) = container.library.tracksForDanceWithTempo(danceType)
 }
 
 /** Course playlists, stored on the device. */
@@ -384,7 +393,7 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
     fun playAll(playlistId: Long) {
         viewModelScope.launch {
             val ids = container.playlists.orderedTrackIds(playlistId)
-            val byId = container.library.tracks(ids).associateBy { it.id }
+            val byId = container.library.tracksWithTempoFor(ids).associateBy { it.track.id }
             container.player.play(ids.mapNotNull { byId[it] })
         }
     }

@@ -13,7 +13,11 @@ import org.junit.Test
 class QrCodesTest {
     @Test
     fun `connection code decodes back to the same text`() {
-        val text = ConnectionUri.build(ServerSettings(ServerUrl.parse("https://music.example.com/"), "key-abc123"))
+        val text =
+            ConnectionUri.build(
+                ServerSettings(ServerUrl.parse("https://music.example.com/"), "key-abc123"),
+                ServerUrl.parse("https://dance.example.com/"),
+            )
         val matrix = QrCodes.matrix(text, SIZE_PX)
         val pixels =
             IntArray(matrix.width * matrix.height) { index ->

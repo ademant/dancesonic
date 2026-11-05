@@ -13,14 +13,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import org.dancesonic.player.dance.DanceBrainzClient
+import org.dancesonic.player.dance.DanceBrainzSettingsStore
+import org.dancesonic.player.dance.DanceBrainzSource
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
+import org.dancesonic.player.playback.PlaybackSettings
+import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.ServerSettings
@@ -63,17 +68,37 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
     val syncState = SyncStateStore(dataStore)
 
+    /** The DanceBrainz address. Written only by [danceBrainzSettings]'s flow. */
+    @Volatile
+    var currentDanceBrainzUrl: HttpUrl = DanceBrainzClient.DEFAULT_BASE_URL
+        private set
+
+    val danceBrainzSettings = DanceBrainzSettingsStore(dataStore)
+
     val library =
         LibraryRepository(
             database,
-            DanceBrainzClient(),
+            DanceBrainzSource { currentDanceBrainzUrl },
             syncState = syncState,
             timings = if (BuildConfig.DEBUG) LogcatSyncTimings() else SyncTimings.None,
         )
     val playlists = PlaylistRepository(database)
 
+    /** The playback choices, kept in memory so the player reads them without waiting for the store. */
+    @Volatile
+    var currentPlaybackSettings: PlaybackSettings = PlaybackSettings()
+        private set
+
+    val playbackSettingsStore = PlaybackSettingsStore(dataStore)
+
     val player =
-        PlayerController(context, appScope, { currentSettings }, onTrackStarted = ::refreshPlayingTrack)
+        PlayerController(
+            context,
+            appScope,
+            { currentSettings },
+            playbackSettings = { currentPlaybackSettings },
+            onTrackStarted = ::refreshPlayingTrack,
+        )
 
     private var cachedCatalogClient: SubsonicClient? = null
 
@@ -109,6 +134,15 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     init {
         settingsStore.settings
             .onEach { currentSettings = it }
+            .launchIn(appScope)
+        danceBrainzSettings.baseUrl
+            .onEach { currentDanceBrainzUrl = it }
+            .launchIn(appScope)
+        playbackSettingsStore.settings
+            .onEach {
+                currentPlaybackSettings = it
+                player.settingsChanged()
+            }
             .launchIn(appScope)
     }
 }

@@ -18,7 +18,9 @@ import org.dancesonic.player.data.db.ArtistEntity
 import org.dancesonic.player.data.db.DanceLookupEntity
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.DanceTypeCount
+import org.dancesonic.player.data.db.TEMPO_RANGE
 import org.dancesonic.player.data.db.TrackEntity
+import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.subsonic.AlbumDto
 import org.dancesonic.player.subsonic.DeletedDto
 import org.dancesonic.player.subsonic.LibraryChangesDto
@@ -75,6 +77,16 @@ class LibraryRepository(
     fun tracks(albumId: String): Flow<List<TrackEntity>> = db.trackDao().observeByAlbum(albumId)
 
     fun tracksForDance(danceType: String): Flow<List<TrackEntity>> = db.trackDao().observeByDanceType(danceType)
+
+    /** Tracks of an album with their tempo: the server's tempo, or DanceBrainz's when the server has none. */
+    fun tracksWithTempo(albumId: String): Flow<List<TrackWithTempo>> = db.trackDao().observeByAlbumWithTempo(albumId)
+
+    /** Tracks by id with their tempo, for playing a playlist. */
+    suspend fun tracksWithTempoFor(ids: List<String>): List<TrackWithTempo> = db.trackDao().getAllWithTempo(ids)
+
+    /** Tracks of one dance type, with their tempo as in [tracksWithTempo]. */
+    fun tracksForDanceWithTempo(danceType: String): Flow<List<TrackWithTempo>> =
+        db.trackDao().observeByDanceTypeWithTempo(danceType)
 
     fun danceTypes(): Flow<List<DanceTypeCount>> = db.trackDao().observeDanceTypeCounts()
 
@@ -145,7 +157,8 @@ class LibraryRepository(
         withContext(Dispatchers.IO) {
             if (isUnchanged(client.libraryInfo().lastModified, since)) {
                 store.save(url, serverTime = null, checkedAt = clock())
-                unchangedResult()
+                // Nothing changed in the catalog, but DanceBrainz may have data for tracks not looked up yet.
+                unchangedResult(refreshAllDanceMetadata())
             } else {
                 val feed = client.libraryChanges(since)
                 if (feed.full) {
@@ -197,6 +210,9 @@ class LibraryRepository(
                     durationSec = song.duration,
                     mbid = song.musicBrainzId?.takeIf { it.isNotBlank() },
                     syncedAt = now,
+                    bpm = song.bpm?.takeIf { it in TEMPO_RANGE },
+                    trackGain = song.replayGain?.trackGain,
+                    trackPeak = song.replayGain?.trackPeak,
                 )
             val current = db.trackDao().get(songId) ?: stored
             if (current.copy(syncedAt = now) != fresh) {
@@ -286,12 +302,12 @@ class LibraryRepository(
         syncState?.save(client.settings.baseUrl.toString(), serverTime = serverTime, checkedAt = clock())
     }
 
-    private suspend fun unchangedResult(): SyncResult =
+    private suspend fun unchangedResult(danceFailures: Int): SyncResult =
         SyncResult(
             artists = db.artistDao().count(),
             albums = db.albumDao().count(),
             tracks = db.trackDao().count(),
-            danceLookupsFailed = 0,
+            danceLookupsFailed = danceFailures,
             skippedAlbums = 0,
             rowsWritten = 0,
             mode = SyncMode.Unchanged,
@@ -394,7 +410,7 @@ class LibraryRepository(
     ): SyncResult {
         val rowsWritten = db.withTransaction { writePatch(patch) }
         val songs = patch.albums.flatMap { it.second }
-        val danceFailures = refreshDanceMetadata(songs.mapNotNull { it.mbid }.distinct())
+        val danceFailures = refreshAllDanceMetadata()
         return SyncResult(
             artists = patch.artists.size,
             albums = patch.albums.size,
@@ -551,6 +567,9 @@ class LibraryRepository(
                     durationSec = it.duration,
                     mbid = it.musicBrainzId?.takeIf { mbid -> mbid.isNotBlank() },
                     syncedAt = runStart,
+                    bpm = it.bpm?.takeIf { bpm -> bpm in TEMPO_RANGE },
+                    trackGain = it.replayGain?.trackGain,
+                    trackPeak = it.replayGain?.trackPeak,
                 )
             }
         return album to songs
@@ -566,6 +585,28 @@ class LibraryRepository(
             ids.map { id -> async { permits.withPermit { fetchOrNull { fetch(id) } } } }.awaitAll().filterNotNull()
         }
 
+    /** Looks up every recording in the library that is due. Cheap when nothing is due. */
+    private suspend fun refreshAllDanceMetadata(): Int =
+        timed(
+            "dance",
+        ) { refreshDanceMetadata(db.trackDao().allMbids()) }
+
+    /**
+     * Drops the stored lookups when they came from another source than the current one, including the
+     * placeholder source of earlier builds. Their "checked" marks would otherwise keep the data from being
+     * fetched for 30 days.
+     */
+    private suspend fun dropLookupsFromOtherSource() {
+        val store = syncState ?: return
+        val current = danceSource.sourceKey
+        if (store.danceSource() == current) return
+        db.withTransaction {
+            db.danceMetadataDao().deleteAll()
+            db.danceLookupDao().deleteAll()
+        }
+        store.saveDanceSource(current)
+    }
+
     /**
      * Looks up DanceBrainz data for the recordings in [mbids] that were not checked within
      * [DANCE_MAX_AGE_MILLIS], in batches of [DanceMetadataSource.MAX_BATCH_SIZE]. Every recording in a
@@ -574,7 +615,9 @@ class LibraryRepository(
      * retried next time. Returns the number of recordings in failed batches. Batches after the server's
      * burst allowance wait between requests, so a large library is not refused.
      */
+
     private suspend fun refreshDanceMetadata(mbids: List<String>): Int {
+        dropLookupsFromOtherSource()
         val now = clock()
         val fresh =
             mbids.chunked(WRITE_BATCH_SIZE).flatMapTo(mutableSetOf()) {

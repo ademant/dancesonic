@@ -3,14 +3,18 @@ package org.dancesonic.player.dance
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -24,6 +28,28 @@ class DanceBrainzClient internal constructor(
         baseUrl: HttpUrl = DEFAULT_BASE_URL,
         client: OkHttpClient = defaultHttpClient(),
     ) : this(serviceFor(baseUrl, client))
+
+    /**
+     * Confirms that the address is a DanceBrainz server. Any failure is reported as [DanceBrainzException] with a
+     * message for the user, so the caller does not need to know about HTTP or JSON errors.
+     */
+    suspend fun checkServer() {
+        val info = answerOrThrow { service.info() }
+        if (info.service != SERVICE_NAME) {
+            throw DanceBrainzException("This address is not a DanceBrainz server")
+        }
+    }
+
+    private suspend fun <T> answerOrThrow(block: suspend () -> T): T =
+        try {
+            block()
+        } catch (e: IOException) {
+            throw DanceBrainzException("Could not reach DanceBrainz: ${e.message ?: "no answer"}", e)
+        } catch (e: HttpException) {
+            throw DanceBrainzException("DanceBrainz answered with HTTP ${e.code()}", e)
+        } catch (e: SerializationException) {
+            throw DanceBrainzException("This address does not answer like a DanceBrainz server", e)
+        }
 
     override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> {
         require(mbids.size <= DanceMetadataSource.MAX_BATCH_SIZE) { "A lookup takes at most 500 recordings" }
@@ -41,6 +67,9 @@ class DanceBrainzClient internal constructor(
     companion object {
         /** The public DanceBrainz server. */
         val DEFAULT_BASE_URL: HttpUrl = "https://dancebrainz.balfolk.social/".toHttpUrl()
+
+        /** Name the server reports in its root answer. */
+        const val SERVICE_NAME = "dancebrainz"
 
         /** The tag type that holds dance names. */
         const val DANCE_TAG_TYPE = "dance"
@@ -90,11 +119,25 @@ class DanceBrainzClient internal constructor(
 
 /** Retrofit endpoint, relative to the DanceBrainz base URL. */
 internal interface DanceBrainzService {
+    @GET("api/v1/")
+    suspend fun info(): ServiceInfoDto
+
     @POST("api/v1/recordings/lookup")
     suspend fun lookup(
         @Body body: LookupRequestDto,
     ): LookupResponseDto
 }
+
+@Serializable
+internal data class ServiceInfoDto(
+    val service: String = "",
+)
+
+/** A DanceBrainz server could not be used. The message is for the user. */
+class DanceBrainzException(
+    message: String,
+    cause: Throwable? = null,
+) : IOException(message, cause)
 
 @Serializable
 internal data class LookupRequestDto(
