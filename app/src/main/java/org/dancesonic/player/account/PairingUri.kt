@@ -41,7 +41,8 @@ object PairingUri {
         return PairingRequest(server = ServerUrl.parse(server), token = token)
     }
 
-    private fun parseQuery(rawQuery: String): Map<String, String> =
+    /** Splits and percent-decodes a query string. Shared with [ConnectionUri]. */
+    internal fun parseQuery(rawQuery: String): Map<String, String> =
         rawQuery.split('&')
             .filter { it.isNotEmpty() }
             .associate { pair ->

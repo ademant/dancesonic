@@ -45,6 +45,7 @@ fun LibraryScreen(
     player: PlayerController,
     playlistVm: PlaylistViewModel,
     connectVm: ConnectViewModel,
+    onOpenConfig: () -> Unit = {},
 ) {
     var artistId by rememberSaveable { mutableStateOf<String?>(null) }
     var albumId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -55,7 +56,7 @@ fun LibraryScreen(
     BackHandler(enabled = openAlbum == null && openArtist != null) { artistId = null }
 
     Column(Modifier.fillMaxSize()) {
-        LibraryToolbar(connectVm)
+        LibraryToolbar(connectVm, onOpenConfig)
         HorizontalDivider()
         when {
             openAlbum != null -> {
@@ -79,7 +80,10 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun LibraryToolbar(connectVm: ConnectViewModel) {
+private fun LibraryToolbar(
+    connectVm: ConnectViewModel,
+    onOpenConfig: () -> Unit,
+) {
     val state by connectVm.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { connectVm.checkForChanges() }
     Column(Modifier.fillMaxWidth().padding(8.dp)) {
@@ -92,6 +96,10 @@ private fun LibraryToolbar(connectVm: ConnectViewModel) {
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { connectVm.disconnect() }) { Text("Disconnect") }
             }
+        }
+        // Own row: the title row has no room for a fourth button at phone width.
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onOpenConfig) { Text("Config") }
         }
         if (state.busy) {
             val progress = state.syncProgress

@@ -176,6 +176,10 @@ interface DanceLookupDao {
     @Upsert
     suspend fun upsert(row: DanceLookupEntity)
 
+    /** The stored tempo of one recording, or null when none was reported or it was never looked up. */
+    @Query("SELECT bpm FROM dance_lookup WHERE mbid = :mbid")
+    suspend fun bpmFor(mbid: String): Int?
+
     @Query("DELETE FROM dance_lookup")
     suspend fun deleteAll()
 }

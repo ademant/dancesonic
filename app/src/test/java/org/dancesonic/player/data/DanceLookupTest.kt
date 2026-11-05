@@ -5,10 +5,12 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.dancesonic.player.dance.DanceMetadataSource
+import org.dancesonic.player.dance.RecordingDance
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -84,6 +86,45 @@ class DanceLookupTest {
             assertEquals(2, source.lookedUp.size)
         }
 
+    @Test
+    fun `dance types and tempo from an answer are stored, and the tempo is kept with the lookup`() =
+        runBlocking(Dispatchers.IO) {
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte", "Gavotte"), bpm = 118, raters = 4))
+            enqueueLibrary()
+
+            repo.sync(server.client)
+
+            assertEquals(listOf("Gavotte"), db.danceMetadataDao().danceTypesFor("rec-1"))
+            assertEquals(118, db.danceLookupDao().bpmFor("rec-1"))
+        }
+
+    @Test
+    fun `a recording answered without dance tags loses its old dance types`() =
+        runBlocking(Dispatchers.IO) {
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = null, raters = null))
+            enqueueLibrary()
+            repo.sync(server.client)
+            source.answers = mapOf("rec-1" to RecordingDance(emptyList(), bpm = null, raters = null))
+            enqueueLibrary()
+            now = 1_000L + 30L * 24 * 60 * 60 * 1000 + 1
+
+            repo.sync(server.client)
+
+            assertEquals(emptyList<String>(), db.danceMetadataDao().danceTypesFor("rec-1"))
+        }
+
+    @Test
+    fun `a recording the server does not answer for is recorded as checked with no tempo`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueLibrary()
+
+            repo.sync(server.client)
+
+            assertNull(db.danceLookupDao().bpmFor("rec-1"))
+            assertEquals(emptyList<String>(), db.danceMetadataDao().danceTypesFor("rec-1"))
+            assertEquals(listOf("rec-1"), source.lookedUp)
+        }
+
     private fun enqueueLibrary() {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
@@ -91,18 +132,22 @@ class DanceLookupTest {
         server.enqueueSongsOf(ALBUM_WITH_MBID)
     }
 
-    /** Records each lookup. Returns no information, and fails the first [failNext] lookups. */
+    /**
+     * Records each looked-up recording. Answers with [answers] for the requested ids, and fails the first
+     * [failNext] batches.
+     */
     private class CountingSource : DanceMetadataSource {
         val lookedUp = mutableListOf<String>()
         var failNext = 0
+        var answers: Map<String, RecordingDance> = emptyMap()
 
-        override suspend fun danceTypesFor(mbid: String): List<String>? {
-            lookedUp += mbid
+        override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> {
+            lookedUp += mbids
             if (failNext > 0) {
                 failNext--
                 throw IOException("DanceBrainz unreachable")
             }
-            return null
+            return answers.filterKeys { it in mbids }
         }
     }
 

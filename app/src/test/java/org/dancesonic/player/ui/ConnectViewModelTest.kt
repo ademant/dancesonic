@@ -66,6 +66,16 @@ class ConnectViewModelTest {
     }
 
     @Test
+    fun `scanned connection code over plain http is rejected before any network call`() {
+        val vm = host.create { ConnectViewModel(container) }
+
+        vm.connectFromScan("dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123")
+
+        assertEquals("The server address must start with https://", vm.state.value.error)
+        assertFalse(vm.state.value.busy)
+    }
+
+    @Test
     fun `refresh without saved settings explains why nothing happens`() {
         val vm = host.create { ConnectViewModel(container) }
 

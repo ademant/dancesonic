@@ -4,9 +4,25 @@ import android.content.Context
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+/**
+ * Scans a code and connects with it. A cancelled scan does nothing. Play services reports scanner failures
+ * without a common exception type, so any other failure reads as "not available".
+ */
+@Suppress("TooGenericExceptionCaught", "SwallowedException")
+suspend fun ConnectViewModel.scanAndConnect(context: Context) {
+    try {
+        scanQrCode(context.applicationContext)?.let { connectFromScan(it) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        reportError("The code scanner is not available on this device.")
+    }
+}
 
 /**
  * Opens the Google code scanner (runs in Play services, so the app needs no camera permission).

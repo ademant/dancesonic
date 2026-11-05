@@ -76,6 +76,7 @@ dependencies {
     implementation(libs.retrofit.kotlinx.serialization.converter)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.code.scanner)
+    implementation(libs.zxing.core)
     implementation(libs.serialization.json)
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)

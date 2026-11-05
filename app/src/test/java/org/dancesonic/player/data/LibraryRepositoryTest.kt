@@ -11,6 +11,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.RecordedRequest
 import org.dancesonic.player.dance.DanceMetadataSource
 import org.dancesonic.player.dance.NoDanceMetadataSource
+import org.dancesonic.player.dance.RecordingDance
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.testsupport.TestSubsonicServer
@@ -106,8 +107,14 @@ class LibraryRepositoryTest {
             enqueueSmallLibrary()
             val source =
                 object : DanceMetadataSource {
-                    override suspend fun danceTypesFor(mbid: String): List<String>? =
-                        if (mbid == "rec-mbid-1") listOf("Waltz") else null
+                    override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> =
+                        if ("rec-mbid-1" in mbids) {
+                            mapOf(
+                                "rec-mbid-1" to RecordingDance(listOf("Waltz"), null, null),
+                            )
+                        } else {
+                            emptyMap()
+                        }
                 }
             val repo = LibraryRepository(db, source, clock = { 1_000L })
 
@@ -125,7 +132,8 @@ class LibraryRepositoryTest {
             enqueueSmallLibrary()
             val failing =
                 object : DanceMetadataSource {
-                    override suspend fun danceTypesFor(mbid: String): List<String>? = error("network down")
+                    override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> =
+                        error("network down")
                 }
             val repo = LibraryRepository(db, failing, clock = { 1_000L })
 
