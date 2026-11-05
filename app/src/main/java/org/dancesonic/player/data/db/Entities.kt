@@ -62,6 +62,8 @@ data class TrackEntity(
     val trackGain: Double? = null,
     /** ReplayGain track peak, linear. Null when the file has none. */
     val trackPeak: Double? = null,
+    /** Size of the audio file in bytes, from the server. Null when unknown; the cache then cannot tell a full file. */
+    val sizeBytes: Long? = null,
 )
 
 /** Tempos outside this range are not stored. DanceBrainz accepts exactly this range. */

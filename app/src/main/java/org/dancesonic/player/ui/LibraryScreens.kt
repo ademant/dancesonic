@@ -6,18 +6,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -84,37 +81,14 @@ private fun LibraryToolbar(
     connectVm: ConnectViewModel,
     onOpenConfig: () -> Unit,
 ) {
-    val state by connectVm.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { connectVm.checkForChanges() }
-    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Library", style = MaterialTheme.typography.titleMedium)
-            Row {
-                OutlinedButton(onClick = { connectVm.sync() }, enabled = !state.busy) { Text("Refresh") }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { connectVm.sync(full = true) }, enabled = !state.busy) { Text("Full rebuild") }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { connectVm.disconnect() }) { Text("Disconnect") }
-            }
-        }
-        // Own row: the title row has no room for a fourth button at phone width.
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onOpenConfig) { Text("Config") }
-        }
-        if (state.busy) {
-            val progress = state.syncProgress
-            val text =
-                if (progress == null || progress.total == 0) {
-                    "Syncing…"
-                } else {
-                    "Syncing ${progress.done} of ${progress.total} albums…"
-                }
-            Text(text, style = MaterialTheme.typography.bodySmall)
-        }
-        state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        state.error?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
+    Row(
+        Modifier.fillMaxWidth().padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text("Library", style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = onOpenConfig) { Text("Config") }
     }
 }
 

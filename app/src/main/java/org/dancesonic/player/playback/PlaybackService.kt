@@ -23,7 +23,14 @@ class PlaybackService : MediaSessionService() {
         // by the interceptor, so media items carry no secrets.
         val mediaSourceFactory =
             DefaultMediaSourceFactory(this)
-                .setDataSourceFactory(OkHttpDataSource.Factory(container.httpClient))
+                .setDataSourceFactory(
+                    container.audioCache.dataSourceFactory(
+                        StreamDataSource.Factory(
+                            OkHttpDataSource.Factory(container.httpClient),
+                            sizeOf = container.streamLengths::sizeOf,
+                        ),
+                    ),
+                )
         val player =
             ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)

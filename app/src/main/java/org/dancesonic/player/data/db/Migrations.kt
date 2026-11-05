@@ -46,3 +46,17 @@ val MIGRATION_4_5 =
             db.execSQL("ALTER TABLE `track` ADD COLUMN `trackPeak` REAL")
         }
     }
+
+/**
+ * Adds the file size of each track. The audio cache needs it to recognise a complete file. Existing tracks get
+ * none until a full rebuild.
+ */
+val MIGRATION_5_6 =
+    object : Migration(FROM_5, TO_6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `track` ADD COLUMN `sizeBytes` INTEGER")
+        }
+    }
+
+private const val FROM_5 = 5
+private const val TO_6 = 6
