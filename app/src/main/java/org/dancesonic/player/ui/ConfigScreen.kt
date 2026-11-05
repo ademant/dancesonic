@@ -36,6 +36,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.dancesonic.player.BuildConfig
 import org.dancesonic.player.account.ConnectionUri
+import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.subsonic.ServerSettings
 
 private const val MASKED_KEY = "••••••••"
@@ -125,7 +126,11 @@ fun ConfigScreen(
         ) { Text("Connect with this key") }
 
         Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
-        Text("Not configured.")
+        Text("Server: ${DanceBrainzClient.DEFAULT_BASE_URL}")
+        Text(
+            "Dance types and tempo are looked up anonymously. No key is sent to DanceBrainz.",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

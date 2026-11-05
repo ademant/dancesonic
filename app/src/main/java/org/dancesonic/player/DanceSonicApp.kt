@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import org.dancesonic.player.dance.NoDanceMetadataSource
+import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
@@ -66,7 +66,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     val library =
         LibraryRepository(
             database,
-            NoDanceMetadataSource,
+            DanceBrainzClient(),
             syncState = syncState,
             timings = if (BuildConfig.DEBUG) LogcatSyncTimings() else SyncTimings.None,
         )

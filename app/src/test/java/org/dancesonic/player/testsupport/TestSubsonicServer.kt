@@ -23,6 +23,9 @@ class TestSubsonicServer : AutoCloseable {
     val settings: ServerSettings
     val client: SubsonicClient
 
+    /** Trusts the test certificate and adds nothing to requests. Use for endpoints without an API key. */
+    val plain: OkHttpClient
+
     /** Trusts the test certificate; use for non-Subsonic endpoints such as the account API. */
     val http: OkHttpClient
 
@@ -38,11 +41,11 @@ class TestSubsonicServer : AutoCloseable {
 
         settings = ServerSettings(server.url("/"), "test-api-key")
         val trust = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
-        http =
+        plain =
             OkHttpClient.Builder()
                 .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
-                .addInterceptor(ApiKeyInterceptor { settings })
                 .build()
+        http = plain.newBuilder().addInterceptor(ApiKeyInterceptor { settings }).build()
         client = SubsonicClient(settings, SubsonicHttp.service(settings.baseUrl, http))
     }
 

@@ -69,11 +69,16 @@ data class DanceMetadataEntity(
     val fetchedAt: Long,
 )
 
-/** When each recording was last looked up in DanceBrainz, including lookups that found nothing. */
+/**
+ * When each recording was last looked up in DanceBrainz, including lookups that found nothing, and the
+ * public tempo that lookup returned. [bpm] is null when nobody has reported a tempo.
+ */
 @Entity(tableName = "dance_lookup")
 data class DanceLookupEntity(
     @PrimaryKey val mbid: String,
     val checkedAt: Long,
+    val bpm: Int? = null,
+    val raters: Int? = null,
 )
 
 @Entity(tableName = "playlist")

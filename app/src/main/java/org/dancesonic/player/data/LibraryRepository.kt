@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -566,44 +567,53 @@ class LibraryRepository(
         }
 
     /**
-     * Looks up DanceBrainz types for the recordings in [mbids] that were not checked within
-     * [DANCE_MAX_AGE_MILLIS]. A recording with no information is recorded too, so it is not asked again
-     * every sync. A failed lookup records nothing and is retried next time. Returns the number of
-     * failed lookups; previously cached types are kept.
+     * Looks up DanceBrainz data for the recordings in [mbids] that were not checked within
+     * [DANCE_MAX_AGE_MILLIS], in batches of [DanceMetadataSource.MAX_BATCH_SIZE]. Every recording in a
+     * batch that got an answer is recorded, so it is not asked again every sync; one the server did not
+     * answer for is recorded with no dance types and no tempo. A failed batch records nothing and is
+     * retried next time. Returns the number of recordings in failed batches. Batches after the server's
+     * burst allowance wait between requests, so a large library is not refused.
      */
+    private suspend fun refreshDanceMetadata(mbids: List<String>): Int {
+        val now = clock()
+        val fresh =
+            mbids.chunked(WRITE_BATCH_SIZE).flatMapTo(mutableSetOf()) {
+                db.danceLookupDao().checkedSince(it, since = now - DANCE_MAX_AGE_MILLIS)
+            }
+        val due = mbids.distinct().filter { it !in fresh }
+        var failed = 0
+        due.chunked(DanceMetadataSource.MAX_BATCH_SIZE).forEachIndexed { index, batch ->
+            if (index >= DANCE_BURST_BATCHES) delay(DANCE_BATCH_INTERVAL_MILLIS)
+            failed += lookupDanceBatch(batch, now)
+        }
+        return failed
+    }
+
+    /** Returns how many recordings of [batch] failed (0 on success). */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
-    private suspend fun refreshDanceMetadata(mbids: List<String>): Int =
-        coroutineScope {
-            val now = clock()
-            val fresh =
-                mbids.chunked(WRITE_BATCH_SIZE).flatMapTo(mutableSetOf()) {
-                    db.danceLookupDao().checkedSince(it, since = now - DANCE_MAX_AGE_MILLIS)
-                }
-            val due = mbids.distinct().filter { it !in fresh }
-            val permits = Semaphore(MAX_PARALLEL_REQUESTS)
-            val results =
-                due.map { mbid ->
-                    async {
-                        permits.withPermit {
-                            try {
-                                val types = danceSource.danceTypesFor(mbid)
-                                db.withTransaction {
-                                    if (types != null) {
-                                        db.danceMetadataDao().replaceFor(mbid, types.distinct().sorted(), now)
-                                    }
-                                    db.danceLookupDao().upsert(DanceLookupEntity(mbid, checkedAt = now))
-                                }
-                                false
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                // Counted and reported; nothing is recorded, so the next sync retries it.
-                                true
-                            }
-                        }
+    private suspend fun lookupDanceBatch(
+        batch: List<String>,
+        now: Long,
+    ): Int =
+        try {
+            val answers = danceSource.lookup(batch)
+            db.withTransaction {
+                batch.forEach { mbid ->
+                    val answer = answers[mbid]
+                    if (answer != null) {
+                        db.danceMetadataDao().replaceFor(mbid, answer.danceTypes.distinct().sorted(), now)
                     }
+                    db.danceLookupDao().upsert(
+                        DanceLookupEntity(mbid, checkedAt = now, bpm = answer?.bpm, raters = answer?.raters),
+                    )
                 }
-            results.count { it.await() }
+            }
+            0
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Counted and reported; nothing is recorded for this batch, so the next sync retries it.
+            batch.size
         }
 
     /** Null when the server no longer has the item: it changed and was removed within one snapshot. */
@@ -630,6 +640,11 @@ class LibraryRepository(
 
         /** A recording is looked up again once its last lookup is this old. */
         const val DANCE_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000
+
+        /** DanceBrainz allows a burst of 10 lookup requests, then one every 2 seconds per client address. */
+        const val DANCE_BURST_BATCHES = 10
+
+        const val DANCE_BATCH_INTERVAL_MILLIS = 2_000L
 
         /** `lastModified` is truncated to whole seconds. */
         const val LAST_MODIFIED_PRECISION_MS = 1_000L
