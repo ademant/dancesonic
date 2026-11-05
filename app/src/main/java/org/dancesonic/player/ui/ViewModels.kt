@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -15,6 +16,7 @@ import okhttp3.HttpUrl
 import org.dancesonic.player.AppContainer
 import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
+import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
@@ -50,6 +52,15 @@ internal fun refreshBlockedReason(settings: ServerSettings?): String? =
     if (settings == null) "Not connected to a server. Connect again to sync." else null
 
 /**
+ * Whether replacing [previous] with [next] points the app at another server. The synced catalog and the
+ * sync point belong to one server, so they are cleared then. A new API key for the same server keeps them.
+ */
+internal fun connectionChangesServer(
+    previous: ServerSettings?,
+    next: ServerSettings,
+): Boolean = previous?.baseUrl != next.baseUrl
+
+/**
  * Connection setup and catalog sync. Three ways in: a pairing QR code, a username and password
  * (exchanged for an API key), or an API key typed in. Every path ends with the same check and
  * only the API key is stored.
@@ -58,8 +69,13 @@ class ConnectViewModel(
     private val container: AppContainer,
     private val account: AccountClient = AccountClient(),
 ) : ViewModel() {
-    val connected: StateFlow<Boolean> =
+    /** The stored connection, or null when not connected. The API key is included, so do not display it unmasked. */
+    val settings: StateFlow<ServerSettings?> =
         container.settingsStore.settings
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val connected: StateFlow<Boolean> =
+        settings
             .map { it != null }
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
@@ -106,6 +122,26 @@ class ConnectViewModel(
                 }
             ServerSettings(url, key)
         }
+    }
+
+    /**
+     * Handles any code the scanner reads: a connection code from another device, or a pairing code from the
+     * server's account page. Both are verified before they replace the stored connection.
+     */
+    fun connectFromScan(rawCode: String) {
+        if (!ConnectionUri.isConnectionCode(rawCode)) {
+            pairWithCode(rawCode)
+            return
+        }
+        // A connection code from another device carries the server address and key itself.
+        val settings =
+            try {
+                ConnectionUri.parse(rawCode)
+            } catch (e: IllegalArgumentException) {
+                _state.value = ConnectUiState(error = e.message)
+                return
+            }
+        runConnect { settings }
     }
 
     /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
@@ -180,7 +216,8 @@ class ConnectViewModel(
     /**
      * Runs [obtain] to get settings, verifies them against the server, stores them and starts the
      * first sync. The sync uses the verified settings directly, because the in-memory copy in the
-     * app container is updated asynchronously from the store.
+     * app container is updated asynchronously from the store. Nothing is stored or cleared until the
+     * check passes, so a failed attempt leaves the current connection untouched.
      */
     private fun runConnect(obtain: suspend () -> ServerSettings) {
         _state.value = ConnectUiState(busy = true)
@@ -188,9 +225,13 @@ class ConnectViewModel(
             try {
                 val settings = obtain()
                 SubsonicClient(settings).checkConnection()
+                if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
+                    container.library.clearCatalog()
+                    container.syncState.clear()
+                }
                 container.settingsStore.save(settings)
                 _state.value = ConnectUiState()
-                startSync(settings)
+                runSync(settings, incremental = false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: AccountException) {
@@ -219,8 +260,6 @@ class ConnectViewModel(
             }
         }
     }
-
-    private fun startSync(settings: ServerSettings) = runSync(settings, incremental = false)
 
     /**
      * An incremental sync asks the server for changes and fetches only those; without a saved sync point

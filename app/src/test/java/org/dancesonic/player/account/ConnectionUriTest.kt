@@ -1,0 +1,68 @@
+package org.dancesonic.player.account
+
+import org.dancesonic.player.subsonic.ServerSettings
+import org.dancesonic.player.subsonic.ServerUrl
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ConnectionUriTest {
+    private val settings =
+        ServerSettings(ServerUrl.parse("https://music.example.com/navidrome/"), "key with spaces+&=")
+
+    @Test
+    fun `round trip keeps the server address and the key`() {
+        val parsed = ConnectionUri.parse(ConnectionUri.build(settings))
+
+        assertEquals(settings.baseUrl, parsed.baseUrl)
+        assertEquals(settings.apiKey, parsed.apiKey)
+    }
+
+    @Test
+    fun `built code has the connection scheme`() {
+        assertTrue(ConnectionUri.isConnectionCode(ConnectionUri.build(settings)))
+    }
+
+    @Test
+    fun `pairing code is not a connection code`() {
+        val pairing = "tinysonic://pair?server=https%3A%2F%2Fmusic.example.com%2F&token=abcdefgh12345678"
+
+        assertFalse(ConnectionUri.isConnectionCode(pairing))
+        assertFailsWithMessage("This is not a connection code.") { ConnectionUri.parse(pairing) }
+    }
+
+    @Test
+    fun `plain http server address is rejected`() {
+        val code = "dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123"
+
+        assertFailsWithMessage("The server address must start with https://") { ConnectionUri.parse(code) }
+    }
+
+    @Test
+    fun `code without a key is rejected`() {
+        val code = "dancesonic://connect?server=https%3A%2F%2Fmusic.example.com%2F"
+
+        assertFailsWithMessage("The connection code has no API key.") { ConnectionUri.parse(code) }
+    }
+
+    @Test
+    fun `code without a server is rejected`() {
+        assertFailsWithMessage("The connection code has no server.") {
+            ConnectionUri.parse("dancesonic://connect?key=key-123")
+        }
+    }
+
+    private fun assertFailsWithMessage(
+        expected: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: IllegalArgumentException) {
+            assertEquals(expected, e.message)
+            return
+        }
+        throw AssertionError("Expected IllegalArgumentException: $expected")
+    }
+}

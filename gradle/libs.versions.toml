@@ -20,6 +20,7 @@ datastore = "1.1.7"
 retrofit = "2.11.0"
 retrofitSerializationConverter = "1.0.0"
 playServicesCodeScanner = "16.1.0"
+zxing = "3.5.3"
 detekt = "1.23.8"
 ktlint = "12.3.0"
 turbine = "1.2.1"
@@ -57,6 +58,7 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-kotlinx-serialization-converter = { group = "com.jakewharton.retrofit", name = "retrofit2-kotlinx-serialization-converter", version.ref = "retrofitSerializationConverter" }
 play-services-code-scanner = { group = "com.google.android.gms", name = "play-services-code-scanner", version.ref = "playServicesCodeScanner" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 
 [plugins]

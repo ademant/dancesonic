@@ -40,7 +40,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.dancesonic.player.AppContainer
 import org.dancesonic.player.playback.PlayerController
@@ -62,6 +61,7 @@ fun DanceSonicRoot(container: AppContainer) {
     }
 
     var tab by rememberSaveable { mutableStateOf(Tab.Library) }
+    var showConfig by rememberSaveable { mutableStateOf(false) }
     val libraryVm: LibraryViewModel = viewModel { LibraryViewModel(container) }
     val playlistVm: PlaylistViewModel = viewModel { PlaylistViewModel(container) }
 
@@ -84,10 +84,21 @@ fun DanceSonicRoot(container: AppContainer) {
         },
     ) { padding ->
         Surface(Modifier.padding(padding).fillMaxWidth()) {
-            when (tab) {
-                Tab.Library -> LibraryScreen(libraryVm, container.player, playlistVm, connectVm)
-                Tab.Dance -> DanceScreen(libraryVm, container.player, playlistVm)
-                Tab.Playlists -> PlaylistsScreen(playlistVm)
+            if (showConfig) {
+                ConfigScreen(connectVm, onBack = { showConfig = false })
+            } else {
+                when (tab) {
+                    Tab.Library ->
+                        LibraryScreen(
+                            libraryVm,
+                            container.player,
+                            playlistVm,
+                            connectVm,
+                            onOpenConfig = { showConfig = true },
+                        )
+                    Tab.Dance -> DanceScreen(libraryVm, container.player, playlistVm)
+                    Tab.Playlists -> PlaylistsScreen(playlistVm)
+                }
             }
         }
     }
@@ -99,8 +110,6 @@ private enum class ConnectMethod(val label: String) {
     ApiKey("API key"),
 }
 
-// Play services reports scanner failures without a common exception type, so any failure reads as "not available".
-@Suppress("TooGenericExceptionCaught", "SwallowedException")
 @Composable
 fun ConnectScreen(vm: ConnectViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -135,17 +144,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Button(
-                    onClick = {
-                        scope.launch {
-                            try {
-                                scanQrCode(context.applicationContext)?.let { vm.pairWithCode(it) }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                vm.reportError("The code scanner is not available on this device.")
-                            }
-                        }
-                    },
+                    onClick = { scope.launch { vm.scanAndConnect(context) } },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Scan pairing code") }
@@ -212,7 +211,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
 }
 
 @Composable
-private fun ServerAddressField(
+internal fun ServerAddressField(
     value: String,
     onChange: (String) -> Unit,
 ) {
