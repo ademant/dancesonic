@@ -194,6 +194,7 @@ class ConnectViewModel(
             }
             container.library.clearCatalog()
             container.syncState.clear()
+            container.audioCache.clear()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
         }
@@ -234,6 +235,7 @@ class ConnectViewModel(
                 if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
                     container.library.clearCatalog()
                     container.syncState.clear()
+                    container.audioCache.clear()
                 }
                 container.settingsStore.save(settings)
                 danceBrainz?.let { container.danceBrainzSettings.save(it) }

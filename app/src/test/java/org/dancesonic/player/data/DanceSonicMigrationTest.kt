@@ -7,6 +7,7 @@ import org.dancesonic.player.data.db.MIGRATION_1_2
 import org.dancesonic.player.data.db.MIGRATION_2_3
 import org.dancesonic.player.data.db.MIGRATION_3_4
 import org.dancesonic.player.data.db.MIGRATION_4_5
+import org.dancesonic.player.data.db.MIGRATION_5_6
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -144,6 +145,38 @@ class DanceSonicMigrationTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(-5.5, cursor.getDouble(0), 1e-9)
                 assertEquals(0.97, cursor.getDouble(1), 1e-9)
+            }
+        }
+    }
+
+    @Test
+    fun `migration 5 to 6 adds the file size to tracks`() {
+        val config =
+            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+                .name(null)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(1) {
+                        override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+
+                        override fun onUpgrade(
+                            db: androidx.sqlite.db.SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                ).build()
+        val helper = FrameworkSQLiteOpenHelperFactory().create(config)
+        helper.use {
+            val db = it.writableDatabase
+            db.execSQL("CREATE TABLE `track` (`id` TEXT NOT NULL, PRIMARY KEY(`id`))")
+            db.execSQL("INSERT INTO track (id) VALUES ('s-1')")
+
+            MIGRATION_5_6.migrate(db)
+
+            db.execSQL("UPDATE track SET sizeBytes = 1731234 WHERE id = 's-1'")
+            db.query("SELECT sizeBytes FROM track WHERE id = 's-1'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1731234L, cursor.getLong(0))
             }
         }
     }

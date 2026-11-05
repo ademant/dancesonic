@@ -213,6 +213,7 @@ class LibraryRepository(
                     bpm = song.bpm?.takeIf { it in TEMPO_RANGE },
                     trackGain = song.replayGain?.trackGain,
                     trackPeak = song.replayGain?.trackPeak,
+                    sizeBytes = song.size?.takeIf { it > 0 },
                 )
             val current = db.trackDao().get(songId) ?: stored
             if (current.copy(syncedAt = now) != fresh) {
@@ -570,6 +571,7 @@ class LibraryRepository(
                     bpm = it.bpm?.takeIf { bpm -> bpm in TEMPO_RANGE },
                     trackGain = it.replayGain?.trackGain,
                     trackPeak = it.replayGain?.trackPeak,
+                    sizeBytes = it.size?.takeIf { size -> size > 0 },
                 )
             }
         return album to songs

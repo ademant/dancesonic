@@ -138,6 +138,8 @@ data class SongDto(
     val bpm: Int? = null,
     /** OpenSubsonic ReplayGain values from folksonic. Absent when the file has none. */
     val replayGain: ReplayGainDto? = null,
+    /** File size in bytes. Absent when the server does not report it; the stream is then not bounded. */
+    val size: Long? = null,
 )
 
 /** The OpenSubsonic replayGain object. Gains are in dB; peaks are linear. Each value is optional. */

@@ -24,9 +24,11 @@ import org.dancesonic.player.data.PlaylistRepository
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
+import org.dancesonic.player.playback.AudioCache
 import org.dancesonic.player.playback.PlaybackSettings
 import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
+import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
@@ -63,6 +65,12 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** Shared client for media streaming; sends requests to the configured server with the API key. */
     val httpClient: OkHttpClient = SubsonicHttp.okHttpClient { currentSettings }
 
+    /** Played audio kept on disk. Created on first playback, so the directory is opened only when it is needed. */
+    val audioCache: AudioCache by lazy { AudioCache(context) }
+
+    /** File sizes of the queued songs, read by the stream source to bound its requests. */
+    val streamLengths = StreamLengths()
+
     val database: DanceSonicDatabase = DanceSonicDatabase.create(context)
 
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
@@ -98,6 +106,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             { currentSettings },
             playbackSettings = { currentPlaybackSettings },
             onTrackStarted = ::refreshPlayingTrack,
+            streamLengths = streamLengths,
         )
 
     private var cachedCatalogClient: SubsonicClient? = null
