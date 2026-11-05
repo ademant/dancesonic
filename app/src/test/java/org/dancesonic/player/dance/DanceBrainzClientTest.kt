@@ -1,6 +1,7 @@
 package org.dancesonic.player.dance
 
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.junit.Assert.assertEquals
@@ -115,6 +116,49 @@ class DanceBrainzClientTest {
                 runBlocking { client.lookup(tooMany) }
             }
             assertEquals(0, server.server.requestCount)
+        }
+    }
+
+    @Test
+    fun `a DanceBrainz server passes the check`() {
+        TestSubsonicServer().use { server ->
+            server.server.enqueue(json("""{"build_time":"x","service":"dancebrainz","version":"c6a8a6c"}"""))
+            val client = DanceBrainzClient(server.server.url("/"), server.plain)
+
+            runBlocking { client.checkServer() }
+
+            assertEquals("/api/v1/", server.server.takeRequest().requestUrl?.encodedPath)
+        }
+    }
+
+    @Test
+    fun `another service at the address fails the check`() {
+        TestSubsonicServer().use { server ->
+            server.server.enqueue(json("""{"service":"navidrome"}"""))
+            val client = DanceBrainzClient(server.server.url("/"), server.plain)
+
+            val error = assertThrows(DanceBrainzException::class.java) { runBlocking { client.checkServer() } }
+
+            assertEquals("This address is not a DanceBrainz server", error.message)
+        }
+    }
+
+    @Test
+    fun `an unreachable or failing server fails the check with a message for the user`() {
+        TestSubsonicServer().use { server ->
+            server.server.enqueue(MockResponse().setResponseCode(500))
+            val client = DanceBrainzClient(server.server.url("/"), server.plain)
+
+            val error = assertThrows(DanceBrainzException::class.java) { runBlocking { client.checkServer() } }
+
+            assertEquals("DanceBrainz answered with HTTP 500", error.message)
+        }
+    }
+
+    @Test
+    fun `a plain http address is refused`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DanceBrainzClient("http://dance.example.com/".toHttpUrl())
         }
     }
 

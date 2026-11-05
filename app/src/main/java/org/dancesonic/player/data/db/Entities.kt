@@ -56,7 +56,19 @@ data class TrackEntity(
     /** Recording MusicBrainz ID; the primary key for DanceBrainz matching. Null when unknown. */
     val mbid: String?,
     val syncedAt: Long,
+    /** Tempo from the server's own library (folksonic). Null when the file has none; DanceBrainz is the fallback. */
+    val bpm: Int? = null,
+    /** ReplayGain track gain in dB, from the server. Null when the file has none. */
+    val trackGain: Double? = null,
+    /** ReplayGain track peak, linear. Null when the file has none. */
+    val trackPeak: Double? = null,
 )
+
+/** Tempos outside this range are not stored. DanceBrainz accepts exactly this range. */
+internal val TEMPO_RANGE = MIN_TEMPO_BPM..MAX_TEMPO_BPM
+
+private const val MIN_TEMPO_BPM = 1
+private const val MAX_TEMPO_BPM = 400
 
 /** DanceBrainz enrichment, keyed by recording MBID. One row per dance type a recording has. */
 @Entity(

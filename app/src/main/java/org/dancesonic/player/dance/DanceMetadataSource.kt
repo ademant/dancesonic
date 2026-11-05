@@ -17,12 +17,21 @@ data class RecordingDance(
  * values. A recording the source did not answer for is absent from the result; it is not an error.
  */
 interface DanceMetadataSource {
+    /**
+     * Identifies where the lookups come from. When it changes, the stored lookups are dropped, so data from
+     * another server, or from the placeholder source, is not kept.
+     */
+    val sourceKey: String
+        get() = NO_SOURCE_KEY
+
     /** Looks up [mbids] in one request. The caller keeps each request within [MAX_BATCH_SIZE]. */
     suspend fun lookup(mbids: List<String>): Map<String, RecordingDance>
 
     companion object {
         /** Largest number of recordings one lookup request may carry (the DanceBrainz batch limit). */
         const val MAX_BATCH_SIZE = 500
+
+        const val NO_SOURCE_KEY = "none"
     }
 }
 

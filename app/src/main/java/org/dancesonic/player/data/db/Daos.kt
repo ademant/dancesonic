@@ -2,6 +2,7 @@ package org.dancesonic.player.data.db
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -94,6 +95,42 @@ interface TrackDao {
     )
     fun observeDanceTypeCounts(): Flow<List<DanceTypeCount>>
 
+    /** The tracks of an album with their tempo. Folksonic's tempo wins; DanceBrainz's is the fallback. */
+    @Query(
+        """
+        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        FROM track t
+        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
+        WHERE t.albumId = :albumId
+        ORDER BY t.trackNumber, t.title COLLATE NOCASE
+        """,
+    )
+    fun observeByAlbumWithTempo(albumId: String): Flow<List<TrackWithTempo>>
+
+    /** The given tracks with their tempo, for playing a playlist. */
+    @Query(
+        """
+        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        FROM track t
+        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
+        WHERE t.id IN (:ids)
+        """,
+    )
+    suspend fun getAllWithTempo(ids: List<String>): List<TrackWithTempo>
+
+    /** Tracks of one dance type with their tempo, as [observeByAlbumWithTempo]. */
+    @Query(
+        """
+        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        FROM track t
+        INNER JOIN dance_metadata d ON d.mbid = t.mbid
+        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
+        WHERE d.danceType = :danceType
+        ORDER BY t.artistName COLLATE NOCASE, t.title COLLATE NOCASE
+        """,
+    )
+    fun observeByDanceTypeWithTempo(danceType: String): Flow<List<TrackWithTempo>>
+
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
@@ -125,6 +162,12 @@ interface TrackDao {
     )
     suspend fun totalsByAlbum(): List<AlbumSongTotals>
 }
+
+/** A track with the tempo to show: folksonic's, or DanceBrainz's when folksonic has none. Null when neither has one. */
+data class TrackWithTempo(
+    @Embedded val track: TrackEntity,
+    val tempoBpm: Int?,
+)
 
 /** Stored song count and summed song duration (seconds) of one album. */
 data class AlbumSongTotals(

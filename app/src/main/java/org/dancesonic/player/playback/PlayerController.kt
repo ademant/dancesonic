@@ -19,6 +19,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.dancesonic.player.data.db.TrackEntity
+import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.streamUrl
 import java.util.concurrent.CancellationException
@@ -31,7 +32,7 @@ data class PlaybackUiState(
     val nowPlayingTitle: String? = null,
     val nowPlayingArtist: String? = null,
     val isPlaying: Boolean = false,
-    /** Playback speed. Pitch is kept constant by Media3's time-stretching. */
+    /** Speed of the current track. Pitch is kept constant by Media3's time-stretching. */
     val tempo: Float = 1f,
 )
 
@@ -46,6 +47,8 @@ class PlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val settingsProvider: () -> ServerSettings?,
+    /** The playback choices, read when a track starts. */
+    private val playbackSettings: () -> PlaybackSettings = { PlaybackSettings() },
     /** Called on the main thread when a track starts; the argument is its song id. */
     private val onTrackStarted: (songId: String) -> Unit = {},
 ) {
@@ -54,6 +57,9 @@ class PlayerController(
 
     private var controller: MediaController? = null
     private val connectLock = Mutex()
+
+    /** The queue as it was loaded, so a track's tempo and gain can be looked up by its index. */
+    private var queue: List<TrackWithTempo> = emptyList()
 
     /** Connects once; concurrent first calls wait for the same connection. */
     private suspend fun connected(): MediaController =
@@ -69,6 +75,7 @@ class PlayerController(
                         mediaItem: MediaItem?,
                         reason: Int,
                     ) {
+                        applyCurrentTrack(built)
                         publish(built)
                         mediaItem?.mediaId?.let(onTrackStarted)
                     }
@@ -92,17 +99,44 @@ class PlayerController(
             )
     }
 
+    /**
+     * Speed and volume for the track now playing, from the playback settings. Called when a track starts and when
+     * a setting changes, so the current track follows the change at once.
+     */
+    private fun applyCurrentTrack(player: MediaController) {
+        val settings = playbackSettings()
+        val entry = queue.getOrNull(player.currentMediaItemIndex)
+        player.playbackParameters = PlaybackParameters(PlaybackMath.speed(settings, entry?.tempoBpm), 1f)
+        player.volume =
+            PlaybackMath.volume(
+                replayGainEnabled = settings.replayGain,
+                trackGainDb = entry?.track?.trackGain,
+                trackPeak = entry?.track?.trackPeak,
+            )
+    }
+
+    /** Called after a playback setting changed: the track now playing takes the new speed and volume. */
+    fun settingsChanged() {
+        scope.launch(Dispatchers.Main) {
+            val player = controller ?: return@launch
+            applyCurrentTrack(player)
+            publish(player)
+        }
+    }
+
     /** Replaces the queue with [tracks] and starts playing at [startIndex]. */
     fun play(
-        tracks: List<TrackEntity>,
+        tracks: List<TrackWithTempo>,
         startIndex: Int = 0,
     ) {
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
+        queue = tracks
         scope.launch(Dispatchers.Main) {
             val player = connected()
-            player.setMediaItems(tracks.map { it.toMediaItem(settings) }, startIndex, 0L)
+            player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)
             player.prepare()
+            applyCurrentTrack(player)
             player.play()
         }
     }
@@ -122,23 +156,12 @@ class PlayerController(
         scope.launch(Dispatchers.Main) { connected().seekToPreviousMediaItem() }
     }
 
-    /** Sets playback speed. [speed] is clamped to the range the UI offers. */
-    fun setTempo(speed: Float) {
-        val clamped = speed.coerceIn(MIN_TEMPO, MAX_TEMPO)
-        scope.launch(Dispatchers.Main) {
-            connected().playbackParameters = PlaybackParameters(clamped, 1f)
-        }
-    }
-
     fun release() {
         controller?.release()
         controller = null
     }
 
     companion object {
-        const val MIN_TEMPO = 0.5f
-        const val MAX_TEMPO = 1.5f
-
         fun TrackEntity.toMediaItem(settings: ServerSettings): MediaItem =
             MediaItem.Builder()
                 .setMediaId(id)

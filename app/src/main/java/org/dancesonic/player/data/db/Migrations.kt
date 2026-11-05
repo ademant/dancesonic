@@ -23,5 +23,26 @@ val MIGRATION_2_3 =
         }
     }
 
+/** Adds the server's tempo to each track. Existing tracks get it on the next full listing. */
+val MIGRATION_3_4 =
+    object : Migration(FROM_3, TO_4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `track` ADD COLUMN `bpm` INTEGER")
+        }
+    }
+
 private const val FROM_VERSION = 2
 private const val TO_VERSION = 3
+private const val FROM_3 = 3
+private const val TO_4 = 4
+private const val FROM_4 = 4
+private const val TO_5 = 5
+
+/** Adds the server's ReplayGain track values to each track. Existing tracks get them on the next full listing. */
+val MIGRATION_4_5 =
+    object : Migration(FROM_4, TO_5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `track` ADD COLUMN `trackGain` REAL")
+            db.execSQL("ALTER TABLE `track` ADD COLUMN `trackPeak` REAL")
+        }
+    }

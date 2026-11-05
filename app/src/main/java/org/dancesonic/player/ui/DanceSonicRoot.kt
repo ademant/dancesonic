@@ -42,7 +42,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import org.dancesonic.player.AppContainer
+import org.dancesonic.player.playback.PlaybackMath
 import org.dancesonic.player.playback.PlayerController
+import org.dancesonic.player.playback.TempoMode
+import kotlin.math.roundToInt
+
+private const val TEMPO_STEPS = 19
 
 private enum class Tab(val label: String) {
     Library("Library"),
@@ -64,11 +69,13 @@ fun DanceSonicRoot(container: AppContainer) {
     var showConfig by rememberSaveable { mutableStateOf(false) }
     val libraryVm: LibraryViewModel = viewModel { LibraryViewModel(container) }
     val playlistVm: PlaylistViewModel = viewModel { PlaylistViewModel(container) }
+    val danceVm: DanceBrainzViewModel = viewModel { DanceBrainzViewModel(container) }
+    val playbackVm: PlaybackSettingsViewModel = viewModel { PlaybackSettingsViewModel(container) }
 
     Scaffold(
         bottomBar = {
             Column {
-                PlayerBar(container.player)
+                PlayerBar(container.player, playbackVm)
                 HorizontalDivider()
                 NavigationBar {
                     Tab.entries.forEach { entry ->
@@ -85,7 +92,7 @@ fun DanceSonicRoot(container: AppContainer) {
     ) { padding ->
         Surface(Modifier.padding(padding).fillMaxWidth()) {
             if (showConfig) {
-                ConfigScreen(connectVm, onBack = { showConfig = false })
+                ConfigScreen(connectVm, danceVm, playbackVm, onBack = { showConfig = false })
             } else {
                 when (tab) {
                     Tab.Library ->
@@ -226,9 +233,15 @@ internal fun ServerAddressField(
 }
 
 @Composable
-fun PlayerBar(player: PlayerController) {
+fun PlayerBar(
+    player: PlayerController,
+    playbackVm: PlaybackSettingsViewModel,
+) {
     val state by player.state.collectAsStateWithLifecycle()
-    var tempo by remember(state.tempo) { mutableFloatStateOf(state.tempo) }
+    val settings by playbackVm.settings.collectAsStateWithLifecycle()
+    val bpmMode = settings.tempoMode == TempoMode.Bpm
+    var tempo by remember(settings.multiplier) { mutableFloatStateOf(settings.multiplier) }
+    var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
@@ -245,13 +258,30 @@ fun PlayerBar(player: PlayerController) {
             OutlinedButton(onClick = { player.next() }) { Text("Next") }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Tempo ${"%.2f".format(tempo)}x", style = MaterialTheme.typography.labelMedium)
+            val label =
+                if (bpmMode) {
+                    "Tempo ${targetBpm.roundToInt()} BPM"
+                } else {
+                    "Tempo ${"%.2f".format(tempo)}x"
+                }
+            Text(label, style = MaterialTheme.typography.labelMedium)
             Slider(
-                value = tempo,
-                onValueChange = { tempo = it },
-                onValueChangeFinished = { player.setTempo(tempo) },
-                valueRange = PlayerController.MIN_TEMPO..PlayerController.MAX_TEMPO,
-                steps = 19,
+                value = if (bpmMode) targetBpm else tempo,
+                onValueChange = { if (bpmMode) targetBpm = it else tempo = it },
+                onValueChangeFinished = {
+                    if (bpmMode) {
+                        playbackVm.setTargetBpm(targetBpm.roundToInt())
+                    } else {
+                        playbackVm.setMultiplier(tempo)
+                    }
+                },
+                valueRange =
+                    if (bpmMode) {
+                        PlaybackMath.MIN_TARGET_BPM.toFloat()..PlaybackMath.MAX_TARGET_BPM.toFloat()
+                    } else {
+                        PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO
+                    },
+                steps = if (bpmMode) PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1 else TEMPO_STEPS,
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
             )
         }
