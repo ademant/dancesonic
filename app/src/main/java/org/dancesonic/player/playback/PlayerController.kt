@@ -31,6 +31,8 @@ import kotlin.coroutines.resumeWithException
 data class PlaybackUiState(
     val nowPlayingTitle: String? = null,
     val nowPlayingArtist: String? = null,
+    /** The song id of the track now playing, which is its key in the local database. Null when nothing plays. */
+    val nowPlayingId: String? = null,
     val isPlaying: Boolean = false,
     /** Speed of the current track. Pitch is kept constant by Media3's time-stretching. */
     val tempo: Float = 1f,
@@ -103,6 +105,7 @@ class PlayerController(
             PlaybackUiState(
                 nowPlayingTitle = metadata.title?.toString(),
                 nowPlayingArtist = metadata.artist?.toString(),
+                nowPlayingId = player.currentMediaItem?.mediaId,
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
             )

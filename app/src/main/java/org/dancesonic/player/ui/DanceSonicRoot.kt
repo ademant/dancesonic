@@ -1,5 +1,6 @@
 package org.dancesonic.player.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,6 +68,7 @@ fun DanceSonicRoot(container: AppContainer) {
 
     var tab by rememberSaveable { mutableStateOf(Tab.Library) }
     var showConfig by rememberSaveable { mutableStateOf(false) }
+    var showNowPlaying by rememberSaveable { mutableStateOf(false) }
     val libraryVm: LibraryViewModel = viewModel { LibraryViewModel(container) }
     val playlistVm: PlaylistViewModel = viewModel { PlaylistViewModel(container) }
     val danceVm: DanceBrainzViewModel = viewModel { DanceBrainzViewModel(container) }
@@ -75,7 +77,7 @@ fun DanceSonicRoot(container: AppContainer) {
     Scaffold(
         bottomBar = {
             Column {
-                PlayerBar(container.player, playbackVm)
+                PlayerBar(container.player, playbackVm, onExpand = { showNowPlaying = true })
                 HorizontalDivider()
                 NavigationBar {
                     Tab.entries.forEach { entry ->
@@ -108,6 +110,9 @@ fun DanceSonicRoot(container: AppContainer) {
                 }
             }
         }
+    }
+    if (showNowPlaying) {
+        NowPlayingSheet(libraryVm) { showNowPlaying = false }
     }
 }
 
@@ -236,6 +241,7 @@ internal fun ServerAddressField(
 fun PlayerBar(
     player: PlayerController,
     playbackVm: PlaybackSettingsViewModel,
+    onExpand: () -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
     val settings by playbackVm.settings.collectAsStateWithLifecycle()
@@ -248,6 +254,7 @@ fun PlayerBar(
             text = state.nowPlayingTitle ?: "Nothing playing",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable(onClick = onExpand),
         )
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         Row(verticalAlignment = Alignment.CenterVertically) {

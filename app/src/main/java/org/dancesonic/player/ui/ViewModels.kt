@@ -10,8 +10,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -27,6 +29,7 @@ import org.dancesonic.player.dance.DanceSuggestion
 import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
+import org.dancesonic.player.data.TrackDetail
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
@@ -387,6 +390,17 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     /** The dance names of [mbid] as the phone has them. */
     fun danceNames(mbid: String): Flow<List<String>> = container.edits.observeDances(mbid)
+
+    /** The track now playing, with its details from the local database. Null when nothing plays. */
+    val nowPlaying: StateFlow<TrackDetail?> =
+        container.player.state
+            .map { it.nowPlayingId }
+            .distinctUntilChanged()
+            .mapLatest { id -> id?.let { container.library.trackDetail(it) } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
+    /** A track's details from the local database, for the preview before it plays. */
+    suspend fun trackDetail(id: String): TrackDetail? = container.library.trackDetail(id)
 
     /**
      * Sets the shoes rating of [mbid] to [value], or clears it when [value] is null. It is shown at once and sent

@@ -135,6 +135,7 @@ private fun TrackList(
 ) {
     var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
     var editingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    var previewing by remember { mutableStateOf<TrackWithTempo?>(null) }
     val shoesState by libraryVm.shoes.collectAsStateWithLifecycle()
     val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
     LaunchedEffect(tracks) { libraryVm.refreshShoes(tracks.mapNotNull { it.track.mbid }) }
@@ -147,7 +148,7 @@ private fun TrackList(
             TrackRow(
                 row = row,
                 shoes = trackShoes(row.track.mbid, row.track.mbid?.let { shoesState[it] }, signedIn),
-                onPlay = { onPlay(tracks.indexOf(row)) },
+                onOpen = { previewing = row },
                 onAddToPlaylist = { addingTrack = row },
                 onEdit = { editingTrack = row },
             )
@@ -158,6 +159,14 @@ private fun TrackList(
             playlistVm = playlistVm,
             trackId = row.track.id,
             onDismiss = { addingTrack = null },
+        )
+    }
+    previewing?.let { row ->
+        TrackPreviewDialog(
+            trackId = row.track.id,
+            libraryVm = libraryVm,
+            onPlay = { onPlay(tracks.indexOf(row)) },
+            onDismiss = { previewing = null },
         )
     }
     editingTrack?.let { row ->
@@ -225,20 +234,21 @@ fun DanceScreen(
 private fun TrackRow(
     row: TrackWithTempo,
     shoes: TrackShoes,
-    onPlay: () -> Unit,
+    onOpen: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onEdit: () -> Unit,
 ) {
     val track = row.track
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(Modifier.weight(1f)) {
             Text(track.title, style = MaterialTheme.typography.bodyLarge)
             val tempo = row.tempoBpm?.let { " · $it BPM" }.orEmpty()
-            Text(track.artistName + tempo, style = MaterialTheme.typography.bodySmall)
+            val length = track.durationSec?.let { " · ${formatLength(it)}" }.orEmpty()
+            Text(track.artistName + tempo + length, style = MaterialTheme.typography.bodySmall)
             shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
         TextButton(onClick = onEdit, enabled = shoes.canRate) { Text("Edit") }

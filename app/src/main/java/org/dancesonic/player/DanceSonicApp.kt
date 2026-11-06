@@ -173,6 +173,10 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     private fun refreshPlayingTrack(songId: String) {
         val settings = currentSettings ?: return
         appScope.launch {
+            // The shoes rating is cached, and read again at most once a day. A failure leaves the cached value.
+            database.trackDao().get(songId)?.mbid?.let { edits.refreshShoes(listOf(it)) }
+        }
+        appScope.launch {
             try {
                 library.refreshTrack(SubsonicClient(settings), songId)
             } catch (e: CancellationException) {
