@@ -92,6 +92,9 @@ class LibraryRepository(
 
     suspend fun track(id: String): TrackEntity? = db.trackDao().get(id)
 
+    /** The album with [id], or null when it is not stored. */
+    suspend fun album(id: String): AlbumEntity? = db.albumDao().get(id)
+
     /** The track with its album name, tempo and dance types, from the local database. Null when unknown. */
     suspend fun trackDetail(id: String): TrackDetail? {
         val row = db.trackDao().getAllWithTempo(listOf(id)).firstOrNull() ?: return null

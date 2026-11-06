@@ -30,6 +30,7 @@ import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.TrackDetail
+import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
@@ -387,6 +388,12 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     fun tracks(albumId: String) = container.library.tracksWithTempo(albumId)
 
     fun tracksForDance(danceType: String) = container.library.tracksForDanceWithTempo(danceType)
+
+    /** Scroll positions of the library lists, kept while the app runs. */
+    val scrolls = ListScrollMemory()
+
+    /** An album's stored details, for the breadcrumb. */
+    suspend fun album(id: String): AlbumEntity? = container.library.album(id)
 
     /** The dance names of [mbid] as the phone has them. */
     fun danceNames(mbid: String): Flow<List<String>> = container.edits.observeDances(mbid)
