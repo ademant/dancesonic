@@ -8,7 +8,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.dancesonic.player.dance.DanceMetadataSource
@@ -53,6 +55,12 @@ data class SyncResult(
     /** Rows inserted, updated or removed. Zero when the server catalog did not change. */
     val rowsWritten: Int,
     val mode: SyncMode,
+)
+
+/** What a DanceBrainz refresh did: the recordings asked about, and how many of them were in a failed request. */
+data class DanceRefresh(
+    val checked: Int,
+    val failed: Int,
 )
 
 /**
@@ -125,7 +133,7 @@ class LibraryRepository(
 
             saveSyncPoint(client, checkpoint)
             syncState?.markFull(client.settings.baseUrl.toString(), clock())
-            val danceFailures = timed("dance") { refreshDanceMetadata(db.trackDao().allMbids()) }
+            val danceFailures = timed("dance") { refreshDanceMetadata(db.trackDao().allMbids()).failed }
 
             SyncResult(
                 artists = fetched.artists.size,
@@ -272,6 +280,27 @@ class LibraryRepository(
                 db.danceMetadataDao().deleteAll()
                 db.danceLookupDao().deleteAll()
             }
+        }
+
+    /** Serialises DanceBrainz checks, so a manual refresh and a catalog sync never run at once. */
+    private val danceMutex = Mutex()
+
+    /**
+     * Re-checks the DanceBrainz data of the library's recordings, without touching the server catalog. [full] checks
+     * every recording; otherwise only those last checked more than a day ago. Data a recording already has stays
+     * until the server answers for it, so a failed request does not empty the Dance view. [onProgress] reports the
+     * recordings done out of the total.
+     */
+    suspend fun refreshDanceBrainz(
+        full: Boolean,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): DanceRefresh =
+        withContext(Dispatchers.IO) {
+            refreshDanceMetadata(
+                db.trackDao().allMbids(),
+                maxAgeMillis = if (full) ALL_DUE else REFRESH_MAX_AGE_MILLIS,
+                onProgress = onProgress,
+            )
         }
 
     /** Runs [block] and reports how long it took, even when it fails. */
@@ -601,7 +630,7 @@ class LibraryRepository(
     private suspend fun refreshAllDanceMetadata(): Int =
         timed(
             "dance",
-        ) { refreshDanceMetadata(db.trackDao().allMbids()) }
+        ) { refreshDanceMetadata(db.trackDao().allMbids()).failed }
 
     /**
      * Drops the stored lookups when they came from another source than the current one, including the
@@ -628,20 +657,40 @@ class LibraryRepository(
      * burst allowance wait between requests, so a large library is not refused.
      */
 
-    private suspend fun refreshDanceMetadata(mbids: List<String>): Int {
-        dropLookupsFromOtherSource()
-        val now = clock()
+    private suspend fun refreshDanceMetadata(
+        mbids: List<String>,
+        maxAgeMillis: Long = DANCE_MAX_AGE_MILLIS,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): DanceRefresh =
+        danceMutex.withLock {
+            dropLookupsFromOtherSource()
+            val now = clock()
+            val due = dueRecordings(mbids, now, maxAgeMillis)
+            var failed = 0
+            var done = 0
+            onProgress(done, due.size)
+            due.chunked(DanceMetadataSource.MAX_BATCH_SIZE).forEachIndexed { index, batch ->
+                if (index >= DANCE_BURST_BATCHES) delay(DANCE_BATCH_INTERVAL_MILLIS)
+                failed += lookupDanceBatch(batch, now)
+                done += batch.size
+                onProgress(done, due.size)
+            }
+            DanceRefresh(checked = due.size, failed = failed)
+        }
+
+    /** The distinct recordings in [mbids] last checked before [now] minus [maxAgeMillis]. Zero means all of them. */
+    private suspend fun dueRecordings(
+        mbids: List<String>,
+        now: Long,
+        maxAgeMillis: Long,
+    ): List<String> {
+        val all = mbids.distinct()
+        if (maxAgeMillis <= ALL_DUE) return all
         val fresh =
             mbids.chunked(WRITE_BATCH_SIZE).flatMapTo(mutableSetOf()) {
-                db.danceLookupDao().checkedSince(it, since = now - DANCE_MAX_AGE_MILLIS)
+                db.danceLookupDao().checkedSince(it, since = now - maxAgeMillis)
             }
-        val due = mbids.distinct().filter { it !in fresh }
-        var failed = 0
-        due.chunked(DanceMetadataSource.MAX_BATCH_SIZE).forEachIndexed { index, batch ->
-            if (index >= DANCE_BURST_BATCHES) delay(DANCE_BATCH_INTERVAL_MILLIS)
-            failed += lookupDanceBatch(batch, now)
-        }
-        return failed
+        return all.filter { it !in fresh }
     }
 
     /** Returns how many recordings of [batch] failed (0 on success). */
@@ -695,6 +744,12 @@ class LibraryRepository(
 
         /** A recording is looked up again once its last lookup is this old. */
         const val DANCE_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000
+
+        /** The manual Refresh checks a recording again once its last check is a day old. */
+        const val REFRESH_MAX_AGE_MILLIS = 24L * 60 * 60 * 1000
+
+        /** A maximum age of zero makes every recording due: the manual Full rebuild. */
+        const val ALL_DUE = 0L
 
         /** DanceBrainz allows a burst of 10 lookup requests, then one every 2 seconds per client address. */
         const val DANCE_BURST_BATCHES = 10
