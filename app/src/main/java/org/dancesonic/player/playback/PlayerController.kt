@@ -51,8 +51,15 @@ class PlayerController(
     private val playbackSettings: () -> PlaybackSettings = { PlaybackSettings() },
     /** Called on the main thread when a track starts; the argument is its song id. */
     private val onTrackStarted: (songId: String) -> Unit = {},
-    /** Receives the size of each queued track, so the stream can be bounded. */
-    private val streamLengths: StreamLengths = StreamLengths(),
+    /**
+     * Called with each new queue, before it starts: the tracks, the index that starts, and the server settings.
+     * Records the sizes that bound the stream, and may start a download of the track that begins.
+     */
+    private val onQueued: (
+        queue: List<TrackEntity>,
+        startIndex: Int,
+        settings: ServerSettings,
+    ) -> Unit = { _, _, _ -> },
 ) {
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
@@ -134,7 +141,7 @@ class PlayerController(
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
         queue = tracks
-        streamLengths.remember(tracks.map { it.track })
+        onQueued(tracks.map { it.track }, startIndex, settings)
         scope.launch(Dispatchers.Main) {
             val player = connected()
             player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)
