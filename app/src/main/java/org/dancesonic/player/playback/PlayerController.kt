@@ -11,6 +11,8 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +29,28 @@ import java.util.concurrent.ExecutionException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/**
+ * Where playback is in the current track, in milliseconds. [durationMs] is 0 while the length is unknown.
+ */
+data class PlaybackProgress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+) {
+    companion object {
+        /**
+         * Keeps the position inside the track. Media3 reports an unknown length as a negative value, and a position can
+         * briefly pass the end, so both are clamped here.
+         */
+        fun of(
+            positionMs: Long,
+            durationMs: Long,
+        ): PlaybackProgress {
+            val duration = durationMs.coerceAtLeast(0L)
+            return PlaybackProgress(positionMs = positionMs.coerceIn(0L, duration), durationMs = duration)
+        }
+    }
+}
+
 /** What the UI shows about playback. Derived from the media session; no playback state is stored here. */
 data class PlaybackUiState(
     val nowPlayingTitle: String? = null,
@@ -36,6 +60,8 @@ data class PlaybackUiState(
     val isPlaying: Boolean = false,
     /** Speed of the current track. Pitch is kept constant by Media3's time-stretching. */
     val tempo: Float = 1f,
+    /** The recording's own BPM, when the server has one. Null when unknown. */
+    val trackBpm: Int? = null,
 )
 
 /**
@@ -66,7 +92,13 @@ class PlayerController(
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
+    private val _progress = MutableStateFlow(PlaybackProgress())
+
+    /** Position and length of the track now playing, refreshed twice a second while connected. */
+    val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
+
     private var controller: MediaController? = null
+    private var ticker: Job? = null
     private val connectLock = Mutex()
 
     /** The queue as it was loaded, so a track's tempo and gain can be looked up by its index. */
@@ -96,8 +128,35 @@ class PlayerController(
             )
             controller = built
             publish(built)
+            ticker?.cancel()
+            ticker =
+                scope.launch(Dispatchers.Main) {
+                    while (true) {
+                        publishProgress(built)
+                        delay(PROGRESS_INTERVAL_MS)
+                    }
+                }
             built
         }
+
+    private fun publishProgress(player: Player) {
+        // Some streams never report a length; the server's length for the track is the fallback.
+        val serverLengthMs =
+            queue.getOrNull(
+                player.currentMediaItemIndex,
+            )?.track?.durationSec?.let { it * MILLIS_PER_SECOND }
+        val duration = if (player.duration > 0) player.duration else serverLengthMs ?: player.duration
+        _progress.value = PlaybackProgress.of(player.currentPosition, duration)
+    }
+
+    /** Moves the track now playing to [positionMs], and shows the new position at once. */
+    fun seekTo(positionMs: Long) {
+        scope.launch(Dispatchers.Main) {
+            val player = connected()
+            player.seekTo(positionMs)
+            publishProgress(player)
+        }
+    }
 
     private fun publish(player: Player) {
         val metadata = player.mediaMetadata
@@ -108,6 +167,7 @@ class PlayerController(
                 nowPlayingId = player.currentMediaItem?.mediaId,
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
+                trackBpm = queue.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
             )
     }
 
@@ -170,11 +230,17 @@ class PlayerController(
     }
 
     fun release() {
+        ticker?.cancel()
+        ticker = null
         controller?.release()
         controller = null
     }
 
     companion object {
+        /** How often the progress is read while connected. */
+        private const val PROGRESS_INTERVAL_MS = 500L
+        private const val MILLIS_PER_SECOND = 1_000L
+
         fun TrackEntity.toMediaItem(settings: ServerSettings): MediaItem =
             MediaItem.Builder()
                 .setMediaId(id)

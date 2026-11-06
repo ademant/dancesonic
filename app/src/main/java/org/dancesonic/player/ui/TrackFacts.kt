@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.TrackDetail
+import org.dancesonic.player.playback.PlayerController
 
 /** A track length as `m:ss`, or `h:mm:ss` from an hour. */
 internal fun formatLength(seconds: Int): String {
@@ -117,6 +118,7 @@ internal fun TrackPreviewDialog(
 @Composable
 internal fun NowPlayingSheet(
     libraryVm: LibraryViewModel,
+    player: PlayerController,
     onDismiss: () -> Unit,
 ) {
     val detail by libraryVm.nowPlaying.collectAsStateWithLifecycle()
@@ -129,7 +131,12 @@ internal fun NowPlayingSheet(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
         ) {
             val current = detail
-            if (current == null) Text("Nothing playing") else TrackFacts(current, current.track.mbid?.let { shoes[it] })
+            if (current == null) {
+                Text("Nothing playing")
+            } else {
+                TrackFacts(current, current.track.mbid?.let { shoes[it] })
+                SeekBar(player)
+            }
         }
     }
 }
