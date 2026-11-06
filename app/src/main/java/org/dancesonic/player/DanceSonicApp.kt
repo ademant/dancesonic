@@ -112,6 +112,15 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     private var cachedCatalogClient: SubsonicClient? = null
 
     /**
+     * Makes [client] the catalog client when it is for the same server and key. The connect check uses it,
+     * so its extension list is not asked for again by the sync that follows.
+     */
+    @Synchronized
+    fun adoptCatalogClient(client: SubsonicClient) {
+        cachedCatalogClient = client
+    }
+
+    /**
      * The client for catalog sync. Reused while the server and key are unchanged, so the server's extension
      * list is asked for once rather than on every Refresh.
      */

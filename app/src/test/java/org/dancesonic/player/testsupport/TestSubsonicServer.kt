@@ -10,12 +10,16 @@ import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.QueueDispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import org.dancesonic.player.subsonic.ApiKeyInterceptor
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicHttp
+
+private const val API_KEY_EXTENSION = "apiKeyAuthentication"
 
 /** A local HTTPS Subsonic stand-in. Enqueue JSON bodies in the order the client will request them. */
 class TestSubsonicServer : AutoCloseable {
@@ -29,7 +33,14 @@ class TestSubsonicServer : AutoCloseable {
     /** Trusts the test certificate; use for non-Subsonic endpoints such as the account API. */
     val http: OkHttpClient
 
+    /**
+     * Extension names answered to `getOpenSubsonicExtensions`, which the client asks once per client. It is
+     * answered here rather than queued, so queued responses stay the library responses in request order.
+     */
+    var advertised: List<String> = listOf(API_KEY_EXTENSION)
+
     init {
+        server.dispatcher = AdvertisingDispatcher()
         val held =
             HeldCertificate.Builder()
                 .commonName("localhost")
@@ -47,6 +58,23 @@ class TestSubsonicServer : AutoCloseable {
                 .build()
         http = plain.newBuilder().addInterceptor(ApiKeyInterceptor { settings }).build()
         client = SubsonicClient(settings, SubsonicHttp.service(settings.baseUrl, http))
+    }
+
+    /** Answers the extension request itself and serves every other request from the queue. */
+    private inner class AdvertisingDispatcher : QueueDispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+            if (request.path.orEmpty().startsWith("/rest/getOpenSubsonicExtensions.view")) {
+                extensionsResponse()
+            } else {
+                super.dispatch(request)
+            }
+    }
+
+    private fun extensionsResponse(): MockResponse {
+        val entries = advertised.joinToString(",") { """{"name":"$it","versions":[1]}""" }
+        return MockResponse()
+            .addHeader("Content-Type", "application/json")
+            .setBody("""{"subsonic-response":{"status":"ok","openSubsonicExtensions":[$entries]}}""")
     }
 
     fun enqueueJson(body: String) {

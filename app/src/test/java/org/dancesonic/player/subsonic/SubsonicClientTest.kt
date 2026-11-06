@@ -130,6 +130,7 @@ class SubsonicClientTest {
     @Test
     fun `album list is read page by page until an empty page`() =
         runBlocking<Unit> {
+            server.enqueue(okJson(EXTENSIONS_OK))
             server.enqueue(okJson(ALBUM_LIST_PAGE_1))
             server.enqueue(okJson(ALBUM_LIST_PAGE_2))
             server.enqueue(okJson("""{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""))
@@ -137,8 +138,37 @@ class SubsonicClientTest {
             val albums = client.allAlbums()
 
             assertEquals(listOf("al-1", "al-2", "al-3"), albums.map { it.id })
+            server.takeRequest() // openSubsonicExtensions
             val offsets = List(3) { server.takeRequest().requestUrl!!.queryParameter("offset") }
             assertEquals(listOf("0", "2", "3"), offsets)
+        }
+
+    @Test
+    fun `short album page is the last one when tinysonicPaging is advertised`() =
+        runBlocking<Unit> {
+            server.enqueue(okJson(EXTENSIONS_WITH_PAGING))
+            server.enqueue(okJson(ALBUM_LIST_PAGE_1))
+
+            val albums = client.allAlbums()
+
+            assertEquals(listOf("al-1", "al-2"), albums.map { it.id })
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun `catalog listing reuses the extension list fetched by the connection check`() =
+        runBlocking<Unit> {
+            server.enqueue(okJson(PING_OK))
+            server.enqueue(okJson(EXTENSIONS_WITH_PAGING))
+            server.enqueue(okJson(ALBUM_LIST_PAGE_1))
+            client.checkConnection()
+
+            client.allAlbums()
+
+            assertEquals(3, server.requestCount)
+            server.takeRequest()
+            server.takeRequest()
+            assertTrue(server.takeRequest().requestUrl!!.encodedPath.endsWith("getAlbumList2.view"))
         }
 
     @Test
@@ -186,6 +216,10 @@ class SubsonicClientTest {
 
         const val EXTENSIONS_OK = """{"subsonic-response":{"status":"ok","version":"1.16.1",
             "openSubsonicExtensions":[{"name":"apiKeyAuthentication","versions":[1]}]}}"""
+
+        const val EXTENSIONS_WITH_PAGING = """{"subsonic-response":{"status":"ok","version":"1.16.1",
+            "openSubsonicExtensions":[{"name":"apiKeyAuthentication","versions":[1]},
+            {"name":"tinysonicPaging","versions":[1]}]}}"""
 
         const val EXTENSIONS_WITHOUT_API_KEY = """{"subsonic-response":{"status":"ok","version":"1.16.1",
             "openSubsonicExtensions":[{"name":"transcodeOffset","versions":[1]}]}}"""

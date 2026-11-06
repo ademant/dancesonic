@@ -111,43 +111,27 @@ class SubsonicClient internal constructor(
     suspend fun artist(id: String): ArtistDto =
         call { artist(id) }.artist ?: throw SubsonicException(null, "Artist response was empty")
 
-    /**
-     * Every album, fetched in pages of [ALBUM_PAGE_SIZE]. Paging stops at the first empty page
-     * rather than a short one, because a server may cap the page size below what was requested.
-     */
-    suspend fun allAlbums(): List<AlbumDto> {
-        val albums = mutableListOf<AlbumDto>()
-        while (true) {
-            val page =
-                call {
-                    albumList2(type = "alphabeticalByName", size = ALBUM_PAGE_SIZE, offset = albums.size)
-                }.albumList2?.album.orEmpty()
-            if (page.isEmpty()) return albums
-            albums += page
+    /** Every album, paged with getAlbumList2. See [readAllPages] for when paging stops. */
+    suspend fun allAlbums(): List<AlbumDto> =
+        readAllPages(shortPageIsLast = supports(PAGING_EXTENSION), pageSize = ALBUM_PAGE_SIZE) { offset ->
+            call {
+                albumList2(type = "alphabeticalByName", size = ALBUM_PAGE_SIZE, offset = offset)
+            }.albumList2?.album.orEmpty()
         }
-    }
 
-    /**
-     * Every song in the library, paged with search3 and an empty query. Pages are requested until the server
-     * returns an empty one, which also covers servers that cap the page size below what was asked.
-     */
-    suspend fun allSongs(): List<SongDto> {
-        val songs = mutableListOf<SongDto>()
-        while (true) {
-            val page =
-                call {
-                    searchSongs(
-                        query = "",
-                        songCount = SONG_PAGE_SIZE,
-                        songOffset = songs.size,
-                        albumCount = 0,
-                        artistCount = 0,
-                    )
-                }.searchResult3?.song.orEmpty()
-            if (page.isEmpty()) return songs
-            songs += page
+    /** Every song in the library, paged with search3 and an empty query. See [readAllPages]. */
+    suspend fun allSongs(): List<SongDto> =
+        readAllPages(shortPageIsLast = supports(PAGING_EXTENSION), pageSize = SONG_PAGE_SIZE) { offset ->
+            call {
+                searchSongs(
+                    query = "",
+                    songCount = SONG_PAGE_SIZE,
+                    songOffset = offset,
+                    albumCount = 0,
+                    artistCount = 0,
+                )
+            }.searchResult3?.song.orEmpty()
         }
-    }
 
     /** One album with its songs. */
     suspend fun album(id: String): AlbumDto =
@@ -204,8 +188,31 @@ class SubsonicClient internal constructor(
         /** Largest page the folksonic change feed accepts (`size`, 1–500). */
         const val CHANGES_PAGE_SIZE = 500
 
+        /** folksonic paging extension: `size` is capped at 500 and a short page is the last one. */
+        const val PAGING_EXTENSION = "tinysonicPaging"
+
         /** Extension name from the OpenSubsonic apikeyauth spec. Verify against the spec before release. */
         const val API_KEY_EXTENSION = "apiKeyAuthentication"
+    }
+}
+
+/**
+ * Reads pages until the listing is complete. A short page is the last one only when [shortPageIsLast]
+ * is set, which is the case when the server advertises `tinysonicPaging`: it caps the page size and keeps
+ * a stable order. Other servers may cap the page size below what was asked, so for them paging stops
+ * only at an empty page.
+ */
+private suspend fun <T> readAllPages(
+    shortPageIsLast: Boolean,
+    pageSize: Int,
+    fetchPage: suspend (offset: Int) -> List<T>,
+): List<T> {
+    val items = mutableListOf<T>()
+    while (true) {
+        val page = fetchPage(items.size)
+        if (page.isEmpty()) return items
+        items += page
+        if (shortPageIsLast && page.size < pageSize) return items
     }
 }
 

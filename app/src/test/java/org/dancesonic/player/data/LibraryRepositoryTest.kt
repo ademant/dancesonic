@@ -249,6 +249,9 @@ class LibraryRepositoryTest {
                                     } else {
                                         songPageOf()
                                     }
+                                "/rest/getOpenSubsonicExtensions.view" ->
+                                    """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
+                                        """{"name":"apiKeyAuthentication","versions":[1]}]}}"""
                                 else -> return MockResponse().setResponseCode(404)
                             }
                         return MockResponse().addHeader("Content-Type", "application/json").setBody(body)
