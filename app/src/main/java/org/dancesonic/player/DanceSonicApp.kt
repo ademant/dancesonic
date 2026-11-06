@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,16 +25,20 @@ import org.dancesonic.player.data.PlaylistRepository
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
+import org.dancesonic.player.data.db.TrackEntity
 import org.dancesonic.player.playback.AudioCache
+import org.dancesonic.player.playback.AudioPrefetcher
 import org.dancesonic.player.playback.PlaybackSettings
 import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
+import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.SubsonicHttp
+import org.dancesonic.player.subsonic.streamUrl
 
 private const val TAG = "DanceSonicApp"
 
@@ -71,6 +76,16 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** File sizes of the queued songs, read by the stream source to bound its requests. */
     val streamLengths = StreamLengths()
 
+    /** Downloads a track into the audio cache when it starts, so playback reads it once. */
+    @Suppress("UnsafeOptInUsageError") // Media3 stream classes are marked unstable; see PlayerController.
+    private val audioPrefetcher: AudioPrefetcher by lazy {
+        AudioPrefetcher(
+            audioCache,
+            StreamDataSource.Factory(OkHttpDataSource.Factory(httpClient), sizeOf = streamLengths::sizeOf),
+            appScope,
+        )
+    }
+
     val database: DanceSonicDatabase = DanceSonicDatabase.create(context)
 
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
@@ -106,8 +121,19 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             { currentSettings },
             playbackSettings = { currentPlaybackSettings },
             onTrackStarted = ::refreshPlayingTrack,
-            streamLengths = streamLengths,
+            onQueued = ::onQueued,
         )
+
+    /** Records the queue's sizes, then downloads the track that begins when its size is known. */
+    private fun onQueued(
+        queue: List<TrackEntity>,
+        startIndex: Int,
+        settings: ServerSettings,
+    ) {
+        streamLengths.remember(queue)
+        val first = queue.getOrNull(startIndex) ?: return
+        first.sizeBytes?.let { audioPrefetcher.prefetch(first.id, settings.streamUrl(first.id), it) }
+    }
 
     private var cachedCatalogClient: SubsonicClient? = null
 
