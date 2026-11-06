@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -21,10 +23,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -32,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.ArtistEntity
 import org.dancesonic.player.data.db.DanceTypeCount
+import org.dancesonic.player.data.db.KeptKind
 import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.playback.PlayerController
 
@@ -52,26 +58,53 @@ fun LibraryScreen(
     BackHandler(enabled = openAlbum != null) { albumId = null }
     BackHandler(enabled = openAlbum == null && openArtist != null) { artistId = null }
 
+    val artists by vm.artists.collectAsStateWithLifecycle()
+    val artistName = artists.firstOrNull { it.id == openArtist }?.name
+    val albumName by produceState<String?>(null, openAlbum) { value = openAlbum?.let { vm.album(it)?.name } }
+    val crumbs =
+        buildList {
+            add(
+                Crumb("Library", current = openArtist == null) {
+                    artistId = null
+                    albumId = null
+                },
+            )
+            if (openArtist != null) add(Crumb(artistName ?: "Artist", current = openAlbum == null) { albumId = null })
+            if (openAlbum != null) add(Crumb(albumName ?: "Album", current = true))
+        }
+
     Column(Modifier.fillMaxSize()) {
         LibraryToolbar(connectVm, onOpenConfig)
         HorizontalDivider()
+        Breadcrumbs(crumbs)
         when {
-            openAlbum != null -> {
-                val tracks by remember(openAlbum) { vm.tracks(openAlbum) }.collectAsStateWithLifecycle(emptyList())
-                TrackList(
-                    tracks = tracks,
-                    onPlay = { index -> player.play(tracks, index) },
-                    playlistVm = playlistVm,
-                )
-            }
-            openArtist != null -> {
-                val albums by remember(openArtist) { vm.albums(openArtist) }.collectAsStateWithLifecycle(emptyList())
-                AlbumList(albums, onOpen = { albumId = it.id })
-            }
-            else -> {
-                val artists by vm.artists.collectAsStateWithLifecycle()
-                ArtistList(artists, onOpen = { artistId = it.id })
-            }
+            openAlbum != null ->
+                key(openAlbum) {
+                    val tracks by remember(openAlbum) { vm.tracks(openAlbum) }.collectAsStateWithLifecycle(emptyList())
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        KeepOfflineToggle(KeptKind.ALBUM, openAlbum, vm.keptCollections)
+                    }
+                    TrackList(
+                        tracks = tracks,
+                        onPlay = { index -> player.play(tracks, index) },
+                        playlistVm = playlistVm,
+                        libraryVm = vm,
+                        listState = keptListState(vm, "tracks:$openAlbum"),
+                    )
+                }
+            openArtist != null ->
+                key(openArtist) {
+                    val albums by remember(
+                        openArtist,
+                    ) { vm.albums(openArtist) }.collectAsStateWithLifecycle(emptyList())
+                    AlbumList(
+                        albums,
+                        onOpen = { albumId = it.id },
+                        listState = keptListState(vm, "albums:$openArtist"),
+                    )
+                }
+            else ->
+                ArtistList(artists, onOpen = { artistId = it.id }, listState = keptListState(vm, "artists"))
         }
     }
 }
@@ -96,12 +129,13 @@ private fun LibraryToolbar(
 private fun ArtistList(
     artists: List<ArtistEntity>,
     onOpen: (ArtistEntity) -> Unit,
+    listState: LazyListState,
 ) {
     if (artists.isEmpty()) {
         EmptyHint("No artists yet. Tap Refresh to sync from the server.")
         return
     }
-    LazyColumn(contentPadding = PaddingValues(vertical = 4.dp)) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 4.dp)) {
         items(artists, key = { it.id }) { artist ->
             ListRow(title = artist.name, onClick = { onOpen(artist) })
         }
@@ -112,12 +146,13 @@ private fun ArtistList(
 private fun AlbumList(
     albums: List<AlbumEntity>,
     onOpen: (AlbumEntity) -> Unit,
+    listState: LazyListState,
 ) {
     if (albums.isEmpty()) {
         EmptyHint("No albums for this artist.")
         return
     }
-    LazyColumn {
+    LazyColumn(state = listState) {
         items(albums, key = { it.id }) { album ->
             val subtitle = album.year?.toString()
             ListRow(title = album.name, subtitle = subtitle, onClick = { onOpen(album) })
@@ -130,18 +165,27 @@ private fun TrackList(
     tracks: List<TrackWithTempo>,
     onPlay: (Int) -> Unit,
     playlistVm: PlaylistViewModel,
+    libraryVm: LibraryViewModel,
+    listState: LazyListState,
 ) {
     var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    var editingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    var previewing by remember { mutableStateOf<TrackWithTempo?>(null) }
+    val shoesState by libraryVm.shoes.collectAsStateWithLifecycle()
+    val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
+    LaunchedEffect(tracks) { libraryVm.refreshShoes(tracks.mapNotNull { it.track.mbid }) }
     if (tracks.isEmpty()) {
         EmptyHint("No tracks.")
         return
     }
-    LazyColumn {
+    LazyColumn(state = listState) {
         items(tracks, key = { it.track.id }) { row ->
             TrackRow(
                 row = row,
-                onPlay = { onPlay(tracks.indexOf(row)) },
+                shoes = trackShoes(row.track.mbid, row.track.mbid?.let { shoesState[it] }, signedIn),
+                onOpen = { previewing = row },
                 onAddToPlaylist = { addingTrack = row },
+                onEdit = { editingTrack = row },
             )
         }
     }
@@ -151,6 +195,25 @@ private fun TrackList(
             trackId = row.track.id,
             onDismiss = { addingTrack = null },
         )
+    }
+    previewing?.let { row ->
+        TrackPreviewDialog(
+            trackId = row.track.id,
+            libraryVm = libraryVm,
+            onPlay = { onPlay(tracks.indexOf(row)) },
+            onDismiss = { previewing = null },
+        )
+    }
+    editingTrack?.let { row ->
+        val mbid = row.track.mbid
+        if (mbid != null) {
+            TrackEditDialog(
+                title = row.track.title,
+                mbid = mbid,
+                libraryVm = libraryVm,
+                onDismiss = { editingTrack = null },
+            )
+        }
     }
 }
 
@@ -165,19 +228,21 @@ fun DanceScreen(
     BackHandler(enabled = danceType != null) { danceType = null }
 
     val selected = danceType
-    if (selected == null) {
-        Column(Modifier.fillMaxSize()) {
-            Text(
-                "Dance",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(16.dp),
-            )
+    val crumbs =
+        buildList {
+            add(Crumb("Dance", current = selected == null) { danceType = null })
+            if (selected != null) add(Crumb(selected, current = true))
+        }
+    Column(Modifier.fillMaxSize()) {
+        Breadcrumbs(crumbs)
+        if (selected == null) {
             if (danceTypes.isEmpty()) {
                 EmptyHint(
                     "No dance metadata yet. Tracks appear here once they match a DanceBrainz recording.",
                 )
             } else {
-                LazyColumn {
+                val listState = keptListState(vm, "dances")
+                LazyColumn(state = listState) {
                     items(danceTypes, key = { it.danceType }) { entry: DanceTypeCount ->
                         ListRow(
                             title = entry.danceType,
@@ -187,37 +252,63 @@ fun DanceScreen(
                     }
                 }
             }
-        }
-    } else {
-        val tracks by remember(selected) { vm.tracksForDance(selected) }.collectAsStateWithLifecycle(emptyList())
-        Column(Modifier.fillMaxSize()) {
-            Text(selected, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
-            TrackList(
-                tracks = tracks,
-                onPlay = { index -> player.play(tracks, index) },
-                playlistVm = playlistVm,
-            )
+        } else {
+            key(selected) {
+                val tracks by remember(
+                    selected,
+                ) { vm.tracksForDance(selected) }.collectAsStateWithLifecycle(emptyList())
+                TrackList(
+                    tracks = tracks,
+                    onPlay = { index -> player.play(tracks, index) },
+                    playlistVm = playlistVm,
+                    libraryVm = vm,
+                    listState = keptListState(vm, "dance:$selected"),
+                )
+            }
         }
     }
+}
+
+/**
+ * The scroll state of one list, kept in [vm] under [key]. Going back to the list returns to the place it was left,
+ * for as long as the app runs.
+ */
+@Composable
+internal fun keptListState(
+    vm: LibraryViewModel,
+    key: String,
+): LazyListState {
+    val (index, offset) = vm.scrolls.position(key)
+    val state = rememberLazyListState(index, offset)
+    LaunchedEffect(state) {
+        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+            .collect { (first, scroll) -> vm.scrolls.remember(key, first, scroll) }
+    }
+    return state
 }
 
 @Composable
 private fun TrackRow(
     row: TrackWithTempo,
-    onPlay: () -> Unit,
+    shoes: TrackShoes,
+    onOpen: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val track = row.track
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(Modifier.weight(1f)) {
             Text(track.title, style = MaterialTheme.typography.bodyLarge)
             val tempo = row.tempoBpm?.let { " · $it BPM" }.orEmpty()
-            Text(track.artistName + tempo, style = MaterialTheme.typography.bodySmall)
+            val length = track.durationSec?.let { " · ${formatLength(it)}" }.orEmpty()
+            Text(track.artistName + tempo + length, style = MaterialTheme.typography.bodySmall)
+            shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
+        TextButton(onClick = onEdit, enabled = shoes.canRate) { Text("Edit") }
         TextButton(onClick = onAddToPlaylist) { Text("+ Playlist") }
     }
     HorizontalDivider()

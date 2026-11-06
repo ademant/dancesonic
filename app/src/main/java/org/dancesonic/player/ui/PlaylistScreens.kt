@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.PlaylistGroup
+import org.dancesonic.player.data.db.KeptKind
 import org.dancesonic.player.data.db.PlaylistItemRow
 
 /** Course playlists: list, then a detail view grouped by dance type. */
@@ -116,11 +117,16 @@ private fun PlaylistDetail(
             Text(current.name, style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = { confirmDelete = true }) { Text("Delete") }
         }
-        OutlinedButton(
-            onClick = { vm.playAll(playlistId) },
-            enabled = groups.isNotEmpty(),
-            modifier = Modifier.padding(horizontal = 16.dp),
-        ) { Text("Play playlist") }
+        Row(
+            Modifier.padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { vm.playAll(playlistId) },
+                enabled = groups.isNotEmpty(),
+            ) { Text("Play playlist") }
+            KeepOfflineToggle(KeptKind.PLAYLIST, playlistId.toString(), vm.keptCollections)
+        }
         HorizontalDivider(Modifier.padding(top = 8.dp))
 
         if (groups.isEmpty()) {

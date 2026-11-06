@@ -134,6 +134,9 @@ interface TrackDao {
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
+    @Query("SELECT id FROM track")
+    suspend fun allIds(): List<String>
+
     @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>)
 
@@ -185,6 +188,9 @@ data class DanceTypeCount(
 interface DanceMetadataDao {
     @Query("SELECT danceType FROM dance_metadata WHERE mbid = :mbid ORDER BY danceType")
     suspend fun danceTypesFor(mbid: String): List<String>
+
+    @Query("SELECT danceType FROM dance_metadata WHERE mbid = :mbid ORDER BY danceType")
+    fun observeDanceTypesFor(mbid: String): Flow<List<String>>
 
     /** Replaces all dance types of one recording with the freshly fetched set. */
     @Transaction

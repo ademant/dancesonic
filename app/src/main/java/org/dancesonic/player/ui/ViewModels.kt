@@ -3,12 +3,17 @@ package org.dancesonic.player.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -20,8 +25,13 @@ import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzException
+import org.dancesonic.player.dance.DanceSuggestion
+import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
+import org.dancesonic.player.data.TrackDetail
+import org.dancesonic.player.data.db.AlbumEntity
+import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
@@ -195,6 +205,7 @@ class ConnectViewModel(
             container.library.clearCatalog()
             container.syncState.clear()
             container.audioCache.clear()
+            container.keptCollections.forgetAll()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
         }
@@ -238,6 +249,7 @@ class ConnectViewModel(
                     container.library.clearCatalog()
                     container.syncState.clear()
                     container.audioCache.clear()
+                    container.keptCollections.forgetAll()
                 }
                 container.settingsStore.save(settings)
                 danceBrainz?.let { container.danceBrainzSettings.save(it) }
@@ -294,6 +306,7 @@ class ConnectViewModel(
                             _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
                         }
                     }
+                container.edits.flush()
                 _state.value = ConnectUiState(lastSync = syncMessage(result))
             } catch (e: CancellationException) {
                 throw e
@@ -339,11 +352,138 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         container.library.danceTypes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
+    /** Shoes state by recording MBID, including changes not yet sent. */
+    val shoes: StateFlow<Map<String, ShoesView>> =
+        container.edits.observeShoes()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
+
+    /** Every DanceBrainz change not yet confirmed: queued, held for review, or in conflict. */
+    val queue: StateFlow<List<EditEntity>> =
+        container.edits.observeQueue()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
+
+    /** True while a DanceBrainz token is stored on this phone, so ratings and dances can be changed. */
+    val signedIn: StateFlow<Boolean> =
+        container.danceBrainzTokens.credential
+            .map { it != null }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), false)
+
+    private val _suggestions = MutableStateFlow<List<DanceSuggestion>>(emptyList())
+
+    /** Dance values that match the text being typed, best first. */
+    val suggestions: StateFlow<List<DanceSuggestion>> = _suggestions.asStateFlow()
+
+    private val _suggestError = MutableStateFlow<String?>(null)
+
+    /** Why suggestions could not be looked up, such as having no connection. Null when they could. */
+    val suggestError: StateFlow<String?> = _suggestError.asStateFlow()
+
+    private var suggestJob: Job? = null
+
+    init {
+        // A change queued offline is sent as soon as the library is opened again.
+        viewModelScope.launch { container.edits.flush() }
+    }
+
     fun albums(artistId: String) = container.library.albums(artistId)
 
     fun tracks(albumId: String) = container.library.tracksWithTempo(albumId)
 
     fun tracksForDance(danceType: String) = container.library.tracksForDanceWithTempo(danceType)
+
+    /** Scroll positions of the library lists, kept while the app runs. */
+    val scrolls = ListScrollMemory()
+
+    /** An album's stored details, for the breadcrumb. */
+    suspend fun album(id: String): AlbumEntity? = container.library.album(id)
+
+    /** The dance names of [mbid] as the phone has them. */
+    fun danceNames(mbid: String): Flow<List<String>> = container.edits.observeDances(mbid)
+
+    /** The track now playing, with its details from the local database. Null when nothing plays. */
+    val nowPlaying: StateFlow<TrackDetail?> =
+        container.player.state
+            .map { it.nowPlayingId }
+            .distinctUntilChanged()
+            .mapLatest { id -> id?.let { container.library.trackDetail(it) } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
+    /** A track's details from the local database, for the preview before it plays. */
+    suspend fun trackDetail(id: String): TrackDetail? = container.library.trackDetail(id)
+
+    /** Which albums and playlists are kept on the phone; see [KeepOfflineToggle]. */
+    val keptCollections = container.keptCollections
+
+    /**
+     * Sets the shoes rating of [mbid] to [value], or clears it when [value] is null. It is shown at once and sent
+     * now or later.
+     */
+    fun rate(
+        mbid: String,
+        value: Int?,
+    ) {
+        viewModelScope.launch {
+            if (value == null) container.edits.clearRating(mbid) else container.edits.rate(mbid, value)
+        }
+    }
+
+    /** Looks up dance values for [query] after a short pause, so each keystroke does not send a request. */
+    fun suggestDances(query: String) {
+        suggestJob?.cancel()
+        suggestJob =
+            viewModelScope.launch {
+                _suggestError.value = null
+                if (query.isBlank()) {
+                    _suggestions.value = emptyList()
+                    return@launch
+                }
+                delay(SUGGEST_PAUSE_MILLIS)
+                try {
+                    _suggestions.value = container.edits.suggestDances(query)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: DanceBrainzException) {
+                    _suggestions.value = emptyList()
+                    _suggestError.value = e.message
+                }
+            }
+    }
+
+    /** Queues adding [suggestion] to [mbid] with [qualifier] (learn, disco or both). */
+    fun addDance(
+        mbid: String,
+        suggestion: DanceSuggestion,
+        qualifier: String,
+    ) {
+        viewModelScope.launch { container.edits.addDance(mbid, suggestion, qualifier) }
+    }
+
+    /** Queues removing the dance named [name] from [mbid]. */
+    fun removeDance(
+        mbid: String,
+        name: String,
+    ) {
+        viewModelScope.launch { container.edits.removeDance(mbid, name) }
+    }
+
+    /** Removes a queued, held or conflicting change from the queue. */
+    fun dismissChange(id: Long) {
+        viewModelScope.launch { container.edits.dismiss(id) }
+    }
+
+    /** Sends the queued changes again, for the Send again action. */
+    fun retryChanges() {
+        viewModelScope.launch { container.edits.flush() }
+    }
+
+    /** Reads the public shoes median and, when signed in, the viewer's rating for the tracks on screen. */
+    fun refreshShoes(mbids: List<String>) {
+        viewModelScope.launch { container.edits.refreshShoes(mbids) }
+    }
+
+    private companion object {
+        const val SUGGEST_PAUSE_MILLIS = 300L
+    }
 }
 
 /** Course playlists, stored on the device. */
@@ -353,6 +493,9 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     fun playlist(id: Long) = container.playlists.playlist(id)
+
+    /** Which albums and playlists are kept on the phone; see [KeepOfflineToggle]. */
+    val keptCollections = container.keptCollections
 
     fun groups(playlistId: Long) = container.playlists.groups(playlistId)
 

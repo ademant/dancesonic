@@ -24,7 +24,18 @@ import javax.crypto.spec.GCMParameterSpec
  * AES-256-GCM encryption with a non-exportable key in the Android Keystore.
  * The plaintext API key never touches DataStore.
  */
-internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
+internal interface SecretCipher {
+    /** Encrypts [plain]; returns the IV and the ciphertext, both Base64. */
+    fun encrypt(plain: String): Pair<String, String>
+
+    /** Reverses [encrypt]. Throws a security exception if the key is gone or the data was changed. */
+    fun decrypt(
+        ivB64: String,
+        ciphertextB64: String,
+    ): String
+}
+
+internal class KeystoreCipher(private val alias: String = KEY_ALIAS) : SecretCipher {
     private fun secretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getKey(alias, null) as? SecretKey)?.let { return it }
@@ -39,14 +50,14 @@ internal class KeystoreCipher(private val alias: String = KEY_ALIAS) {
         return generator.generateKey()
     }
 
-    fun encrypt(plain: String): Pair<String, String> {
+    override fun encrypt(plain: String): Pair<String, String> {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val ciphertext = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
         return encode(cipher.iv) to encode(ciphertext)
     }
 
-    fun decrypt(
+    override fun decrypt(
         ivB64: String,
         ciphertextB64: String,
     ): String {

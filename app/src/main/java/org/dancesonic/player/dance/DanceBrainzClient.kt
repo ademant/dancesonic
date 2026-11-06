@@ -81,7 +81,7 @@ class DanceBrainzClient internal constructor(
         private const val READ_TIMEOUT_SECONDS = 30L
 
         @OptIn(ExperimentalSerializationApi::class)
-        private val json: Json =
+        internal val json: Json =
             Json {
                 ignoreUnknownKeys = true
                 coerceInputValues = true
@@ -91,17 +91,22 @@ class DanceBrainzClient internal constructor(
         private fun serviceFor(
             baseUrl: HttpUrl,
             client: OkHttpClient,
-        ): DanceBrainzService {
+        ): DanceBrainzService = retrofitFor(baseUrl, client).create(DanceBrainzService::class.java)
+
+        /** The JSON Retrofit for a DanceBrainz server; shared with the account endpoints. */
+        internal fun retrofitFor(
+            baseUrl: HttpUrl,
+            client: OkHttpClient,
+        ): Retrofit {
             require(baseUrl.isHttps) { "DanceBrainz must be reached over https" }
             return Retrofit.Builder()
                 .baseUrl(baseUrl)
                 .client(client)
                 .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
                 .build()
-                .create(DanceBrainzService::class.java)
         }
 
-        private fun defaultHttpClient(): OkHttpClient =
+        internal fun defaultHttpClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -133,10 +138,14 @@ internal data class ServiceInfoDto(
     val service: String = "",
 )
 
-/** A DanceBrainz server could not be used. The message is for the user. */
+/**
+ * A DanceBrainz server could not be used. The message is for the user. [httpCode] is the status the server
+ * answered with, or null when no answer came (the phone is offline or the server is unreachable).
+ */
 class DanceBrainzException(
     message: String,
     cause: Throwable? = null,
+    val httpCode: Int? = null,
 ) : IOException(message, cause)
 
 @Serializable
