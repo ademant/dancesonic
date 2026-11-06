@@ -132,7 +132,7 @@ class LibraryRepository(
      * - folksonic with a saved sync point: one small request when nothing changed; otherwise only the
      *   reported items are fetched.
      * - any other Subsonic server: artists and album stubs are compared with the stored catalog, and only
-     *   the albums whose header, song count or total duration differ are fetched. Tag-only edits to a
+     *   the albums whose header or song count differ are fetched. Tag-only edits to a
      *   song are not visible this way and wait for a full Refresh.
      * - folksonic without a sync point yet: a full listing.
      */
@@ -369,8 +369,8 @@ class LibraryRepository(
 
     /**
      * Subsonic fallback without a change feed. Artists come from the index and albums from the paged
-     * album lists, both cheap. An album is fetched whole only when its stored header, song count or
-     * total duration differs from the listing. Removed artists and albums are deleted.
+     * album lists, both cheap. An album is fetched whole only when its stored header or song count differs
+     * from the listing. Removed artists and albums are deleted.
      */
     private suspend fun syncBySubsonicComparison(client: SubsonicClient): SyncResult =
         withContext(Dispatchers.IO) {
@@ -519,8 +519,9 @@ class LibraryRepository(
     }
 
     /**
-     * Whether this album, as listed, differs from the stored album: its header, or the song count or
-     * total duration of its stored songs. Decides which albums need a full fetch.
+     * Whether this album, as listed, differs from the stored album: its header, or its song count. Decides
+     * which albums need a full fetch. The listed duration is not compared: the server's album duration is
+     * not the sum of its song durations, so it would differ on every unchanged album.
      */
     private fun AlbumDto.differsFrom(
         stored: AlbumEntity?,
@@ -530,10 +531,7 @@ class LibraryRepository(
         if (!hasArtistIn(artistNames)) return false
         if (stored == null || headerDiffers(stored)) return true
         val storedSongs = totals?.songCount ?: 0
-        val storedSeconds = totals?.duration ?: 0L
-        val countDiffers = songCount != null && songCount != storedSongs
-        val durationDiffers = duration != null && duration.toLong() != storedSeconds
-        return countDiffers || durationDiffers
+        return songCount != null && songCount != storedSongs
     }
 
     private fun AlbumDto.headerDiffers(stored: AlbumEntity): Boolean =
