@@ -209,7 +209,11 @@ private fun PlaybackSection(playbackVm: PlaybackSettingsViewModel) {
 private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
     val url by danceVm.baseUrl.collectAsStateWithLifecycle()
     val state by danceVm.state.collectAsStateWithLifecycle()
+    val signedIn by danceVm.signedIn.collectAsStateWithLifecycle()
     var address by rememberSaveable { mutableStateOf(danceVm.baseUrl.value.toString()) }
+    var token by rememberSaveable { mutableStateOf("") }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
@@ -230,6 +234,44 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Use the public server") }
+        Text("Account", style = MaterialTheme.typography.titleSmall)
+        if (signedIn) {
+            Text(
+                "Signed in. Edits you make are sent with this phone's token.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(
+                onClick = { danceVm.signOut() },
+                enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Sign out of DanceBrainz") }
+        } else {
+            Text(
+                "Sign in to edit dances and shoes ratings. Scan the pairing code from the DanceBrainz account page, " +
+                    "or paste a token from it.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(
+                onClick = {
+                    scope.launch { danceVm.scanAndSignIn(context) }
+                },
+                enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Scan pairing code") }
+            OutlinedTextField(
+                value = token,
+                onValueChange = { token = it },
+                label = { Text("Token (dbz_…)") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(
+                onClick = { danceVm.signInWithToken(token) },
+                enabled = !state.busy && token.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Sign in with token") }
+        }
         state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (state.busy) {

@@ -24,6 +24,18 @@ suspend fun ConnectViewModel.scanAndConnect(context: Context) {
     }
 }
 
+/** Scans a DanceBrainz pairing code and signs in with it. A cancelled scan does nothing; a failure is reported. */
+@Suppress("TooGenericExceptionCaught", "SwallowedException")
+suspend fun DanceBrainzViewModel.scanAndSignIn(context: Context) {
+    try {
+        scanQrCode(context.applicationContext)?.let { signInWithCode(it) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        reportError("The code scanner is not available on this device.")
+    }
+}
+
 /**
  * Opens the Google code scanner (runs in Play services, so the app needs no camera permission).
  * Returns the QR payload, or null if the user closed the scanner without a result.

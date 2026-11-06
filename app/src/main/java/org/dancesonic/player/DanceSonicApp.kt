@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
+import org.dancesonic.player.dance.DanceBrainzTokenStore
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
@@ -97,6 +98,9 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
         private set
 
     val danceBrainzSettings = DanceBrainzSettingsStore(dataStore)
+
+    /** The DanceBrainz sign-in token, encrypted. Empty until the user signs in. */
+    val danceBrainzTokens = DanceBrainzTokenStore(dataStore)
 
     val library =
         LibraryRepository(
