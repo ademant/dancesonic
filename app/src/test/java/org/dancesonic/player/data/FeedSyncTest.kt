@@ -170,6 +170,51 @@ class FeedSyncTest {
         }
 
     @Test
+    fun `fallback removes an album with its tracks and keeps playlist entries that named them`() =
+        runBlocking(Dispatchers.IO) {
+            server.advertised = listOf("apiKeyAuthentication")
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_FULL)
+            repo.syncIncremental(server.client)
+            val playlists = PlaylistRepository(db, clock = { 1_000L })
+            val playlistId = playlists.create("Waltz course")
+            playlists.addTrack(playlistId, "s-1", "One")
+
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            repo.syncIncremental(server.client)
+
+            assertNull(db.albumDao().get("al-1"))
+            assertNull(db.trackDao().get("s-1"))
+            assertEquals(0, db.trackDao().count())
+            assertEquals(listOf("s-1"), playlists.orderedTrackIds(playlistId))
+        }
+
+    @Test
+    fun `fallback picks up a track added to an album when its song count changes`() =
+        runBlocking(Dispatchers.IO) {
+            server.advertised = listOf("apiKeyAuthentication")
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_FULL)
+            repo.syncIncremental(server.client)
+            assertEquals(2, db.trackDao().count())
+
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_THREE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_THREE)
+            val second = repo.syncIncremental(server.client)
+
+            assertEquals(SyncMode.Changes, second.mode)
+            assertEquals(3, db.trackDao().count())
+            assertNotNull(db.trackDao().get("s-3"))
+        }
+
+    @Test
     fun `a tag-only edit rewrites only the changed song`() =
         runBlocking(Dispatchers.IO) {
             enqueueFirstSync()
@@ -248,6 +293,21 @@ class FeedSyncTest {
         const val FEED_FULL =
             """{"subsonic-response":{"status":"ok","libraryChanges":{"full":true,"serverTime":3000,""" +
                 """"artists":[],"albums":[],"songs":[],"playlists":[],"starred":[],"deleted":[]}}}"""
+
+        const val ALBUM_LIST_THREE =
+            """{"subsonic-response":{"status":"ok","albumList2":{"album":[""" +
+                """{"id":"al-1","name":"Night","artistId":"ar-1","artist":"Ada","year":1999,""" +
+                """"songCount":3,"duration":580}]}}}"""
+
+        const val ALBUM_THREE =
+            """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night","artist":"Ada",""" +
+                """"artistId":"ar-1","year":1999,"songCount":3,"duration":580,"song":[""" +
+                """{"id":"s-1","title":"One","album":"Night","artist":"Ada","albumId":"al-1","track":1,""" +
+                """"duration":200,"musicBrainzId":"rec-1"},""" +
+                """{"id":"s-2","title":"Two","album":"Night","artist":"Ada","albumId":"al-1","track":2,""" +
+                """"duration":180},""" +
+                """{"id":"s-3","title":"Three","album":"Night","artist":"Ada","albumId":"al-1","track":3,""" +
+                """"duration":200}]}}}"""
 
         const val ARTISTS =
             """{"subsonic-response":{"status":"ok","artists":{"index":[{"name":"A","artist":[""" +
