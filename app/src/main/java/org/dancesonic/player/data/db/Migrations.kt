@@ -83,3 +83,28 @@ val MIGRATION_6_7 =
 
 private const val FROM_6 = 6
 private const val TO_7 = 7
+
+/**
+ * Replaces the shoes-only queue with one queue for every DanceBrainz change, so shoes ratings and dance tags share
+ * a queue. Queued shoes changes are carried over.
+ */
+val MIGRATION_7_8 =
+    object : Migration(FROM_7, TO_8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `edit_queue` " +
+                    "(`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kind` TEXT NOT NULL, `mbid` TEXT NOT NULL, " +
+                    "`value` INTEGER, `danceName` TEXT, `path` TEXT, `qualifier` TEXT, `expectedDances` TEXT, " +
+                    "`status` TEXT NOT NULL, `queuedAt` INTEGER NOT NULL, `lastError` TEXT)",
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_edit_queue_mbid` ON `edit_queue` (`mbid`)")
+            db.execSQL(
+                "INSERT INTO `edit_queue` (`kind`, `mbid`, `value`, `status`, `queuedAt`, `lastError`) " +
+                    "SELECT 'shoes', `mbid`, `value`, 'queued', `queuedAt`, `lastError` FROM `shoes_edit`",
+            )
+            db.execSQL("DROP TABLE `shoes_edit`")
+        }
+    }
+
+private const val FROM_7 = 7
+private const val TO_8 = 8

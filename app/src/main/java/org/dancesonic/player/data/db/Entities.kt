@@ -108,16 +108,52 @@ data class ShoesRatingEntity(
     val checkedAt: Long,
 )
 
+/** The kinds of change in [EditEntity.kind]. */
+object EditKind {
+    /** A shoes rating set, or cleared when [EditEntity.value] is null. */
+    const val SHOES = "shoes"
+
+    /** A dance added to a recording, at [EditEntity.path] with [EditEntity.qualifier]. */
+    const val DANCE_ADD = "dance_add"
+
+    /** A dance removed from a recording, named [EditEntity.danceName]. */
+    const val DANCE_REMOVE = "dance_remove"
+}
+
+/** The states in [EditEntity.status]. */
+object EditStatus {
+    /** Waiting to be sent. */
+    const val QUEUED = "queued"
+
+    /** Sent, and held for review by a moderated DanceBrainz server. Not sent again. */
+    const val PENDING_REVIEW = "pending_review"
+
+    /** The track changed on DanceBrainz since the phone showed it, so nothing was sent. Not sent again. */
+    const val CONFLICT = "conflict"
+}
+
 /**
- * A shoes change the phone has made but DanceBrainz has not confirmed. [value] is null for a cleared rating.
- * One row per recording: a newer change replaces an older one. [lastError] is the message of the last failed send.
+ * A change the phone has made to DanceBrainz, queued until it is sent. Only the fields of its [kind] are set.
+ * A shoes change replaces an older queued shoes change of the same recording. [expectedDances] is the JSON list of
+ * dance names the phone showed when a removal was queued; a send checks it against DanceBrainz first.
+ * [lastError] is the message of the last failed send.
  */
-@Entity(tableName = "shoes_edit")
-data class ShoesEditEntity(
-    @PrimaryKey val mbid: String,
-    val value: Int?,
+@Entity(
+    tableName = "edit_queue",
+    indices = [Index("mbid")],
+)
+data class EditEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,
+    val mbid: String,
+    val value: Int? = null,
+    val danceName: String? = null,
+    val path: String? = null,
+    val qualifier: String? = null,
+    val expectedDances: String? = null,
+    val status: String = EditStatus.QUEUED,
     val queuedAt: Long,
-    val lastError: String?,
+    val lastError: String? = null,
 )
 
 @Entity(tableName = "playlist")

@@ -132,9 +132,9 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
                     note = "Signed out. Revoke the token on the account page too."
                 }
             }
-            val unsent = container.shoes.forgetAccount()
+            val unsent = container.edits.forgetAccount()
             container.danceBrainzTokens.clear()
-            if (unsent > 0) note = "$note $unsent shoes ratings were not sent yet and are removed."
+            if (unsent > 0) note = "$note $unsent changes were not sent yet and are removed."
             _state.value = DanceBrainzUiState(message = note)
         }
     }

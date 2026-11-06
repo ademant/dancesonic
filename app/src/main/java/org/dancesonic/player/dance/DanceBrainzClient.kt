@@ -81,7 +81,7 @@ class DanceBrainzClient internal constructor(
         private const val READ_TIMEOUT_SECONDS = 30L
 
         @OptIn(ExperimentalSerializationApi::class)
-        private val json: Json =
+        internal val json: Json =
             Json {
                 ignoreUnknownKeys = true
                 coerceInputValues = true

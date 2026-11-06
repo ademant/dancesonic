@@ -20,10 +20,10 @@ import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
 import org.dancesonic.player.dance.DanceBrainzTokenStore
+import org.dancesonic.player.data.DanceBrainzEdits
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
-import org.dancesonic.player.data.ShoesRepository
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
@@ -103,14 +103,9 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** The DanceBrainz sign-in token, encrypted. Empty until the user signs in. */
     val danceBrainzTokens = DanceBrainzTokenStore(dataStore)
 
-    /** Shoes ratings and the queue of changes not yet sent to DanceBrainz. */
-    val shoes =
-        ShoesRepository(
-            database.shoesRatingDao(),
-            database.shoesEditDao(),
-            danceBrainzTokens,
-            { currentDanceBrainzUrl },
-        )
+    /** DanceBrainz changes made on this phone (shoes ratings, dance tags) and the queue of those not yet sent. */
+    val edits =
+        DanceBrainzEdits(database, danceBrainzTokens, { currentDanceBrainzUrl })
 
     val library =
         LibraryRepository(

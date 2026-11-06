@@ -27,19 +27,19 @@ class ShoesUiTest {
 
     @Test
     fun `a track without an MBID says why it cannot be rated`() {
-        assertEquals("Cannot be rated: no MusicBrainz ID", shoesReason(mbid = null, signedIn = true))
+        assertEquals("Cannot be edited: no MusicBrainz ID", shoesReason(mbid = null, signedIn = true))
     }
 
     @Test
     fun `a signed-out viewer is told to sign in`() {
         assertEquals(
-            "Sign in to DanceBrainz to rate",
+            "Sign in to DanceBrainz to edit",
             shoesReason(mbid = "7f9c2a1e-0d3b-4c5a-9e8f-1a2b3c4d5e6f", signedIn = false),
         )
     }
 
     @Test
-    fun `a signed-in viewer can rate a track with an MBID`() {
+    fun `a signed-in viewer can edit a track with an MBID`() {
         assertNull(shoesReason(mbid = "7f9c2a1e-0d3b-4c5a-9e8f-1a2b3c4d5e6f", signedIn = true))
     }
 }

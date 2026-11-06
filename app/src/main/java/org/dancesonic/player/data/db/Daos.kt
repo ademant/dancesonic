@@ -186,6 +186,9 @@ interface DanceMetadataDao {
     @Query("SELECT danceType FROM dance_metadata WHERE mbid = :mbid ORDER BY danceType")
     suspend fun danceTypesFor(mbid: String): List<String>
 
+    @Query("SELECT danceType FROM dance_metadata WHERE mbid = :mbid ORDER BY danceType")
+    fun observeDanceTypesFor(mbid: String): Flow<List<String>>
+
     /** Replaces all dance types of one recording with the freshly fetched set. */
     @Transaction
     suspend fun replaceFor(

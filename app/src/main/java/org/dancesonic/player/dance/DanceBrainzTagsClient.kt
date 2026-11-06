@@ -1,0 +1,199 @@
+package org.dancesonic.player.dance
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Path
+import retrofit2.http.Query
+
+/**
+ * A dance value that matches a typed name. [path] is what a tag write takes, such as
+ * `gavotte/gavotte des montagnes`.
+ */
+data class DanceSuggestion(
+    val path: String,
+    val name: String,
+)
+
+/**
+ * A dance tag a recording currently has. [tagId] is what a replace takes; [qualifier] is `learn`, `disco` or
+ * `both`.
+ */
+data class CurrentDance(
+    val tagId: Long,
+    val name: String,
+    val qualifier: String,
+)
+
+/** The answer to a tag write: [pending] is true when the server held the change for review (a moderated server). */
+data class TagWriteResult(
+    val pending: Boolean,
+)
+
+/**
+ * Dance tags on DanceBrainz: suggestions while typing, the tags a recording has, and the two writes. A write needs
+ * a token; reading does not. The server has no version check on a write, so a caller that replaces tags must read
+ * them first (see [DanceBrainzEdits]).
+ */
+class DanceBrainzTagsClient internal constructor(
+    private val service: DanceBrainzTagsService,
+) {
+    constructor(baseUrl: HttpUrl, client: OkHttpClient = DanceBrainzClient.defaultHttpClient()) : this(
+        DanceBrainzClient.retrofitFor(baseUrl, client).create(DanceBrainzTagsService::class.java),
+    )
+
+    /** Dance values close to [name], best first. Empty when nothing is close. */
+    suspend fun suggest(name: String): List<DanceSuggestion> =
+        danceBrainzCall {
+            decodeSuggestions(service.suggest(name))
+                .mapNotNull { row -> row.path?.let { DanceSuggestion(path = it, name = row.tag.name) } }
+        }
+
+    /** The dance tags of [mbid], with their qualifiers. Sends [token] when given. */
+    suspend fun currentDances(
+        mbid: String,
+        token: String?,
+    ): List<CurrentDance> =
+        danceBrainzCall { service.tags(mbid, token?.let(::bearer)) }
+            .tags
+            .filter { it.tag.type == DANCE_TYPE }
+            .map { CurrentDance(tagId = it.tag.id, name = it.tag.name, qualifier = it.qualifier.orEmpty()) }
+
+    /** Adds the dance at [path] with [qualifier] to [mbid]. */
+    suspend fun addDance(
+        mbid: String,
+        path: String,
+        qualifier: String,
+        token: String,
+    ): TagWriteResult {
+        val body = AddTagsBody(listOf(AddTagDto(type = DANCE_TYPE, path = path, qualifier = qualifier)))
+        val outcome = danceBrainzCall { service.add(mbid, body, bearer(token)) }
+        return TagWriteResult(pending = outcome.change.status == PENDING)
+    }
+
+    /** Replaces all dance tags of [mbid] with [dances]. Tags of other types are left alone. */
+    suspend fun replaceDances(
+        mbid: String,
+        dances: List<CurrentDance>,
+        token: String,
+    ): TagWriteResult {
+        val body = ReplaceTagsBody(dances.map { ReplaceTagDto(tagId = it.tagId, qualifier = it.qualifier) })
+        val outcome = danceBrainzCall { service.replace(mbid, DANCE_TYPE, body, bearer(token)) }
+        return TagWriteResult(pending = outcome.change.status == PENDING)
+    }
+
+    private fun bearer(token: String): String = "Bearer $token"
+
+    companion object {
+        /** The tag type that holds dance names; shared with [DanceBrainzClient.DANCE_TAG_TYPE]. */
+        private const val DANCE_TYPE = DanceBrainzClient.DANCE_TAG_TYPE
+        private const val PENDING = "pending"
+    }
+}
+
+/**
+ * The suggestions in a suggest answer. The server answers `null`, not an empty list, when nothing is close, so the
+ * answer is read as a raw JSON element and only an array is decoded.
+ */
+private fun decodeSuggestions(answer: JsonElement): List<SuggestionDto> =
+    if (answer is JsonArray) {
+        DanceBrainzClient.json.decodeFromJsonElement(ListSerializer(SuggestionDto.serializer()), answer)
+    } else {
+        emptyList()
+    }
+
+/** Retrofit endpoints of the dance tags, relative to the DanceBrainz base URL. */
+internal interface DanceBrainzTagsService {
+    @GET("api/v1/tag-types/dance/suggest")
+    suspend fun suggest(
+        @Query("name") name: String,
+    ): JsonElement
+
+    @GET("api/v1/recordings/{mbid}/tags")
+    suspend fun tags(
+        @Path("mbid") mbid: String,
+        @Header("Authorization") bearer: String?,
+    ): TrackTagsDto
+
+    @POST("api/v1/recordings/{mbid}/tags")
+    suspend fun add(
+        @Path("mbid") mbid: String,
+        @Body body: AddTagsBody,
+        @Header("Authorization") bearer: String,
+    ): TagChangeDto
+
+    @PUT("api/v1/recordings/{mbid}/tags")
+    suspend fun replace(
+        @Path("mbid") mbid: String,
+        @Query("type") type: String,
+        @Body body: ReplaceTagsBody,
+        @Header("Authorization") bearer: String,
+    ): TagChangeDto
+}
+
+@Serializable
+internal data class SuggestionDto(
+    val tag: TagRefDto,
+    val path: String? = null,
+)
+
+@Serializable
+internal data class TrackTagsDto(
+    val tags: List<TrackTagDto> = emptyList(),
+)
+
+@Serializable
+internal data class TrackTagDto(
+    val tag: TagRefDto,
+    val qualifier: String? = null,
+)
+
+/** The parts of a tag the app uses. Other fields, such as the parent or aliases, are ignored. */
+@Serializable
+internal data class TagRefDto(
+    val id: Long = 0,
+    val type: String = "",
+    val name: String = "",
+)
+
+@Serializable
+internal data class TagChangeDto(
+    val change: ChangeStatusDto = ChangeStatusDto(),
+)
+
+@Serializable
+internal data class ChangeStatusDto(
+    val status: String = "",
+)
+
+@Serializable
+internal data class AddTagsBody(
+    val tags: List<AddTagDto>,
+)
+
+@Serializable
+internal data class AddTagDto(
+    val type: String,
+    val path: String,
+    val qualifier: String,
+)
+
+@Serializable
+internal data class ReplaceTagsBody(
+    val tags: List<ReplaceTagDto>,
+)
+
+@Serializable
+internal data class ReplaceTagDto(
+    @SerialName("tag_id") val tagId: Long,
+    val qualifier: String,
+)

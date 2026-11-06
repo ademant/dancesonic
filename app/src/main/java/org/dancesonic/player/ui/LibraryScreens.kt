@@ -134,7 +134,7 @@ private fun TrackList(
     libraryVm: LibraryViewModel,
 ) {
     var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
-    var ratingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    var editingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
     val shoesState by libraryVm.shoes.collectAsStateWithLifecycle()
     val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
     LaunchedEffect(tracks) { libraryVm.refreshShoes(tracks.mapNotNull { it.track.mbid }) }
@@ -149,7 +149,7 @@ private fun TrackList(
                 shoes = trackShoes(row.track.mbid, row.track.mbid?.let { shoesState[it] }, signedIn),
                 onPlay = { onPlay(tracks.indexOf(row)) },
                 onAddToPlaylist = { addingTrack = row },
-                onRate = { ratingTrack = row },
+                onEdit = { editingTrack = row },
             )
         }
     }
@@ -160,15 +160,14 @@ private fun TrackList(
             onDismiss = { addingTrack = null },
         )
     }
-    ratingTrack?.let { row ->
+    editingTrack?.let { row ->
         val mbid = row.track.mbid
         if (mbid != null) {
-            ShoesDialog(
+            TrackEditDialog(
                 title = row.track.title,
-                view = shoesState[mbid],
-                onRate = { value -> libraryVm.rate(mbid, value) },
-                onRetry = libraryVm::retryShoes,
-                onDismiss = { ratingTrack = null },
+                mbid = mbid,
+                libraryVm = libraryVm,
+                onDismiss = { editingTrack = null },
             )
         }
     }
@@ -228,7 +227,7 @@ private fun TrackRow(
     shoes: TrackShoes,
     onPlay: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onRate: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val track = row.track
     Row(
@@ -242,7 +241,7 @@ private fun TrackRow(
             Text(track.artistName + tempo, style = MaterialTheme.typography.bodySmall)
             shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
-        TextButton(onClick = onRate, enabled = shoes.canRate) { Text("Shoes") }
+        TextButton(onClick = onEdit, enabled = shoes.canRate) { Text("Edit") }
         TextButton(onClick = onAddToPlaylist) { Text("+ Playlist") }
     }
     HorizontalDivider()
