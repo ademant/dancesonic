@@ -96,7 +96,7 @@ class FolksonicFeedTest {
     @Test
     fun `extension support is asked once per client`() =
         runBlocking {
-            fake.enqueueJson(EXTENSIONS)
+            fake.advertised = listOf("apiKeyAuthentication", "tinysonicLibraryChanges")
 
             assertTrue(client.supports("tinysonicLibraryChanges"))
             assertTrue(client.supports("apiKeyAuthentication"))
@@ -131,10 +131,5 @@ class FolksonicFeedTest {
         const val ALBUM_STUB =
             """{"subsonic-response":{"status":"ok","album":{"id":"al-1","name":"Night","artist":"Ada",""" +
                 """"artistId":"ar-1","year":1999,"songCount":2,"duration":380,"song":[]}}}"""
-
-        const val EXTENSIONS =
-            """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
-                """{"name":"apiKeyAuthentication","versions":[1]},""" +
-                """{"name":"tinysonicLibraryChanges","versions":[1]}]}}"""
     }
 }

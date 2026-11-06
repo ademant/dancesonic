@@ -230,7 +230,9 @@ class ConnectViewModel(
         viewModelScope.launch {
             try {
                 val settings = obtain()
-                SubsonicClient(settings).checkConnection()
+                val verified = SubsonicClient(settings)
+                verified.checkConnection()
+                container.adoptCatalogClient(verified)
                 danceBrainz?.let { DanceBrainzClient(it).checkServer() }
                 if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
                     container.library.clearCatalog()

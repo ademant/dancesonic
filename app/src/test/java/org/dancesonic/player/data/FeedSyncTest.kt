@@ -147,7 +147,7 @@ class FeedSyncTest {
     @Test
     fun `without a change feed the comparison fetches only the albums that differ`() =
         runBlocking(Dispatchers.IO) {
-            server.enqueueJson(EXTENSIONS_WITHOUT_FEED)
+            server.advertised = listOf("apiKeyAuthentication")
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)
             server.enqueueJson(EMPTY_ALBUM_LIST)
@@ -199,7 +199,7 @@ class FeedSyncTest {
 
     /** Extensions, sync point, artists, two album pages and one album: what a first sync reads. */
     private fun enqueueFirstSync() {
-        server.enqueueJson(EXTENSIONS_WITH_FEED)
+        server.advertised = listOf("apiKeyAuthentication", "tinysonicLibraryChanges")
         server.enqueueJson(CHECKPOINT_AT_1000)
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)
@@ -210,11 +210,6 @@ class FeedSyncTest {
     private fun serverUrl(): String = server.settings.baseUrl.toString()
 
     private companion object {
-        const val EXTENSIONS_WITH_FEED =
-            """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
-                """{"name":"apiKeyAuthentication","versions":[1]},""" +
-                """{"name":"tinysonicLibraryChanges","versions":[1]}]}}"""
-
         const val FEED_ALBUM_ONLY =
             """{"subsonic-response":{"status":"ok","libraryChanges":{"full":false,"serverTime":2000,""" +
                 """"artists":[],"albums":[{"id":"al-1","updated":1500}],"songs":[],"playlists":[],""" +
@@ -227,10 +222,6 @@ class FeedSyncTest {
                 """"duration":200,"musicBrainzId":"rec-1"},""" +
                 """{"id":"s-2","title":"Two","album":"Night","artist":"Ada","albumId":"al-1","track":2,""" +
                 """"duration":180}]}}}"""
-
-        const val EXTENSIONS_WITHOUT_FEED =
-            """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[""" +
-                """{"name":"apiKeyAuthentication","versions":[1]}]}}"""
 
         const val CHECKPOINT_AT_1000 =
             """{"subsonic-response":{"status":"ok","libraryChanges":{"full":false,"serverTime":1000,""" +

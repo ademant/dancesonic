@@ -138,8 +138,6 @@ class DanceLookupTest {
                     syncState = newTestSyncStateStore(ApplicationProvider.getApplicationContext()),
                 )
             source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = 120, raters = 2))
-            // A sync with a state store asks for the extension list once; the client keeps the answer.
-            server.enqueueJson(NO_EXTENSIONS)
             enqueueLibrary()
             withState.sync(server.client)
             source.key = "source-b"
@@ -192,8 +190,6 @@ class DanceLookupTest {
         const val ALBUM_LIST_ONE =
             """{"subsonic-response":{"status":"ok","albumList2":{"album":[{"id":"al-1","name":"Night",""" +
                 """"artistId":"ar-1","artist":"Ada","year":1999,"songCount":1,"duration":200}]}}}"""
-
-        const val NO_EXTENSIONS = """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[]}}"""
 
         const val EMPTY_ALBUM_LIST = """{"subsonic-response":{"status":"ok","albumList2":{"album":[]}}}"""
 
