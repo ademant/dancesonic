@@ -57,6 +57,7 @@ fun ConfigScreen(
     vm: ConnectViewModel,
     danceVm: DanceBrainzViewModel,
     playbackVm: PlaybackSettingsViewModel,
+    offlineVm: OfflineViewModel,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -156,6 +157,8 @@ fun ConfigScreen(
         }
 
         PlaybackSection(playbackVm)
+
+        OfflineSection(offlineVm)
 
         DanceBrainzSection(danceVm)
     }

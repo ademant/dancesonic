@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.ArtistEntity
 import org.dancesonic.player.data.db.DanceTypeCount
+import org.dancesonic.player.data.db.KeptKind
 import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.playback.PlayerController
 
@@ -80,6 +81,9 @@ fun LibraryScreen(
             openAlbum != null ->
                 key(openAlbum) {
                     val tracks by remember(openAlbum) { vm.tracks(openAlbum) }.collectAsStateWithLifecycle(emptyList())
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        KeepOfflineToggle(KeptKind.ALBUM, openAlbum, vm.keptCollections)
+                    }
                     TrackList(
                         tracks = tracks,
                         onPlay = { index -> player.play(tracks, index) },

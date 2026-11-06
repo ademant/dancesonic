@@ -7,7 +7,6 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -15,21 +14,44 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Keeps played audio on disk, least recently used first, under [maxBytes]. Entries are keyed by song id (see
- * [org.dancesonic.player.playback.PlayerController]), never by the stream URL, which carries the API key.
- * Cleared when the connection changes, because song ids belong to one server.
+ * Keeps audio on disk under [maxBytes], least recently used first, except for kept songs (see [setKept]), which stay
+ * until they are unmarked. Entries are keyed by song id (see [org.dancesonic.player.playback.PlayerController]),
+ * never by the stream URL, which carries the API key. Cleared when the connection changes, because song ids belong
+ * to one server.
  */
 @Suppress("UnsafeOptInUsageError") // Media3 cache classes are marked unstable; see PlayerController.
 class AudioCache(
     context: Context,
     maxBytes: Long = DEFAULT_MAX_BYTES,
 ) {
+    /** The songs that must stay on disk, or null until the first set is loaded. See [setKept]. */
+    @Volatile
+    private var keptSongs: Set<String>? = null
+
     private val cache: SimpleCache =
         SimpleCache(
             File(context.cacheDir, DIRECTORY),
-            LeastRecentlyUsedCacheEvictor(maxBytes),
+            // Until the kept set is known, every song counts as kept, so the cache evicts nothing that might be kept.
+            KeepAwareEvictor(maxBytes) { songId -> keptSongs?.contains(songId) ?: true },
             StandaloneDatabaseProvider(context),
         )
+
+    /**
+     * Replaces the songs that must stay on disk. Until this is first called, nothing is evicted. Read by the evictor
+     * when it next has to make room.
+     */
+    fun setKept(songIds: Set<String>) {
+        keptSongs = songIds
+    }
+
+    /** Bytes used by the whole cache: kept songs and played ones together. */
+    fun cacheBytes(): Long = cache.cacheSpace
+
+    /** Removes every cached song that is not in [songIds], such as songs a sync dropped from the server. */
+    suspend fun removeUnknown(songIds: Set<String>) =
+        withContext(Dispatchers.IO) {
+            cache.keys.toList().filterNot(songIds::contains).forEach(cache::removeResource)
+        }
 
     /**
      * Wraps [upstream] so that bytes already on disk are read from the cache. A cache error falls back to the

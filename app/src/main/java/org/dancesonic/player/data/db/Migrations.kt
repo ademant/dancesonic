@@ -108,3 +108,18 @@ val MIGRATION_7_8 =
 
 private const val FROM_7 = 7
 private const val TO_8 = 8
+
+/** Adds the albums and playlists the user keeps on the phone. Nothing existing changes. */
+val MIGRATION_8_9 =
+    object : Migration(FROM_8, TO_9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `kept_collection` " +
+                    "(`kind` TEXT NOT NULL, `refId` TEXT NOT NULL, `keptAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`kind`, `refId`))",
+            )
+        }
+    }
+
+private const val FROM_8 = 8
+private const val TO_9 = 9

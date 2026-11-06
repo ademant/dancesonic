@@ -17,8 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistItemEntity::class,
         ShoesRatingEntity::class,
         EditEntity::class,
+        KeptCollectionEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -40,6 +41,8 @@ abstract class DanceSonicDatabase : RoomDatabase() {
 
     abstract fun editQueueDao(): EditQueueDao
 
+    abstract fun keptCollectionDao(): KeptCollectionDao
+
     companion object {
         fun create(context: Context): DanceSonicDatabase =
             Room.databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
@@ -51,6 +54,7 @@ abstract class DanceSonicDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addCallback(

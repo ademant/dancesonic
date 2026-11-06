@@ -134,6 +134,9 @@ interface TrackDao {
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
+    @Query("SELECT id FROM track")
+    suspend fun allIds(): List<String>
+
     @Upsert
     suspend fun upsertAll(tracks: List<TrackEntity>)
 

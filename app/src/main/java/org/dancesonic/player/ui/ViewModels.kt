@@ -205,6 +205,7 @@ class ConnectViewModel(
             container.library.clearCatalog()
             container.syncState.clear()
             container.audioCache.clear()
+            container.keptCollections.forgetAll()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
         }
@@ -248,6 +249,7 @@ class ConnectViewModel(
                     container.library.clearCatalog()
                     container.syncState.clear()
                     container.audioCache.clear()
+                    container.keptCollections.forgetAll()
                 }
                 container.settingsStore.save(settings)
                 danceBrainz?.let { container.danceBrainzSettings.save(it) }
@@ -409,6 +411,9 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     /** A track's details from the local database, for the preview before it plays. */
     suspend fun trackDetail(id: String): TrackDetail? = container.library.trackDetail(id)
 
+    /** Which albums and playlists are kept on the phone; see [KeepOfflineToggle]. */
+    val keptCollections = container.keptCollections
+
     /**
      * Sets the shoes rating of [mbid] to [value], or clears it when [value] is null. It is shown at once and sent
      * now or later.
@@ -488,6 +493,9 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     fun playlist(id: Long) = container.playlists.playlist(id)
+
+    /** Which albums and playlists are kept on the phone; see [KeepOfflineToggle]. */
+    val keptCollections = container.keptCollections
 
     fun groups(playlistId: Long) = container.playlists.groups(playlistId)
 

@@ -73,6 +73,7 @@ fun DanceSonicRoot(container: AppContainer) {
     val playlistVm: PlaylistViewModel = viewModel { PlaylistViewModel(container) }
     val danceVm: DanceBrainzViewModel = viewModel { DanceBrainzViewModel(container) }
     val playbackVm: PlaybackSettingsViewModel = viewModel { PlaybackSettingsViewModel(container) }
+    val offlineVm: OfflineViewModel = viewModel { OfflineViewModel(container) }
 
     Scaffold(
         bottomBar = {
@@ -94,7 +95,7 @@ fun DanceSonicRoot(container: AppContainer) {
     ) { padding ->
         Surface(Modifier.padding(padding).fillMaxWidth()) {
             if (showConfig) {
-                ConfigScreen(connectVm, danceVm, playbackVm, onBack = { showConfig = false })
+                ConfigScreen(connectVm, danceVm, playbackVm, offlineVm, onBack = { showConfig = false })
             } else {
                 when (tab) {
                     Tab.Library ->

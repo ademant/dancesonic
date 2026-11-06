@@ -21,6 +21,7 @@ import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
 import org.dancesonic.player.dance.DanceBrainzTokenStore
 import org.dancesonic.player.data.DanceBrainzEdits
+import org.dancesonic.player.data.KeptCollections
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
@@ -30,6 +31,11 @@ import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.TrackEntity
 import org.dancesonic.player.playback.AudioCache
 import org.dancesonic.player.playback.AudioPrefetcher
+import org.dancesonic.player.playback.DownloadConditions
+import org.dancesonic.player.playback.DownloadNetwork
+import org.dancesonic.player.playback.DownloadSettings
+import org.dancesonic.player.playback.DownloadSettingsStore
+import org.dancesonic.player.playback.OfflineDownloads
 import org.dancesonic.player.playback.PlaybackSettings
 import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
@@ -72,23 +78,47 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** Shared client for media streaming; sends requests to the configured server with the API key. */
     val httpClient: OkHttpClient = SubsonicHttp.okHttpClient { currentSettings }
 
-    /** Played audio kept on disk. Created on first playback, so the directory is opened only when it is needed. */
+    /**
+     * Audio kept on disk: played songs and the songs of kept albums and playlists. Created on first use. Until the
+     * kept songs are known, the cache evicts nothing (see [AudioCache.setKept]).
+     */
     val audioCache: AudioCache by lazy { AudioCache(context) }
 
     /** File sizes of the queued songs, read by the stream source to bound its requests. */
     val streamLengths = StreamLengths()
 
-    /** Downloads a track into the audio cache when it starts, so playback reads it once. */
+    /** The stream source for playback, prefetch and downloads: the authenticated client, bounded by known sizes. */
     @Suppress("UnsafeOptInUsageError") // Media3 stream classes are marked unstable; see PlayerController.
-    private val audioPrefetcher: AudioPrefetcher by lazy {
-        AudioPrefetcher(
-            audioCache,
-            StreamDataSource.Factory(OkHttpDataSource.Factory(httpClient), sizeOf = streamLengths::sizeOf),
-            appScope,
+    private val streamSource =
+        StreamDataSource.Factory(
+            OkHttpDataSource.Factory(httpClient),
+            sizeOf = streamLengths::sizeOf,
         )
-    }
+
+    /** Downloads a track into the audio cache when it starts, so playback reads it once. */
+    private val audioPrefetcher: AudioPrefetcher by lazy { AudioPrefetcher(audioCache, streamSource, appScope) }
 
     val database: DanceSonicDatabase = DanceSonicDatabase.create(context)
+
+    /** The download choices, kept in memory so the downloads read them without waiting for the store. */
+    @Volatile
+    var currentDownloadSettings: DownloadSettings = DownloadSettings()
+        private set
+
+    val downloadSettingsStore = DownloadSettingsStore(dataStore)
+
+    /** Downloads the tracks of kept albums and playlists. Started in [init]. */
+    val offline =
+        OfflineDownloads(
+            database,
+            { audioCache },
+            streamSource,
+            conditions = { DownloadConditions(currentSettings, currentDownloadSettings.allowMobileData) },
+            network = DownloadNetwork(context),
+            scope = appScope,
+        )
+
+    val keptCollections = KeptCollections(database)
 
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
     val syncState = SyncStateStore(dataStore)
@@ -190,8 +220,18 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
 
     init {
         settingsStore.settings
-            .onEach { currentSettings = it }
+            .onEach {
+                currentSettings = it
+                offline.kick()
+            }
             .launchIn(appScope)
+        downloadSettingsStore.settings
+            .onEach {
+                currentDownloadSettings = it
+                offline.kick()
+            }
+            .launchIn(appScope)
+        offline.start()
         danceBrainzSettings.baseUrl
             .onEach { currentDanceBrainzUrl = it }
             .launchIn(appScope)
