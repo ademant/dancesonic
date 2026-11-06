@@ -193,6 +193,26 @@ class FeedSyncTest {
         }
 
     @Test
+    fun `fallback does not refetch an album whose listed duration is above its song total`() =
+        runBlocking(Dispatchers.IO) {
+            server.advertised = listOf("apiKeyAuthentication")
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_ONE)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            server.enqueueJson(ALBUM_FULL)
+            repo.syncIncremental(server.client)
+
+            // Navidrome lists 385 s for songs that add up to 380 s; the same album must cost no album fetch.
+            server.enqueueJson(ARTISTS)
+            server.enqueueJson(ALBUM_LIST_LONGER_DURATION)
+            server.enqueueJson(EMPTY_ALBUM_LIST)
+            val second = repo.syncIncremental(server.client)
+
+            assertEquals(SyncMode.Unchanged, second.mode)
+            assertEquals(0, second.rowsWritten)
+        }
+
+    @Test
     fun `fallback picks up a track added to an album when its song count changes`() =
         runBlocking(Dispatchers.IO) {
             server.advertised = listOf("apiKeyAuthentication")
@@ -308,6 +328,11 @@ class FeedSyncTest {
                 """"duration":180},""" +
                 """{"id":"s-3","title":"Three","album":"Night","artist":"Ada","albumId":"al-1","track":3,""" +
                 """"duration":200}]}}}"""
+
+        const val ALBUM_LIST_LONGER_DURATION =
+            """{"subsonic-response":{"status":"ok","albumList2":{"album":[""" +
+                """{"id":"al-1","name":"Night","artistId":"ar-1","artist":"Ada","year":1999,""" +
+                """"songCount":2,"duration":385}]}}}"""
 
         const val ARTISTS =
             """{"subsonic-response":{"status":"ok","artists":{"index":[{"name":"A","artist":[""" +
