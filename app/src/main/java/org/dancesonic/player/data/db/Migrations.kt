@@ -60,3 +60,26 @@ val MIGRATION_5_6 =
 
 private const val FROM_5 = 5
 private const val TO_6 = 6
+
+/**
+ * Adds the shoes ratings read from DanceBrainz and the queue of shoes changes not yet sent. Nothing existing
+ * changes.
+ */
+val MIGRATION_6_7 =
+    object : Migration(FROM_6, TO_7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `shoes_rating` " +
+                    "(`mbid` TEXT NOT NULL, `myShoes` INTEGER, `median` REAL, `raters` INTEGER NOT NULL, " +
+                    "`checkedAt` INTEGER NOT NULL, PRIMARY KEY(`mbid`))",
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `shoes_edit` " +
+                    "(`mbid` TEXT NOT NULL, `value` INTEGER, `queuedAt` INTEGER NOT NULL, `lastError` TEXT, " +
+                    "PRIMARY KEY(`mbid`))",
+            )
+        }
+    }
+
+private const val FROM_6 = 6
+private const val TO_7 = 7

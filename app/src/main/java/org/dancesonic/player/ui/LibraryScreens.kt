@@ -62,6 +62,7 @@ fun LibraryScreen(
                     tracks = tracks,
                     onPlay = { index -> player.play(tracks, index) },
                     playlistVm = playlistVm,
+                    libraryVm = vm,
                 )
             }
             openArtist != null -> {
@@ -130,8 +131,13 @@ private fun TrackList(
     tracks: List<TrackWithTempo>,
     onPlay: (Int) -> Unit,
     playlistVm: PlaylistViewModel,
+    libraryVm: LibraryViewModel,
 ) {
     var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    var ratingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
+    val shoesState by libraryVm.shoes.collectAsStateWithLifecycle()
+    val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
+    LaunchedEffect(tracks) { libraryVm.refreshShoes(tracks.mapNotNull { it.track.mbid }) }
     if (tracks.isEmpty()) {
         EmptyHint("No tracks.")
         return
@@ -140,8 +146,10 @@ private fun TrackList(
         items(tracks, key = { it.track.id }) { row ->
             TrackRow(
                 row = row,
+                shoes = trackShoes(row.track.mbid, row.track.mbid?.let { shoesState[it] }, signedIn),
                 onPlay = { onPlay(tracks.indexOf(row)) },
                 onAddToPlaylist = { addingTrack = row },
+                onRate = { ratingTrack = row },
             )
         }
     }
@@ -151,6 +159,18 @@ private fun TrackList(
             trackId = row.track.id,
             onDismiss = { addingTrack = null },
         )
+    }
+    ratingTrack?.let { row ->
+        val mbid = row.track.mbid
+        if (mbid != null) {
+            ShoesDialog(
+                title = row.track.title,
+                view = shoesState[mbid],
+                onRate = { value -> libraryVm.rate(mbid, value) },
+                onRetry = libraryVm::retryShoes,
+                onDismiss = { ratingTrack = null },
+            )
+        }
     }
 }
 
@@ -196,6 +216,7 @@ fun DanceScreen(
                 tracks = tracks,
                 onPlay = { index -> player.play(tracks, index) },
                 playlistVm = playlistVm,
+                libraryVm = vm,
             )
         }
     }
@@ -204,8 +225,10 @@ fun DanceScreen(
 @Composable
 private fun TrackRow(
     row: TrackWithTempo,
+    shoes: TrackShoes,
     onPlay: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onRate: () -> Unit,
 ) {
     val track = row.track
     Row(
@@ -217,7 +240,9 @@ private fun TrackRow(
             Text(track.title, style = MaterialTheme.typography.bodyLarge)
             val tempo = row.tempoBpm?.let { " · $it BPM" }.orEmpty()
             Text(track.artistName + tempo, style = MaterialTheme.typography.bodySmall)
+            shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
+        TextButton(onClick = onRate, enabled = shoes.canRate) { Text("Shoes") }
         TextButton(onClick = onAddToPlaylist) { Text("+ Playlist") }
     }
     HorizontalDivider()

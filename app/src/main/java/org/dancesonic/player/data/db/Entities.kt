@@ -95,6 +95,31 @@ data class DanceLookupEntity(
     val raters: Int? = null,
 )
 
+/**
+ * The DanceBrainz shoes ratings last read for a recording: the signed-in viewer's own value ([myShoes], null when
+ * unrated or signed out) and the public median. [checkedAt] is when they were read.
+ */
+@Entity(tableName = "shoes_rating")
+data class ShoesRatingEntity(
+    @PrimaryKey val mbid: String,
+    val myShoes: Int?,
+    val median: Double?,
+    val raters: Int,
+    val checkedAt: Long,
+)
+
+/**
+ * A shoes change the phone has made but DanceBrainz has not confirmed. [value] is null for a cleared rating.
+ * One row per recording: a newer change replaces an older one. [lastError] is the message of the last failed send.
+ */
+@Entity(tableName = "shoes_edit")
+data class ShoesEditEntity(
+    @PrimaryKey val mbid: String,
+    val value: Int?,
+    val queuedAt: Long,
+    val lastError: String?,
+)
+
 @Entity(tableName = "playlist")
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

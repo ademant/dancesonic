@@ -138,10 +138,14 @@ internal data class ServiceInfoDto(
     val service: String = "",
 )
 
-/** A DanceBrainz server could not be used. The message is for the user. */
+/**
+ * A DanceBrainz server could not be used. The message is for the user. [httpCode] is the status the server
+ * answered with, or null when no answer came (the phone is offline or the server is unreachable).
+ */
 class DanceBrainzException(
     message: String,
     cause: Throwable? = null,
+    val httpCode: Int? = null,
 ) : IOException(message, cause)
 
 @Serializable

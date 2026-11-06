@@ -1,17 +1,14 @@
 package org.dancesonic.player.dance
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
-import retrofit2.HttpException
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
-import java.io.IOException
 
 /**
  * The signed-in DanceBrainz calls: redeeming a pairing code, checking a token, and revoking one. Every call here
@@ -48,28 +45,7 @@ class DanceBrainzAccountClient internal constructor(
 
     private fun bearer(token: String): String = "Bearer $token"
 
-    private suspend fun <T> answerOrThrow(block: suspend () -> T): T =
-        try {
-            block()
-        } catch (e: IOException) {
-            throw DanceBrainzException("Could not reach DanceBrainz: ${e.message ?: "no answer"}", e)
-        } catch (e: HttpException) {
-            throw DanceBrainzException(messageFor(e.code()), e)
-        } catch (e: SerializationException) {
-            throw DanceBrainzException("DanceBrainz answered in a form the app does not know", e)
-        }
-
-    private fun messageFor(code: Int): String =
-        when (code) {
-            UNAUTHORIZED -> "The code or token was not accepted. It may be wrong, expired or revoked."
-            FORBIDDEN -> "This account is not allowed to do that."
-            else -> "DanceBrainz answered with HTTP $code"
-        }
-
-    private companion object {
-        const val UNAUTHORIZED = 401
-        const val FORBIDDEN = 403
-    }
+    private suspend fun <T> answerOrThrow(block: suspend () -> T): T = danceBrainzCall(block)
 }
 
 /** Retrofit endpoints of the signed-in DanceBrainz API, relative to the base URL. */

@@ -20,6 +20,7 @@ import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzException
+import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.db.PlaylistItemRow
@@ -294,6 +295,7 @@ class ConnectViewModel(
                             _state.update { it.copy(syncProgress = SyncProgress(done, total)) }
                         }
                     }
+                container.shoes.flush()
                 _state.value = ConnectUiState(lastSync = syncMessage(result))
             } catch (e: CancellationException) {
                 throw e
@@ -339,11 +341,50 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         container.library.danceTypes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
+    /** Shoes state by recording MBID, including changes not yet sent. */
+    val shoes: StateFlow<Map<String, ShoesView>> =
+        container.shoes.observe()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
+
+    /** True while a DanceBrainz token is stored on this phone, so shoes ratings can be changed. */
+    val signedIn: StateFlow<Boolean> =
+        container.danceBrainzTokens.credential
+            .map { it != null }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), false)
+
+    init {
+        // A change queued offline is sent as soon as the library is opened again.
+        viewModelScope.launch { container.shoes.flush() }
+    }
+
     fun albums(artistId: String) = container.library.albums(artistId)
 
     fun tracks(albumId: String) = container.library.tracksWithTempo(albumId)
 
     fun tracksForDance(danceType: String) = container.library.tracksForDanceWithTempo(danceType)
+
+    /**
+     * Sets the shoes rating of [mbid] to [value], or clears it when [value] is null. It is shown at once and sent
+     * now or later.
+     */
+    fun rate(
+        mbid: String,
+        value: Int?,
+    ) {
+        viewModelScope.launch {
+            if (value == null) container.shoes.clear(mbid) else container.shoes.rate(mbid, value)
+        }
+    }
+
+    /** Sends the queued shoes changes again, for the Retry action. */
+    fun retryShoes() {
+        viewModelScope.launch { container.shoes.flush() }
+    }
+
+    /** Reads the public shoes median and, when signed in, the viewer's rating for the tracks on screen. */
+    fun refreshShoes(mbids: List<String>) {
+        viewModelScope.launch { container.shoes.refresh(mbids) }
+    }
 }
 
 /** Course playlists, stored on the device. */
