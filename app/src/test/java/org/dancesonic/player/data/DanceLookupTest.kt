@@ -152,6 +152,66 @@ class DanceLookupTest {
             assertNull(db.danceLookupDao().bpmFor("rec-1"))
         }
 
+    @Test
+    fun `refresh checks only recordings last checked more than a day ago`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueLibrary()
+            repo.sync(server.client)
+            now = 1_000L + hour
+
+            val soon = repo.refreshDanceBrainz(full = false)
+            now = 1_000L + day + hour
+            val later = repo.refreshDanceBrainz(full = false)
+
+            assertEquals(DanceRefresh(checked = 0, failed = 0), soon)
+            assertEquals(DanceRefresh(checked = 1, failed = 0), later)
+            assertEquals(listOf("rec-1", "rec-1"), source.lookedUp)
+        }
+
+    @Test
+    fun `full rebuild checks every recording, even one checked a moment ago`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueLibrary()
+            repo.sync(server.client)
+            now = 1_000L + hour
+
+            val result = repo.refreshDanceBrainz(full = true)
+
+            assertEquals(DanceRefresh(checked = 1, failed = 0), result)
+            assertEquals(listOf("rec-1", "rec-1"), source.lookedUp)
+        }
+
+    @Test
+    fun `a failed refresh keeps the dance types and tempo the recording already had`() =
+        runBlocking(Dispatchers.IO) {
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = 118, raters = 3))
+            enqueueLibrary()
+            repo.sync(server.client)
+            source.failNext = 1
+            now = 1_000L + 2 * day
+
+            val result = repo.refreshDanceBrainz(full = true)
+
+            assertEquals(DanceRefresh(checked = 1, failed = 1), result)
+            assertEquals(listOf("Gavotte"), db.danceMetadataDao().danceTypesFor("rec-1"))
+            assertEquals(118, db.danceLookupDao().bpmFor("rec-1"))
+        }
+
+    @Test
+    fun `refresh reports progress from zero to the recordings due`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueLibrary()
+            repo.sync(server.client)
+            val reported = mutableListOf<Pair<Int, Int>>()
+
+            repo.refreshDanceBrainz(full = true) { done, total -> reported += done to total }
+
+            assertEquals(listOf(0 to 1, 1 to 1), reported)
+        }
+
+    private val hour = 60L * 60 * 1000
+    private val day = 24 * hour
+
     private fun enqueueLibrary() {
         server.enqueueJson(ARTISTS)
         server.enqueueJson(ALBUM_LIST_ONE)

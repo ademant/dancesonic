@@ -1,5 +1,6 @@
 package org.dancesonic.player.ui
 
+import android.database.sqlite.SQLiteException
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,6 +20,7 @@ import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzCredential
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceBrainzPairingUri
+import org.dancesonic.player.data.DanceRefresh
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicException
 
@@ -45,6 +47,36 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
         container.danceBrainzTokens.credential
             .map { it != null }
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * Re-checks the DanceBrainz data of the library: the recent ones, or every recording when [full]. One check runs
+     * at a time; the state shows its progress and the result.
+     */
+    fun refreshDance(full: Boolean) {
+        if (_state.value.busy) return
+        viewModelScope.launch {
+            _state.value = DanceBrainzUiState(busy = true, message = "Checking DanceBrainz…")
+            try {
+                val result =
+                    container.library.refreshDanceBrainz(full) { done, total ->
+                        _state.value = DanceBrainzUiState(busy = true, message = "Checked $done of $total recordings…")
+                    }
+                _state.value = DanceBrainzUiState(message = refreshMessage(result))
+            } catch (e: SQLiteException) {
+                val reason = e.javaClass.simpleName
+                _state.value = DanceBrainzUiState(error = "The dance data could not be refreshed ($reason).")
+            }
+        }
+    }
+
+    private fun refreshMessage(result: DanceRefresh): String =
+        when {
+            result.checked == 0 -> "Nothing to check: the library is empty or every recording was checked recently."
+            result.failed == 0 -> "Checked ${result.checked} recordings."
+            else ->
+                "Checked ${result.checked} recordings; ${result.failed} got no answer and keep their old data. " +
+                    "Try again later."
+        }
 
     /** Shows [message] as an error; used when the code scanner itself fails. */
     fun reportError(message: String) {

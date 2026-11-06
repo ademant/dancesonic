@@ -221,6 +221,17 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
         Text("Server: $url")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { danceVm.refreshDance(full = false) }, enabled = !state.busy) { Text("Refresh") }
+            OutlinedButton(onClick = { danceVm.refreshDance(full = true) }, enabled = !state.busy) {
+                Text("Full rebuild")
+            }
+        }
+        Text(
+            "Refresh checks dance types and tempo that are more than a day old. Full rebuild checks every recording. " +
+                "Old data stays until DanceBrainz answers.",
+            style = MaterialTheme.typography.bodySmall,
+        )
         Text(
             "Dance types and tempo are looked up anonymously. No key is sent to DanceBrainz. " +
                 "Saving a different server replaces the dance data with the new server's.",
