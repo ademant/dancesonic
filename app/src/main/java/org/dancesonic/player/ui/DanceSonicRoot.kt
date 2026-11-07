@@ -138,8 +138,10 @@ fun ConnectScreen(vm: ConnectViewModel) {
     var method by rememberSaveable { mutableStateOf(ConnectMethod.Qr) }
     var address by rememberSaveable { mutableStateOf("https://") }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var apiKey by rememberSaveable { mutableStateOf("") }
+    // Secrets are plain remember, not saved: they never reach the saved-instance state, and they are cleared
+    // after each attempt. Leaving the screen drops them too.
+    var password by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -194,7 +196,10 @@ fun ConnectScreen(vm: ConnectViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    onClick = { vm.signInWithPassword(address, username, password) },
+                    onClick = {
+                        vm.signInWithPassword(address, username, password)
+                        password = ""
+                    },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Sign in") }
@@ -216,7 +221,10 @@ fun ConnectScreen(vm: ConnectViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
-                    onClick = { vm.connectWithApiKey(address, apiKey) },
+                    onClick = {
+                        vm.connectWithApiKey(address, apiKey)
+                        apiKey = ""
+                    },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Connect") }

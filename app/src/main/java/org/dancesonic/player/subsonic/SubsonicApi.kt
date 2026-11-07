@@ -38,7 +38,11 @@ fun ServerSettings.streamUrl(songId: String): HttpUrl =
         .addQueryParameter("id", songId)
         .build()
 
-/** Parses user input into a server URL. Only `https://` is accepted. */
+/**
+ * Parses user input into a server URL. Only `https://` is accepted. The address must be a plain base URL: user
+ * information, a query and a fragment are rejected, so no credential can be stored or sent as part of it. The error
+ * messages never repeat the address.
+ */
 object ServerUrl {
     fun parse(input: String): HttpUrl {
         val trimmed = input.trim()
@@ -46,6 +50,12 @@ object ServerUrl {
             "The server address must start with https://"
         }
         val url = trimmed.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid server address")
+        require(url.encodedUsername.isEmpty() && url.encodedPassword.isEmpty()) {
+            "The server address must not contain a username or password. Enter the address only."
+        }
+        require(url.encodedQuery == null && url.encodedFragment == null) {
+            "The server address must not contain a query or fragment."
+        }
         return if (url.encodedPath.endsWith("/")) url else url.newBuilder().addPathSegment("").build()
     }
 }
@@ -106,11 +116,13 @@ internal interface SubsonicService {
 }
 
 /**
- * Adds the API key and the mandatory Subsonic client parameters to every request sent to the
- * configured server. The key is never placed in app URLs or logs by this class; it is only added
- * to the outgoing request. Requests to other hosts pass through untouched.
+ * Adds the API key and the mandatory Subsonic client parameters to requests sent to the configured Subsonic API. A
+ * request gets the key only when it goes to the same scheme, host and effective port as the configured server, and
+ * its path is under the server's `rest/` API. Other requests, including media on the same host, pass through
+ * untouched. Any authentication parameters the caller set are replaced, never duplicated.
  *
- * Per the OpenSubsonic apikeyauth extension, `u`, `p`, `t` and `s` must not be sent with `apiKey`.
+ * Per the OpenSubsonic apikeyauth extension, `u`, `p`, `t` and `s` must not be sent with `apiKey`. The key is never
+ * placed in app URLs or logs by this class; it is only added to the outgoing request.
  */
 internal class ApiKeyInterceptor(
     private val settingsProvider: () -> ServerSettings?,
@@ -118,11 +130,15 @@ internal class ApiKeyInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val settings = settingsProvider()
-        if (settings == null || request.url.host != settings.baseUrl.host || request.url.scheme != "https") {
+        if (settings == null || !isSubsonicApi(request.url, settings.baseUrl)) {
             return chain.proceed(request)
         }
         val url =
             request.url.newBuilder()
+                .removeAllQueryParameters("apiKey")
+                .removeAllQueryParameters("c")
+                .removeAllQueryParameters("v")
+                .removeAllQueryParameters("f")
                 .addQueryParameter("apiKey", settings.apiKey)
                 .addQueryParameter("c", CLIENT_NAME)
                 .addQueryParameter("v", API_VERSION)
@@ -130,6 +146,17 @@ internal class ApiKeyInterceptor(
                 .build()
         return chain.proceed(request.newBuilder().url(url).build())
     }
+
+    /** True when [url] is a request to the configured server's Subsonic REST API, on the same origin. */
+    private fun isSubsonicApi(
+        url: HttpUrl,
+        server: HttpUrl,
+    ): Boolean =
+        url.scheme == "https" &&
+            url.scheme == server.scheme &&
+            url.host == server.host &&
+            url.port == server.port &&
+            url.encodedPath.startsWith(server.encodedPath + "rest/")
 
     companion object {
         const val CLIENT_NAME = "DanceSonic"

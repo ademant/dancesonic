@@ -70,7 +70,8 @@ fun ConfigScreen(
     // Not saved: the QR code leaves the screen with the screen, so a rotation or restore hides it again.
     var showQr by remember { mutableStateOf(false) }
     var address by rememberSaveable { mutableStateOf(vm.settings.value?.baseUrl?.toString() ?: "https://") }
-    var apiKey by rememberSaveable { mutableStateOf("") }
+    // Not saved: the typed key never reaches the saved-instance state.
+    var apiKey by remember { mutableStateOf("") }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -145,7 +146,10 @@ fun ConfigScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedButton(
-            onClick = { vm.connectWithApiKey(address, apiKey) },
+            onClick = {
+                vm.connectWithApiKey(address, apiKey)
+                apiKey = ""
+            },
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Connect with this key") }
@@ -214,7 +218,8 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
     val state by danceVm.state.collectAsStateWithLifecycle()
     val signedIn by danceVm.signedIn.collectAsStateWithLifecycle()
     var address by rememberSaveable { mutableStateOf(danceVm.baseUrl.value.toString()) }
-    var token by rememberSaveable { mutableStateOf("") }
+    // Not saved: the pasted token never reaches the saved-instance state.
+    var token by remember { mutableStateOf("") }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -281,7 +286,10 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedButton(
-                onClick = { danceVm.signInWithToken(token) },
+                onClick = {
+                    danceVm.signInWithToken(token)
+                    token = ""
+                },
                 enabled = !state.busy && token.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Sign in with token") }
