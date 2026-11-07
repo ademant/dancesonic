@@ -1,7 +1,9 @@
 package org.dancesonic.player.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -22,8 +25,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -34,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -113,7 +120,7 @@ fun DanceSonicRoot(container: AppContainer) {
         }
     }
     if (showNowPlaying) {
-        NowPlayingSheet(libraryVm) { showNowPlaying = false }
+        NowPlayingSheet(libraryVm, container.player) { showNowPlaying = false }
     }
 }
 
@@ -238,6 +245,7 @@ internal fun ServerAddressField(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerBar(
     player: PlayerController,
@@ -258,6 +266,7 @@ fun PlayerBar(
             modifier = Modifier.clickable(onClick = onExpand),
         )
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        SeekBar(player)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
             Spacer(Modifier.width(8.dp))
@@ -273,6 +282,7 @@ fun PlayerBar(
                     "Tempo ${"%.2f".format(tempo)}x"
                 }
             Text(label, style = MaterialTheme.typography.labelMedium)
+            val markerFraction = bpmMarkerFraction(bpmMode, state.trackBpm)
             Slider(
                 value = if (bpmMode) targetBpm else tempo,
                 onValueChange = { if (bpmMode) targetBpm = it else tempo = it },
@@ -290,8 +300,71 @@ fun PlayerBar(
                         PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO
                     },
                 steps = if (bpmMode) PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1 else TEMPO_STEPS,
+                track = { sliderState -> TrackWithMarker(sliderState, markerFraction) },
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
             )
+            ResetTempoButton(playbackVm, bpmMode, state.trackBpm)
         }
     }
+}
+
+/**
+ * The slider track, with a thin marker at [markerFraction] (0 to 1 across the track) when there is one. The marker
+ * shows the recording's own BPM, so the listener can see how far the target is from it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TrackWithMarker(
+    sliderState: SliderState,
+    markerFraction: Float?,
+) {
+    Box(Modifier.fillMaxWidth()) {
+        SliderDefaults.Track(sliderState = sliderState, modifier = Modifier.fillMaxWidth())
+        if (markerFraction != null) {
+            val markerColor = MaterialTheme.colorScheme.tertiary
+            Canvas(Modifier.matchParentSize()) {
+                val x = size.width * markerFraction
+                drawLine(
+                    color = markerColor,
+                    start = Offset(x, 0f),
+                    end = Offset(x, size.height),
+                    strokeWidth = MARKER_WIDTH.toPx(),
+                )
+            }
+        }
+    }
+}
+
+private val MARKER_WIDTH = 3.dp
+
+/** Where the track's own BPM sits on the BPM slider, from 0 to 1, or null when the slider shows no BPM. */
+private fun bpmMarkerFraction(
+    bpmMode: Boolean,
+    trackBpm: Int?,
+): Float? {
+    if (!bpmMode || trackBpm == null) return null
+    val range = PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM
+    return (trackBpm - PlaybackMath.MIN_TARGET_BPM).toFloat() / range
+}
+
+/**
+ * Puts the tempo back to the original: 1x in multiplier mode, and in BPM mode the track's own BPM, so it plays at its
+ * original speed. Disabled in BPM mode when the track has no BPM.
+ */
+@Composable
+private fun ResetTempoButton(
+    playbackVm: PlaybackSettingsViewModel,
+    bpmMode: Boolean,
+    trackBpm: Int?,
+) {
+    TextButton(
+        onClick = {
+            if (bpmMode) {
+                playbackVm.setTargetBpm(trackBpm ?: PlaybackMath.DEFAULT_TARGET_BPM)
+            } else {
+                playbackVm.setMultiplier(1f)
+            }
+        },
+        enabled = !bpmMode || trackBpm != null,
+    ) { Text("Reset") }
 }
