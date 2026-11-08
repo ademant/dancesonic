@@ -183,9 +183,13 @@ private fun TrackList(
             TrackRow(
                 row = row,
                 shoes = trackShoes(row.track.mbid, row.track.mbid?.let { shoesState[it] }, signedIn),
-                onOpen = { previewing = row },
-                onAddToPlaylist = { addingTrack = row },
-                onEdit = { editingTrack = row },
+                actions =
+                    TrackRowActions(
+                        onPlay = { onPlay(tracks.indexOf(row)) },
+                        onInfo = { previewing = row },
+                        onAddToPlaylist = { addingTrack = row },
+                        onEdit = { editingTrack = row },
+                    ),
             )
         }
     }
@@ -287,17 +291,23 @@ internal fun keptListState(
     return state
 }
 
+/** What a track row does: a tap plays it; the buttons show its info, edit it or add it to a playlist. */
+private class TrackRowActions(
+    val onPlay: () -> Unit,
+    val onInfo: () -> Unit,
+    val onAddToPlaylist: () -> Unit,
+    val onEdit: () -> Unit,
+)
+
 @Composable
 private fun TrackRow(
     row: TrackWithTempo,
     shoes: TrackShoes,
-    onOpen: () -> Unit,
-    onAddToPlaylist: () -> Unit,
-    onEdit: () -> Unit,
+    actions: TrackRowActions,
 ) {
     val track = row.track
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().clickable(onClick = actions.onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -308,8 +318,9 @@ private fun TrackRow(
             Text(track.artistName + tempo + length, style = MaterialTheme.typography.bodySmall)
             shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
-        TextButton(onClick = onEdit, enabled = shoes.canRate) { Text("Edit") }
-        TextButton(onClick = onAddToPlaylist) { Text("+ Playlist") }
+        TextButton(onClick = actions.onInfo) { Text("Info") }
+        TextButton(onClick = actions.onEdit, enabled = shoes.canRate) { Text("Edit") }
+        TextButton(onClick = actions.onAddToPlaylist) { Text("+ Playlist") }
     }
     HorizontalDivider()
 }

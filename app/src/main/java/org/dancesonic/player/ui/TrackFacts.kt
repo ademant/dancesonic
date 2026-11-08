@@ -79,7 +79,7 @@ internal fun TrackFacts(
     }
 }
 
-/** Preview of a track before it plays. Play starts it in the list, as tapping a row used to. */
+/** The facts about a track, opened from its Info button. Play starts it, as tapping the row does. */
 @Composable
 internal fun TrackPreviewDialog(
     trackId: String,
