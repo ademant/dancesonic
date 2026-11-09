@@ -2,6 +2,7 @@ package org.dancesonic.player.dance
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -60,6 +61,8 @@ class DanceBrainzClient internal constructor(
                     danceTypes = recording.tags.filter { it.type == DANCE_TAG_TYPE }.map { it.name },
                     bpm = recording.bpm?.takeIf { it in BPM_RANGE },
                     raters = recording.raters,
+                    chapters = recording.chapters.map { it.toDomain() },
+                    chaptersVersion = recording.chaptersVersion,
                 )
         }
     }
@@ -164,6 +167,33 @@ internal data class RecordingDto(
     val tags: List<TagDto> = emptyList(),
     val bpm: Int? = null,
     val raters: Int? = null,
+    val chapters: List<ChapterDto> = emptyList(),
+    @SerialName("chapters_version") val chaptersVersion: String? = null,
+)
+
+/** One chapter mark as the server sends it. [dance] is null when no dance is set. */
+@Serializable
+internal data class ChapterDto(
+    @SerialName("start_ms") val startMs: Long,
+    @SerialName("end_ms") val endMs: Long? = null,
+    val title: String? = null,
+    val dance: ChapterDanceDto? = null,
+) {
+    fun toDomain(): DanceChapter =
+        DanceChapter(
+            startMs = startMs,
+            endMs = endMs,
+            title = title?.takeIf { it.isNotBlank() },
+            danceTagId = dance?.tagId,
+            danceName = dance?.name,
+        )
+}
+
+/** The dance of a chapter: the tag's id and display name. The path is not used on the phone. */
+@Serializable
+internal data class ChapterDanceDto(
+    @SerialName("tag_id") val tagId: Long,
+    val name: String,
 )
 
 /** One tag on a recording. Only the type and the display name are used; other fields are ignored. */

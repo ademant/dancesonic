@@ -20,6 +20,7 @@ import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
 import org.dancesonic.player.dance.DanceBrainzTokenStore
+import org.dancesonic.player.data.ChapterEdits
 import org.dancesonic.player.data.DanceBrainzEdits
 import org.dancesonic.player.data.KeptCollections
 import org.dancesonic.player.data.LibraryRepository
@@ -136,6 +137,9 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     /** DanceBrainz changes made on this phone (shoes ratings, dance tags) and the queue of those not yet sent. */
     val edits =
         DanceBrainzEdits(database, danceBrainzTokens, { currentDanceBrainzUrl })
+
+    /** Chapter marks changed on DanceBrainz. Sent at once; a failed send is shown, not queued. */
+    val chapters = ChapterEdits(database, danceBrainzTokens, { currentDanceBrainzUrl })
 
     val library =
         LibraryRepository(

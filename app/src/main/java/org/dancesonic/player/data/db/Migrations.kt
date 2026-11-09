@@ -123,3 +123,20 @@ val MIGRATION_8_9 =
 
 private const val FROM_8 = 8
 private const val TO_9 = 9
+
+/** Adds the chapter marks of a recording and the chapters version each lookup returns. Nothing existing changes. */
+val MIGRATION_9_10 =
+    object : Migration(FROM_9, TO_10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `chapter` " +
+                    "(`mbid` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER, `title` TEXT, " +
+                    "`danceTagId` INTEGER, `danceName` TEXT, PRIMARY KEY(`mbid`, `startMs`))",
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_chapter_mbid` ON `chapter` (`mbid`)")
+            db.execSQL("ALTER TABLE `dance_lookup` ADD COLUMN `chaptersVersion` TEXT")
+        }
+    }
+
+private const val FROM_9 = 9
+private const val TO_10 = 10

@@ -13,10 +13,12 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import org.dancesonic.player.dance.DanceChapter
 import org.dancesonic.player.dance.DanceMetadataSource
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.AlbumSongTotals
 import org.dancesonic.player.data.db.ArtistEntity
+import org.dancesonic.player.data.db.ChapterEntity
 import org.dancesonic.player.data.db.DanceLookupEntity
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.DanceTypeCount
@@ -97,6 +99,9 @@ class LibraryRepository(
         db.trackDao().observeByDanceTypeWithTempo(danceType)
 
     fun danceTypes(): Flow<List<DanceTypeCount>> = db.trackDao().observeDanceTypeCounts()
+
+    /** The chapter marks of recording [mbid], in order. Empty when it has none or was never looked up. */
+    fun chapters(mbid: String): Flow<List<ChapterEntity>> = db.chapterDao().observeFor(mbid)
 
     suspend fun track(id: String): TrackEntity? = db.trackDao().get(id)
 
@@ -644,6 +649,7 @@ class LibraryRepository(
         db.withTransaction {
             db.danceMetadataDao().deleteAll()
             db.danceLookupDao().deleteAll()
+            db.chapterDao().deleteAll()
         }
         store.saveDanceSource(current)
     }
@@ -706,9 +712,16 @@ class LibraryRepository(
                     val answer = answers[mbid]
                     if (answer != null) {
                         db.danceMetadataDao().replaceFor(mbid, answer.danceTypes.distinct().sorted(), now)
+                        db.chapterDao().replaceFor(mbid, answer.chapters.map { it.toEntity(mbid) })
                     }
                     db.danceLookupDao().upsert(
-                        DanceLookupEntity(mbid, checkedAt = now, bpm = answer?.bpm, raters = answer?.raters),
+                        DanceLookupEntity(
+                            mbid,
+                            checkedAt = now,
+                            bpm = answer?.bpm,
+                            raters = answer?.raters,
+                            chaptersVersion = answer?.chaptersVersion,
+                        ),
                     )
                 }
             }
@@ -776,3 +789,14 @@ private fun artistRow(
     name: String?,
     syncedAt: Long,
 ): ArtistEntity = ArtistEntity(id = id, name = artistName(name), syncedAt = syncedAt)
+
+/** A chapter as the lookup or a read returned it, stored under its recording. */
+internal fun DanceChapter.toEntity(mbid: String): ChapterEntity =
+    ChapterEntity(
+        mbid = mbid,
+        startMs = startMs,
+        endMs = endMs,
+        title = title,
+        danceTagId = danceTagId,
+        danceName = danceName,
+    )

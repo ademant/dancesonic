@@ -22,6 +22,8 @@ import retrofit2.http.Query
 data class DanceSuggestion(
     val path: String,
     val name: String,
+    /** The tag's id, which a chapter's dance takes. Null when the suggestion did not carry one. */
+    val tagId: Long? = null,
 )
 
 /**
@@ -55,7 +57,9 @@ class DanceBrainzTagsClient internal constructor(
     suspend fun suggest(name: String): List<DanceSuggestion> =
         danceBrainzCall {
             decodeSuggestions(service.suggest(name))
-                .mapNotNull { row -> row.path?.let { DanceSuggestion(path = it, name = row.tag.name) } }
+                .mapNotNull { row ->
+                    row.path?.let { DanceSuggestion(path = it, name = row.tag.name, tagId = row.tag.id) }
+                }
         }
 
     /** The dance tags of [mbid], with their qualifiers. Sends [token] when given. */

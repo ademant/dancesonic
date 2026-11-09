@@ -374,7 +374,7 @@ class DanceBrainzEditsTest {
         val found = runBlocking { repo.suggestDances("valse") }
         val none = runBlocking { repo.suggestDances("zzz") }
 
-        assertEquals(listOf(DanceSuggestion("valse", "valse")), found)
+        assertEquals(listOf(DanceSuggestion("valse", "valse", tagId = 4)), found)
         assertEquals(emptyList<DanceSuggestion>(), none)
     }
 

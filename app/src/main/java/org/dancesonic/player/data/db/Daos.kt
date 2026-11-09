@@ -225,11 +225,50 @@ interface DanceLookupDao {
     @Upsert
     suspend fun upsert(row: DanceLookupEntity)
 
+    /** Records the chapters version of [mbid] after a read. Does nothing when the recording was never looked up. */
+    @Query("UPDATE dance_lookup SET chaptersVersion = :version WHERE mbid = :mbid")
+    suspend fun setChaptersVersion(
+        mbid: String,
+        version: String?,
+    )
+
+    /** The chapters version of one recording from its last lookup, or null when unknown. */
+    @Query("SELECT chaptersVersion FROM dance_lookup WHERE mbid = :mbid")
+    suspend fun chaptersVersionFor(mbid: String): String?
+
     /** The stored tempo of one recording, or null when none was reported or it was never looked up. */
     @Query("SELECT bpm FROM dance_lookup WHERE mbid = :mbid")
     suspend fun bpmFor(mbid: String): Int?
 
     @Query("DELETE FROM dance_lookup")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface ChapterDao {
+    @Query("SELECT * FROM chapter WHERE mbid = :mbid ORDER BY startMs")
+    fun observeFor(mbid: String): Flow<List<ChapterEntity>>
+
+    @Query("SELECT * FROM chapter WHERE mbid = :mbid ORDER BY startMs")
+    suspend fun getFor(mbid: String): List<ChapterEntity>
+
+    /** Replaces the chapters of [mbid] with [rows], in one transaction, so a reader never sees half a list. */
+    @Transaction
+    suspend fun replaceFor(
+        mbid: String,
+        rows: List<ChapterEntity>,
+    ) {
+        deleteFor(mbid)
+        insertAll(rows)
+    }
+
+    @Query("DELETE FROM chapter WHERE mbid = :mbid")
+    suspend fun deleteFor(mbid: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rows: List<ChapterEntity>)
+
+    @Query("DELETE FROM chapter")
     suspend fun deleteAll()
 }
 

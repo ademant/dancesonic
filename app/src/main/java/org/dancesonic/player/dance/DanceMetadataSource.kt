@@ -8,6 +8,23 @@ data class RecordingDance(
     val bpm: Int?,
     /** Number of tempo reports behind [bpm]. */
     val raters: Int?,
+    /** The recording's chapter marks, in order. Empty when it has none. */
+    val chapters: List<DanceChapter> = emptyList(),
+    /** Version of the chapters; a chapter write sends it back as `If-Match`. Null when the server has no chapters. */
+    val chaptersVersion: String? = null,
+)
+
+/**
+ * One chapter mark of a recording: a part of the track that starts at [startMs]. It ends at the next chapter's
+ * start, or at [endMs] for the last one (null when the recording's length is not known). [title] and the dance
+ * are null until someone sets them.
+ */
+data class DanceChapter(
+    val startMs: Long,
+    val endMs: Long?,
+    val title: String?,
+    val danceTagId: Long?,
+    val danceName: String?,
 )
 
 /**
