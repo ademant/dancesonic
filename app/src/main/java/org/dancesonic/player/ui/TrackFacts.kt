@@ -136,6 +136,7 @@ internal fun NowPlayingSheet(
             } else {
                 TrackFacts(current, current.track.mbid?.let { shoes[it] })
                 SeekBar(player)
+                current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
             }
         }
     }

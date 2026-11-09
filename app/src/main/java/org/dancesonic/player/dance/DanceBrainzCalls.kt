@@ -23,8 +23,10 @@ private fun messageFor(code: Int): String =
     when (code) {
         UNAUTHORIZED -> "The code or token was not accepted. It may be wrong, expired or revoked."
         FORBIDDEN -> "This account is not allowed to do that."
+        PRECONDITION_FAILED -> "The chapters changed on DanceBrainz since they were shown. Try again."
         else -> "DanceBrainz answered with HTTP $code"
     }
 
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
+private const val PRECONDITION_FAILED = 412

@@ -93,6 +93,26 @@ data class DanceLookupEntity(
     val checkedAt: Long,
     val bpm: Int? = null,
     val raters: Int? = null,
+    /** The version of the recording's chapters when last looked up; a chapter write sends it as `If-Match`. */
+    val chaptersVersion: String? = null,
+)
+
+/**
+ * A chapter mark of a recording, from the last lookup or read. It runs from [startMs] to [endMs] (null when
+ * DanceBrainz does not know the recording's length). The dance is the tag id and name, null when not set.
+ */
+@Entity(
+    tableName = "chapter",
+    primaryKeys = ["mbid", "startMs"],
+    indices = [Index("mbid")],
+)
+data class ChapterEntity(
+    val mbid: String,
+    val startMs: Long,
+    val endMs: Long?,
+    val title: String?,
+    val danceTagId: Long?,
+    val danceName: String?,
 )
 
 /**

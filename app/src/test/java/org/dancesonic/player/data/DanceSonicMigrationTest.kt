@@ -8,6 +8,7 @@ import org.dancesonic.player.data.db.MIGRATION_2_3
 import org.dancesonic.player.data.db.MIGRATION_3_4
 import org.dancesonic.player.data.db.MIGRATION_4_5
 import org.dancesonic.player.data.db.MIGRATION_5_6
+import org.dancesonic.player.data.db.MIGRATION_9_10
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -177,6 +178,49 @@ class DanceSonicMigrationTest {
             db.query("SELECT sizeBytes FROM track WHERE id = 's-1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals(1731234L, cursor.getLong(0))
+            }
+        }
+    }
+
+    @Test
+    fun `migration 9 to 10 adds the chapter table and the version column, and keeps existing lookups`() {
+        val config =
+            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+                .name(null)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(1) {
+                        override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+
+                        override fun onUpgrade(
+                            db: androidx.sqlite.db.SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                ).build()
+        val helper = FrameworkSQLiteOpenHelperFactory().create(config)
+        helper.use {
+            val db = it.writableDatabase
+            db.execSQL(
+                "CREATE TABLE `dance_lookup` (`mbid` TEXT NOT NULL, `checkedAt` INTEGER NOT NULL, " +
+                    "`bpm` INTEGER, `raters` INTEGER, PRIMARY KEY(`mbid`))",
+            )
+            db.execSQL("INSERT INTO dance_lookup (mbid, checkedAt, bpm) VALUES ('rec-1', 5, 120)")
+
+            MIGRATION_9_10.migrate(db)
+
+            db.query("SELECT bpm, chaptersVersion FROM dance_lookup WHERE mbid = 'rec-1'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(120, cursor.getInt(0))
+                assertTrue(cursor.isNull(1))
+            }
+            db.execSQL(
+                "INSERT INTO chapter (mbid, startMs, endMs, title, danceTagId, danceName) " +
+                    "VALUES ('rec-1', 0, 1000, NULL, NULL, NULL)",
+            )
+            db.query("SELECT COUNT(*) FROM chapter").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
             }
         }
     }

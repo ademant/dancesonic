@@ -23,6 +23,7 @@ import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
+import org.dancesonic.player.dance.ChapterChange
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceSuggestion
@@ -31,6 +32,7 @@ import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.TrackDetail
 import org.dancesonic.player.data.db.AlbumEntity
+import org.dancesonic.player.data.db.ChapterEntity
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.subsonic.ServerSettings
@@ -39,6 +41,9 @@ import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
+
+private const val PENDING_CHAPTER_MESSAGE = "Sent. DanceBrainz holds the change until a moderator approves it."
+private const val CHAPTER_NOT_SENT = "The chapter change was not sent"
 
 /** How long a successful check stays fresh before the next automatic check on start. */
 private const val CHECK_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
@@ -343,6 +348,7 @@ class ConnectViewModel(
 }
 
 /** Passes library flows to the UI. Room is the source of truth; the UI never waits on the network. */
+@Suppress("TooManyFunctions") // The library screens and the DanceBrainz edits they call share this model.
 class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     val artists =
         container.library.artists()
@@ -407,6 +413,49 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
             .distinctUntilChanged()
             .mapLatest { id -> id?.let { container.library.trackDetail(it) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
+
+    /** The chapter marks of recording [mbid] as stored on the phone, in order. */
+    fun chapters(mbid: String): Flow<List<ChapterEntity>> = container.library.chapters(mbid)
+
+    private val _chapterMessage = MutableStateFlow<String?>(null)
+
+    /** What the last chapter change said: that it waits for a moderator, or why it failed. Null when nothing to say. */
+    val chapterMessage: StateFlow<String?> = _chapterMessage.asStateFlow()
+
+    /** Marks a chapter at [startMs] of [mbid]. The list is reloaded from DanceBrainz afterwards. */
+    fun markChapter(
+        mbid: String,
+        startMs: Long,
+    ) = chapterWrite { container.chapters.add(mbid, startMs) }
+
+    /** Applies [change] to the chapter that starts at [startMs]. */
+    fun changeChapter(
+        mbid: String,
+        startMs: Long,
+        change: ChapterChange,
+    ) = chapterWrite { container.chapters.update(mbid, startMs, change) }
+
+    /** Removes the chapter that starts at [startMs]. */
+    fun deleteChapter(
+        mbid: String,
+        startMs: Long,
+    ) = chapterWrite { container.chapters.delete(mbid, startMs) }
+
+    /** Clears the message of the last chapter change, once it has been shown. */
+    fun clearChapterMessage() {
+        _chapterMessage.value = null
+    }
+
+    private fun chapterWrite(write: suspend () -> Boolean) {
+        viewModelScope.launch {
+            _chapterMessage.value =
+                try {
+                    if (write()) PENDING_CHAPTER_MESSAGE else null
+                } catch (e: DanceBrainzException) {
+                    e.message ?: CHAPTER_NOT_SENT
+                }
+        }
+    }
 
     /** A track's details from the local database, for the preview before it plays. */
     suspend fun trackDetail(id: String): TrackDetail? = container.library.trackDetail(id)
