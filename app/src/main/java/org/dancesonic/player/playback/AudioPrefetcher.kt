@@ -22,15 +22,21 @@ class AudioPrefetcher(
     private val scope: CoroutineScope,
 ) {
     private var job: Job? = null
+    private var activeSongId: String? = null
 
-    /** Starts downloading [url] for [songId] when its [size] is known and at most [MAX_BYTES]. */
+    /**
+     * Starts downloading [url] for [songId] when its [size] is known and at most [MAX_BYTES]. A track already being
+     * downloaded is left alone, so the one that starts a queue is not restarted when it begins playing.
+     */
     fun prefetch(
         songId: String,
         url: HttpUrl,
         size: Long,
     ) {
         if (size <= 0 || size > MAX_BYTES) return
+        if (songId == activeSongId && job?.isActive == true) return
         job?.cancel()
+        activeSongId = songId
         job =
             scope.launch(Dispatchers.IO) {
                 try {

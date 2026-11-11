@@ -188,9 +188,22 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             appScope,
             { currentSettings },
             playbackSettings = { currentPlaybackSettings },
-            onTrackStarted = ::refreshPlayingTrack,
+            onTrackStarted = { songId ->
+                refreshPlayingTrack(songId)
+                prefetchStarted(songId)
+            },
             onQueued = ::onQueued,
         )
+
+    /**
+     * Downloads a track as it starts, so that playing it reads one whole copy and the player does not reopen the
+     * file. A track started with Next was not in the queue's first slot, so it would otherwise be streamed twice.
+     */
+    private fun prefetchStarted(songId: String) {
+        val settings = currentSettings ?: return
+        val size = streamLengths.sizeOf(songId) ?: return
+        audioPrefetcher.prefetch(songId, settings.streamUrl(songId), size)
+    }
 
     /** Records the queue's sizes, then downloads the track that begins when its size is known. */
     private fun onQueued(
