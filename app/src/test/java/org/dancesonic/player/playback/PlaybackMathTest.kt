@@ -64,4 +64,27 @@ class PlaybackMathTest {
         // A loud peak limits a track with a gain that would otherwise leave it at 0.9.
         assertEquals(0.5f, PlaybackMath.volume(replayGainEnabled = true, trackGainDb = -1.0, trackPeak = 2.0), 1e-4f)
     }
+
+    @Test
+    fun `a track starts at 1x when the tempo is not kept`() {
+        val settings = PlaybackSettings(multiplier = 1.3f, keepTempoForNextTrack = false)
+        val start = PlaybackMath.trackStartSettings(settings, trackBpm = null)
+        assertEquals(1f, start.multiplier, 0f)
+        assertEquals(1f, PlaybackMath.speed(start, trackBpm = null), 0f)
+    }
+
+    @Test
+    fun `in BPM mode a track starts at its own BPM, so it plays at 1x`() {
+        val settings =
+            PlaybackSettings(tempoMode = TempoMode.Bpm, targetBpm = 150, keepTempoForNextTrack = false)
+        val start = PlaybackMath.trackStartSettings(settings, trackBpm = 105)
+        assertEquals(105, start.targetBpm)
+        assertEquals(1f, PlaybackMath.speed(start, trackBpm = 105), 1e-4f)
+    }
+
+    @Test
+    fun `a track without a BPM keeps the target it had`() {
+        val settings = PlaybackSettings(tempoMode = TempoMode.Bpm, targetBpm = 150)
+        assertEquals(150, PlaybackMath.trackStartSettings(settings, trackBpm = null).targetBpm)
+    }
 }

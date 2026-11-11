@@ -44,6 +44,7 @@ import org.dancesonic.player.playback.DownloadSettings
 import org.dancesonic.player.playback.DownloadSettingsStore
 import org.dancesonic.player.playback.OfflineDownloads
 import org.dancesonic.player.playback.PlaybackSettings
+import org.dancesonic.player.playback.PlaybackSettingsSource
 import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.playback.StreamDataSource
@@ -187,7 +188,14 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             context,
             appScope,
             { currentSettings },
-            playbackSettings = { currentPlaybackSettings },
+            settings =
+                object : PlaybackSettingsSource {
+                    override fun current(): PlaybackSettings = currentPlaybackSettings
+
+                    override fun saveTempo(settings: PlaybackSettings) {
+                        appScope.launch { playbackSettingsStore.save(settings) }
+                    }
+                },
             onTrackStarted = { songId ->
                 refreshPlayingTrack(songId)
                 prefetchStarted(songId)

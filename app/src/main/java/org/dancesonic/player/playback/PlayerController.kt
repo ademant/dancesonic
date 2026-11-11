@@ -51,6 +51,13 @@ data class PlaybackProgress(
     }
 }
 
+/** Reads the playback choices, and saves the tempo a new track starts with when the tempo is not kept. */
+interface PlaybackSettingsSource {
+    fun current(): PlaybackSettings
+
+    fun saveTempo(settings: PlaybackSettings)
+}
+
 /** What the UI shows about playback. Derived from the media session; no playback state is stored here. */
 data class PlaybackUiState(
     val nowPlayingTitle: String? = null,
@@ -62,8 +69,6 @@ data class PlaybackUiState(
     val tempo: Float = 1f,
     /** The recording's own BPM, when the server has one. Null when unknown. */
     val trackBpm: Int? = null,
-    /** The album of the track now playing, whose cover art is shown. Null when nothing plays. */
-    val nowPlayingAlbumId: String? = null,
 )
 
 /**
@@ -77,8 +82,8 @@ class PlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
     private val settingsProvider: () -> ServerSettings?,
-    /** The playback choices, read when a track starts. */
-    private val playbackSettings: () -> PlaybackSettings = { PlaybackSettings() },
+    /** The playback choices: read when a track starts, and saved when a new track resets the tempo. */
+    private val settings: PlaybackSettingsSource,
     /** Called on the main thread when a track starts; the argument is its song id. */
     private val onTrackStarted: (songId: String) -> Unit = {},
     /**
@@ -120,7 +125,7 @@ class PlayerController(
                         mediaItem: MediaItem?,
                         reason: Int,
                     ) {
-                        applyCurrentTrack(built)
+                        applyCurrentTrack(built, fromStart = true)
                         publish(built)
                         mediaItem?.mediaId?.let(onTrackStarted)
                     }
@@ -170,7 +175,6 @@ class PlayerController(
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
                 trackBpm = queue.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
-                nowPlayingAlbumId = queue.getOrNull(player.currentMediaItemIndex)?.track?.albumId,
             )
     }
 
@@ -178,9 +182,20 @@ class PlayerController(
      * Speed and volume for the track now playing, from the playback settings. Called when a track starts and when
      * a setting changes, so the current track follows the change at once.
      */
-    private fun applyCurrentTrack(player: MediaController) {
-        val settings = playbackSettings()
+    private fun applyCurrentTrack(
+        player: MediaController,
+        fromStart: Boolean = false,
+    ) {
         val entry = queue.getOrNull(player.currentMediaItemIndex)
+        val current = settings.current()
+        val settings =
+            if (fromStart && !current.keepTempoForNextTrack) {
+                PlaybackMath.trackStartSettings(current, entry?.tempoBpm).also {
+                    if (it != current) settings.saveTempo(it)
+                }
+            } else {
+                current
+            }
         player.playbackParameters = PlaybackParameters(PlaybackMath.speed(settings, entry?.tempoBpm), 1f)
         player.volume =
             PlaybackMath.volume(
@@ -212,7 +227,7 @@ class PlayerController(
             val player = connected()
             player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)
             player.prepare()
-            applyCurrentTrack(player)
+            applyCurrentTrack(player, fromStart = true)
             player.play()
         }
     }
