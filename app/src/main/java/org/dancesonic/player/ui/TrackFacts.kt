@@ -16,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.ShoesView
@@ -55,7 +57,48 @@ internal fun shoesFacts(
     return if (view?.pending == true) "$text · not sent yet" else text
 }
 
-/** The facts about one track: length, dance types, tempo and shoes rating, as the rows and the Dance view show them. */
+/**
+ * The cover, title, release, artist and dance of a track, with a link to its dance description when DanceBrainz has
+ * one. The link opens the recording's DanceBrainz page.
+ */
+@Composable
+internal fun TrackHeader(
+    detail: TrackDetail,
+    libraryVm: LibraryViewModel,
+    coverSize: Dp,
+) {
+    val track = detail.track
+    val descriptionUrl by produceState<String?>(null, track.mbid) {
+        value =
+            track.mbid?.let { mbid ->
+                if (libraryVm.hasDanceDescription(mbid)) libraryVm.danceBrainzPageUrl(mbid) else null
+            }
+    }
+    val uriHandler = LocalUriHandler.current
+    Column(Modifier.fillMaxWidth()) {
+        CoverImage(
+            url = libraryVm.coverUrl(track.albumId, COVER_PX_LARGE),
+            contentDescription = detail.albumName,
+            size = coverSize,
+        )
+        Text(track.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+        detail.albumName?.let { Text("Release: $it", style = MaterialTheme.typography.bodyMedium) }
+        Text("Artist: ${track.artistName}", style = MaterialTheme.typography.bodyMedium)
+        Text(
+            if (detail.danceTypes.isEmpty()) {
+                "Dance: none assigned"
+            } else {
+                "Dance: ${detail.danceTypes.joinToString(", ")}"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        descriptionUrl?.let { url ->
+            TextButton(onClick = { uriHandler.openUri(url) }) { Text("Dance description") }
+        }
+    }
+}
+
+/** The facts about one track that are not in its header: length, tempo and shoes rating. */
 @Composable
 internal fun TrackFacts(
     detail: TrackDetail,
@@ -63,17 +106,7 @@ internal fun TrackFacts(
 ) {
     val track = detail.track
     Column(Modifier.fillMaxWidth()) {
-        Text(track.title, style = MaterialTheme.typography.titleMedium)
-        Text(track.artistName, style = MaterialTheme.typography.bodyMedium)
-        detail.albumName?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         Text(track.durationSec?.let { "Length ${formatLength(it)}" } ?: "Length unknown")
-        Text(
-            if (detail.danceTypes.isEmpty()) {
-                "No dance assigned"
-            } else {
-                "Dance: ${detail.danceTypes.joinToString(", ")}"
-            },
-        )
         Text(detail.bpm?.let { "Tempo $it BPM" } ?: "Tempo unknown")
         Text(shoesFacts(shoes, hasMbid = track.mbid != null))
     }
@@ -96,7 +129,12 @@ internal fun TrackPreviewDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 val current = detail
-                if (current == null) Text("Loading…") else TrackFacts(current, current.track.mbid?.let { shoes[it] })
+                if (current == null) {
+                    Text("Loading…")
+                } else {
+                    TrackHeader(current, libraryVm, coverSize = PREVIEW_COVER)
+                    TrackFacts(current, current.track.mbid?.let { shoes[it] })
+                }
             }
         },
         confirmButton = {
@@ -134,6 +172,7 @@ internal fun NowPlayingSheet(
             if (current == null) {
                 Text("Nothing playing")
             } else {
+                TrackHeader(current, libraryVm, coverSize = SHEET_COVER)
                 TrackFacts(current, current.track.mbid?.let { shoes[it] })
                 SeekBar(player)
                 current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
@@ -143,4 +182,6 @@ internal fun NowPlayingSheet(
 }
 
 private const val SECONDS_PER_MINUTE = 60
+private val PREVIEW_COVER = 120.dp
+private val SHEET_COVER = 220.dp
 private const val SECONDS_PER_HOUR = 3600

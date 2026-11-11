@@ -62,6 +62,8 @@ data class PlaybackUiState(
     val tempo: Float = 1f,
     /** The recording's own BPM, when the server has one. Null when unknown. */
     val trackBpm: Int? = null,
+    /** The album of the track now playing, whose cover art is shown. Null when nothing plays. */
+    val nowPlayingAlbumId: String? = null,
 )
 
 /**
@@ -168,6 +170,7 @@ class PlayerController(
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
                 trackBpm = queue.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
+                nowPlayingAlbumId = queue.getOrNull(player.currentMediaItemIndex)?.track?.albumId,
             )
     }
 
