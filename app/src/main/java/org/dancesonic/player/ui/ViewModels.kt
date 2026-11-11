@@ -3,6 +3,7 @@ package org.dancesonic.player.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -12,6 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -212,6 +215,7 @@ class ConnectViewModel(
             container.library.clearCatalog()
             container.syncState.clear()
             container.audioCache.clear()
+            container.waveforms.clear()
             container.keptCollections.forgetAll()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
@@ -256,6 +260,7 @@ class ConnectViewModel(
                     container.library.clearCatalog()
                     container.syncState.clear()
                     container.audioCache.clear()
+                    container.waveforms.clear()
                     container.keptCollections.forgetAll()
                 }
                 container.settingsStore.save(settings)
@@ -359,6 +364,15 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     val danceTypes =
         container.library.danceTypes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
+
+    /** The waveform of the track now playing, for the seek bar. Null while there is none. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val nowPlayingWaveform: StateFlow<List<Int>?> =
+        container.player.state
+            .map { it.nowPlayingId }
+            .distinctUntilChanged()
+            .flatMapLatest { id -> if (id == null) flowOf(null) else container.waveforms.observe(id) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), null)
 
     /** Shoes state by recording MBID, including changes not yet sent. */
     val shoes: StateFlow<Map<String, ShoesView>> =

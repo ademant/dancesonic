@@ -6,12 +6,14 @@ import androidx.media3.common.C
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.SimpleCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 
 /**
  * Keeps audio on disk under [maxBytes], least recently used first, except for kept songs (see [setKept]), which stay
@@ -67,6 +69,16 @@ class AudioCache(
             // opening a second connection to the server for them.
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR or CacheDataSource.FLAG_BLOCK_ON_CACHE)
 
+    /**
+     * Reads a track from the cache only. A byte the cache lacks is an error, never a download, so whatever reads
+     * through this (the waveform decoder) cannot stream a track.
+     */
+    fun cacheOnlyFactory(): DataSource.Factory =
+        CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(DataSource.Factory { NotCachedDataSource })
+            .setFlags(0)
+
     /** True when the whole track of [size] bytes is on disk under [key]. */
     fun holdsWhole(
         key: String,
@@ -111,4 +123,22 @@ class AudioCache(
         private const val DIRECTORY = "audio"
         private const val PREFETCH_BUFFER_BYTES = 64 * 1024
     }
+}
+
+/** The upstream of a cache-only read: it refuses every request, so a missing byte fails instead of downloading. */
+@Suppress("UnsafeOptInUsageError") // Media3 data source classes are marked unstable; see PlayerController.
+private object NotCachedDataSource : DataSource {
+    override fun addTransferListener(transferListener: TransferListener) = Unit
+
+    override fun open(dataSpec: DataSpec): Long = throw IOException("Track is not in the audio cache")
+
+    override fun read(
+        buffer: ByteArray,
+        offset: Int,
+        length: Int,
+    ): Int = throw IOException("Track is not in the audio cache")
+
+    override fun getUri(): Uri? = null
+
+    override fun close() = Unit
 }

@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
+import org.dancesonic.player.analysis.WaveformStore
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
@@ -122,8 +123,23 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             sizeOf = streamLengths::sizeOf,
         )
 
-    /** Downloads a track into the audio cache when it starts, so playback reads it once. */
-    private val audioPrefetcher: AudioPrefetcher by lazy { AudioPrefetcher(audioCache, streamSource, appScope) }
+    /**
+     * Waveforms for the seek bar: the server's analysis, or one decoded from a track once it is wholly cached.
+     * Built after [database] and [audioCache] are created.
+     */
+    val waveforms: WaveformStore by lazy {
+        WaveformStore(database.waveformDao(), database.trackDao(), audioCache, { currentSettings })
+    }
+
+    /**
+     * Downloads a track into the audio cache when it starts, so playback reads it once. When a download completes, the
+     * track's waveform is decoded from the cache if the server had none.
+     */
+    private val audioPrefetcher: AudioPrefetcher by lazy {
+        AudioPrefetcher(audioCache, streamSource, appScope, onCached = { songId, size ->
+            waveforms.analyseCached(songId, size)
+        })
+    }
 
     val database: DanceSonicDatabase = DanceSonicDatabase.create(context)
 
@@ -199,6 +215,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             onTrackStarted = { songId ->
                 refreshPlayingTrack(songId)
                 prefetchStarted(songId)
+                appScope.launch { waveforms.loadFromServer(songId) }
             },
             onQueued = ::onQueued,
         )

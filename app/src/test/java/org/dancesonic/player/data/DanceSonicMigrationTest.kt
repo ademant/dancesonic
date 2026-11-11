@@ -3,6 +3,7 @@ package org.dancesonic.player.data
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import org.dancesonic.player.data.db.MIGRATION_10_11
 import org.dancesonic.player.data.db.MIGRATION_1_2
 import org.dancesonic.player.data.db.MIGRATION_2_3
 import org.dancesonic.player.data.db.MIGRATION_3_4
@@ -221,6 +222,49 @@ class DanceSonicMigrationTest {
             db.query("SELECT COUNT(*) FROM chapter").use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals(1, cursor.getInt(0))
+            }
+        }
+    }
+
+    @Test
+    fun `migration 10 to 11 adds the waveform table and keeps existing chapters`() {
+        val config =
+            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+                .name(null)
+                .callback(
+                    object : SupportSQLiteOpenHelper.Callback(1) {
+                        override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+
+                        override fun onUpgrade(
+                            db: androidx.sqlite.db.SupportSQLiteDatabase,
+                            oldVersion: Int,
+                            newVersion: Int,
+                        ) = Unit
+                    },
+                ).build()
+        val helper = FrameworkSQLiteOpenHelperFactory().create(config)
+        helper.use {
+            val db = it.writableDatabase
+            db.execSQL(
+                "CREATE TABLE `chapter` (`mbid` TEXT NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER, " +
+                    "`title` TEXT, `danceTagId` INTEGER, `danceName` TEXT, PRIMARY KEY(`mbid`, `startMs`))",
+            )
+            db.execSQL(
+                "INSERT INTO chapter (mbid, startMs, endMs, title, danceTagId, danceName) " +
+                    "VALUES ('rec-1', 0, 1000, NULL, NULL, NULL)",
+            )
+
+            MIGRATION_10_11.migrate(db)
+
+            db.query("SELECT COUNT(*) FROM chapter").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.execSQL("INSERT INTO waveform (songId, peaks, source, computedAt) VALUES ('so-1', '1,2', 'server', 5)")
+            db.query("SELECT peaks, source FROM waveform WHERE songId = 'so-1'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("1,2", cursor.getString(0))
+                assertEquals("server", cursor.getString(1))
             }
         }
     }

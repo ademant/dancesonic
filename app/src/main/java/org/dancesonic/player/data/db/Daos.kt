@@ -337,3 +337,20 @@ interface PlaylistItemDao {
     @Update
     suspend fun update(item: PlaylistItemEntity)
 }
+
+@Dao
+interface WaveformDao {
+    /** The waveform of [songId], observed so the seek bar redraws when it is stored. */
+    @Query("SELECT * FROM waveform WHERE songId = :songId")
+    fun observe(songId: String): Flow<WaveformEntity?>
+
+    @Query("SELECT * FROM waveform WHERE songId = :songId")
+    suspend fun get(songId: String): WaveformEntity?
+
+    @Upsert
+    suspend fun upsert(entity: WaveformEntity)
+
+    /** Clears every waveform. Used when the connection changes, since song ids belong to one server. */
+    @Query("DELETE FROM waveform")
+    suspend fun deleteAll()
+}
