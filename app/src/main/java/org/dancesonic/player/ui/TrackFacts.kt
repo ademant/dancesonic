@@ -174,7 +174,7 @@ internal fun NowPlayingSheet(
             } else {
                 TrackHeader(current, libraryVm, coverSize = SHEET_COVER)
                 TrackFacts(current, current.track.mbid?.let { shoes[it] })
-                SeekBar(player)
+                SeekBar(player, libraryVm.nowPlayingWaveform)
                 current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
             }
         }

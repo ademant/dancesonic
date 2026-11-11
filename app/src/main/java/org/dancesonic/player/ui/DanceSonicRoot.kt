@@ -86,7 +86,7 @@ fun DanceSonicRoot(container: AppContainer) {
     Scaffold(
         bottomBar = {
             Column {
-                PlayerBar(container.player, playbackVm, onExpand = { showNowPlaying = true })
+                PlayerBar(container.player, playbackVm, libraryVm, onExpand = { showNowPlaying = true })
                 HorizontalDivider()
                 NavigationBar {
                     Tab.entries.forEach { entry ->
@@ -259,6 +259,7 @@ internal fun ServerAddressField(
 fun PlayerBar(
     player: PlayerController,
     playbackVm: PlaybackSettingsViewModel,
+    libraryVm: LibraryViewModel,
     onExpand: () -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
@@ -275,7 +276,7 @@ fun PlayerBar(
             modifier = Modifier.clickable(onClick = onExpand),
         )
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        SeekBar(player)
+        SeekBar(player, libraryVm.nowPlayingWaveform)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
             Spacer(Modifier.width(8.dp))

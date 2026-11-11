@@ -138,5 +138,19 @@ val MIGRATION_9_10 =
         }
     }
 
+/** Adds the waveform table: one row per song with its peaks. Existing rows are untouched. */
+val MIGRATION_10_11 =
+    object : Migration(FROM_10, TO_11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `waveform` " +
+                    "(`songId` TEXT NOT NULL, `peaks` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+                    "`computedAt` INTEGER NOT NULL, PRIMARY KEY(`songId`))",
+            )
+        }
+    }
+
 private const val FROM_9 = 9
 private const val TO_10 = 10
+private const val FROM_10 = 10
+private const val TO_11 = 11

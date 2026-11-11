@@ -20,6 +20,8 @@ class AudioPrefetcher(
     private val cache: AudioCache,
     private val upstream: DataSource.Factory,
     private val scope: CoroutineScope,
+    /** Called once the whole track is in the cache, with its song id and size. Not called when the download stops. */
+    private val onCached: suspend (songId: String, size: Long) -> Unit = { _, _ -> },
 ) {
     private var job: Job? = null
     private var activeSongId: String? = null
@@ -41,6 +43,7 @@ class AudioPrefetcher(
             scope.launch(Dispatchers.IO) {
                 try {
                     cache.prefetch(songId, Uri.parse(url.toString()), size, upstream)
+                    onCached(songId, size)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: IOException) {

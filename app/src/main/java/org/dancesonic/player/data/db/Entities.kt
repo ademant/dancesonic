@@ -205,3 +205,17 @@ data class PlaylistItemEntity(
     val danceType: String?,
     val position: Int,
 )
+
+/**
+ * The waveform of a song for the seek bar: [peaks] is the comma-separated 0..255 values, [source] is `server`
+ * (folksonic's stored analysis) or `local` (decoded from the audio cache), and [computedAt] is epoch milliseconds.
+ * Keyed by the server's song id, so it survives a re-sync. No foreign key: a sync rewrites track rows, and a waveform
+ * does not depend on the row.
+ */
+@Entity(tableName = "waveform")
+data class WaveformEntity(
+    @PrimaryKey val songId: String,
+    val peaks: String,
+    val source: String,
+    val computedAt: Long,
+)
