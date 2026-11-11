@@ -85,7 +85,7 @@ fun DanceSonicRoot(container: AppContainer) {
     Scaffold(
         bottomBar = {
             Column {
-                PlayerBar(container.player, playbackVm, onExpand = { showNowPlaying = true })
+                PlayerBar(container.player, playbackVm, libraryVm, onExpand = { showNowPlaying = true })
                 HorizontalDivider()
                 NavigationBar {
                     Tab.entries.forEach { entry ->
@@ -258,6 +258,7 @@ internal fun ServerAddressField(
 fun PlayerBar(
     player: PlayerController,
     playbackVm: PlaybackSettingsViewModel,
+    libraryVm: LibraryViewModel,
     onExpand: () -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
@@ -267,13 +268,22 @@ fun PlayerBar(
     var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(
-            text = state.nowPlayingTitle ?: "Nothing playing",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clickable(onClick = onExpand),
-        )
-        state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        Row(Modifier.fillMaxWidth().clickable(onClick = onExpand), verticalAlignment = Alignment.CenterVertically) {
+            CoverImage(
+                url = state.nowPlayingAlbumId?.let { libraryVm.coverUrl(it, COVER_PX_SMALL) },
+                contentDescription = null,
+                size = PLAYER_COVER,
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = state.nowPlayingTitle ?: "Nothing playing",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
         SeekBar(player)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
@@ -344,6 +354,7 @@ private fun TrackWithMarker(
 }
 
 private val MARKER_WIDTH = 3.dp
+private val PLAYER_COVER = 48.dp
 
 /** Where the track's own BPM sits on the BPM slider, from 0 to 1, or null when the slider shows no BPM. */
 private fun bpmMarkerFraction(

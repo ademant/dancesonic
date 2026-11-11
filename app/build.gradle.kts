@@ -54,6 +54,13 @@ android {
 }
 
 dependencies {
+    // Coil's OkHttp module asks for a newer Kotlin stdlib than this project's compiler reads. Keep the stdlib at the
+    // project's Kotlin version; Coil's own classes are built against the same stdlib API.
+    constraints {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib") {
+            version { strictly(libs.versions.kotlin.get()) }
+        }
+    }
     implementation(platform(libs.compose.bom))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -66,6 +73,8 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.datasource.okhttp)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

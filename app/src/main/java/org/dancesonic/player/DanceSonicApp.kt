@@ -7,6 +7,11 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +21,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import okio.Path.Companion.toOkioPath
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
 import org.dancesonic.player.dance.DanceBrainzSource
@@ -53,7 +59,7 @@ private const val TAG = "DanceSonicApp"
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dancesonic_settings")
 
-class DanceSonicApp : Application() {
+class DanceSonicApp : Application(), SingletonImageLoader.Factory {
     lateinit var container: AppContainer
         private set
 
@@ -61,6 +67,9 @@ class DanceSonicApp : Application() {
         super.onCreate()
         container = AppContainer(this, settingsDataStore)
     }
+
+    /** Cover art loads through the authenticated client; see [AppContainer.imageLoader]. */
+    override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader
 }
 
 /**
@@ -78,6 +87,22 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
 
     /** Shared client for media streaming; sends requests to the configured server with the API key. */
     val httpClient: OkHttpClient = SubsonicHttp.okHttpClient { currentSettings }
+
+    /**
+     * Loads cover art from the server through [httpClient], so the API key is added as for every Subsonic request.
+     * Cover images are cached on disk with a size cap; the cache keys are the album id, never the URL.
+     */
+    val imageLoader: ImageLoader by lazy {
+        ImageLoader.Builder(context.applicationContext)
+            .components { add(OkHttpNetworkFetcherFactory(callFactory = { httpClient })) }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve(COVER_CACHE_DIR).toOkioPath())
+                    .maxSizeBytes(COVER_CACHE_BYTES)
+                    .build()
+            }
+            .build()
+    }
 
     /**
      * Audio kept on disk: played songs and the songs of kept albums and playlists. Created on first use. Until the
@@ -247,3 +272,6 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             .launchIn(appScope)
     }
 }
+
+private const val COVER_CACHE_DIR = "cover_art"
+private const val COVER_CACHE_BYTES = 64L * 1024 * 1024

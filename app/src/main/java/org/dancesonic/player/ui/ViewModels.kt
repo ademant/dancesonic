@@ -25,6 +25,7 @@ import org.dancesonic.player.account.ConnectionUri
 import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.dance.ChapterChange
 import org.dancesonic.player.dance.DanceBrainzClient
+import org.dancesonic.player.dance.DanceBrainzDescriptionClient
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceSuggestion
 import org.dancesonic.player.data.ShoesView
@@ -39,6 +40,7 @@ import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
+import org.dancesonic.player.subsonic.coverArtUrl
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
 
@@ -454,6 +456,37 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
                 } catch (e: DanceBrainzException) {
                     e.message ?: CHAPTER_NOT_SENT
                 }
+        }
+    }
+
+    /**
+     * The cover art of album [albumId] at most [size] pixels on its longer side, on the configured server. Null while
+     * no server is set. The URL holds no API key; the image loader adds it.
+     */
+    fun coverUrl(
+        albumId: String,
+        size: Int,
+    ): String? = container.currentSettings?.coverArtUrl(albumId, size)?.toString()
+
+    /** The DanceBrainz page of recording [mbid]. The page shows its dance description. */
+    fun danceBrainzPageUrl(mbid: String): String? =
+        container.currentDanceBrainzUrl.resolve("recording/$mbid")?.toString()
+
+    private val descriptionAnswers = mutableMapOf<String, Boolean>()
+
+    /**
+     * True when DanceBrainz stores a dance description for [mbid]. Each answer is kept for the session. When the check
+     * fails (offline, server unreachable), it answers false and is asked again next time.
+     */
+    @Suppress("SwallowedException") // A failed check is shown as no link; the next visit asks again.
+    suspend fun hasDanceDescription(mbid: String): Boolean {
+        descriptionAnswers[mbid]?.let { return it }
+        return try {
+            DanceBrainzDescriptionClient(container.currentDanceBrainzUrl).hasDescription(mbid).also {
+                descriptionAnswers[mbid] = it
+            }
+        } catch (e: DanceBrainzException) {
+            false
         }
     }
 

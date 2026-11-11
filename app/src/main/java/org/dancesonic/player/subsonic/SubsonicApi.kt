@@ -39,6 +39,20 @@ fun ServerSettings.streamUrl(songId: String): HttpUrl =
         .build()
 
 /**
+ * URL of the cover art of [albumId], at most [size] pixels on its longer side. Like [streamUrl], it carries no API key:
+ * the shared client adds it when the request is sent. The album id is the cover id on folksonic and Navidrome.
+ */
+fun ServerSettings.coverArtUrl(
+    albumId: String,
+    size: Int,
+): HttpUrl =
+    baseUrl.resolve("rest/getCoverArt.view")!!
+        .newBuilder()
+        .addQueryParameter("id", albumId)
+        .addQueryParameter("size", size.toString())
+        .build()
+
+/**
  * Parses user input into a server URL. Only `https://` is accepted. The address must be a plain base URL: user
  * information, a query and a fragment are rejected, so no credential can be stored or sent as part of it. The error
  * messages never repeat the address.
