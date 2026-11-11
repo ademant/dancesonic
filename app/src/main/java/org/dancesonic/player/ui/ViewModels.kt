@@ -416,6 +416,10 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     /** Scroll positions of the library lists, kept while the app runs. */
     val scrolls = ListScrollMemory()
 
+    /** Which letter sections of the artist list and of the dance list are open. */
+    val artistSections = LetterSections()
+    val danceSections = LetterSections()
+
     /** An album's stored details, for the breadcrumb. */
     suspend fun album(id: String): AlbumEntity? = container.library.album(id)
 
