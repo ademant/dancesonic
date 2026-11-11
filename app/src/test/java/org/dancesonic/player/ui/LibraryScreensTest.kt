@@ -2,9 +2,11 @@ package org.dancesonic.player.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
@@ -63,6 +65,9 @@ class LibraryScreensTest {
             MaterialTheme { LibraryScreen(library, container.player, playlists, connect) }
         }
 
+        composeRule.waitUntilAtLeastOneExists(hasText("A · 1"))
+        composeRule.onAllNodesWithText("Ada").assertCountEquals(0)
+        composeRule.onNodeWithText("A · 1").performClick()
         composeRule.waitUntilAtLeastOneExists(hasText("Ada"))
         composeRule.onNodeWithText("Ada").performClick()
         composeRule.waitUntilAtLeastOneExists(hasText("Night"))
@@ -82,6 +87,9 @@ class LibraryScreensTest {
             MaterialTheme { DanceScreen(library, container.player, playlists) }
         }
 
+        composeRule.waitUntilAtLeastOneExists(hasText("W · 1"))
+        composeRule.onAllNodesWithText("Waltz").assertCountEquals(0)
+        composeRule.onNodeWithText("W · 1").performClick()
         composeRule.waitUntilAtLeastOneExists(hasText("Waltz"))
         composeRule.onNodeWithText("Waltz").performClick()
         composeRule.waitUntilAtLeastOneExists(hasText("One"))

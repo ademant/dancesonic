@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -104,7 +103,12 @@ fun LibraryScreen(
                     )
                 }
             else ->
-                ArtistList(artists, onOpen = { artistId = it.id }, listState = keptListState(vm, "artists"))
+                ArtistList(
+                    artists,
+                    onOpen = { artistId = it.id },
+                    listState = keptListState(vm, "artists"),
+                    sections = vm.artistSections,
+                )
         }
     }
 }
@@ -130,16 +134,20 @@ private fun ArtistList(
     artists: List<ArtistEntity>,
     onOpen: (ArtistEntity) -> Unit,
     listState: LazyListState,
+    sections: LetterSections,
 ) {
     if (artists.isEmpty()) {
         EmptyHint("No artists yet. Tap Refresh to sync from the server.")
         return
     }
-    LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 4.dp)) {
-        items(artists, key = { it.id }) { artist ->
-            ListRow(title = artist.name, onClick = { onOpen(artist) })
-        }
-    }
+    val groups = remember(artists) { groupByFirstLetter(artists) { it.name } }
+    LetterGroupedList(
+        groups = groups,
+        listState = listState,
+        sections = sections,
+        key = { it.id },
+        row = { artist -> ListRow(title = artist.name, onClick = { onOpen(artist) }) },
+    )
 }
 
 @Composable
@@ -246,15 +254,20 @@ fun DanceScreen(
                 )
             } else {
                 val listState = keptListState(vm, "dances")
-                LazyColumn(state = listState) {
-                    items(danceTypes, key = { it.danceType }) { entry: DanceTypeCount ->
+                val groups = remember(danceTypes) { groupByFirstLetter(danceTypes) { it.danceType } }
+                LetterGroupedList(
+                    groups = groups,
+                    listState = listState,
+                    sections = vm.danceSections,
+                    key = { it.danceType },
+                    row = { entry: DanceTypeCount ->
                         ListRow(
                             title = entry.danceType,
                             subtitle = "${entry.trackCount} tracks",
                             onClick = { danceType = entry.danceType },
                         )
-                    }
-                }
+                    },
+                )
             }
         } else {
             key(selected) {
