@@ -24,6 +24,8 @@ class PlaybackSettingsViewModel(private val container: AppContainer) : ViewModel
 
     fun setTargetBpm(bpm: Int) = update { it.copy(targetBpm = bpm) }
 
+    fun setKeepTempoForNextTrack(keep: Boolean) = update { it.copy(keepTempoForNextTrack = keep) }
+
     private fun update(change: (PlaybackSettings) -> PlaybackSettings) {
         viewModelScope.launch {
             container.playbackSettingsStore.save(change(container.currentPlaybackSettings))

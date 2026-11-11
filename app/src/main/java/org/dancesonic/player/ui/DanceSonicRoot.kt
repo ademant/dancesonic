@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -85,7 +86,7 @@ fun DanceSonicRoot(container: AppContainer) {
     Scaffold(
         bottomBar = {
             Column {
-                PlayerBar(container.player, playbackVm, libraryVm, onExpand = { showNowPlaying = true })
+                PlayerBar(container.player, playbackVm, onExpand = { showNowPlaying = true })
                 HorizontalDivider()
                 NavigationBar {
                     Tab.entries.forEach { entry ->
@@ -258,7 +259,6 @@ internal fun ServerAddressField(
 fun PlayerBar(
     player: PlayerController,
     playbackVm: PlaybackSettingsViewModel,
-    libraryVm: LibraryViewModel,
     onExpand: () -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
@@ -268,22 +268,13 @@ fun PlayerBar(
     var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth().clickable(onClick = onExpand), verticalAlignment = Alignment.CenterVertically) {
-            CoverImage(
-                url = state.nowPlayingAlbumId?.let { libraryVm.coverUrl(it, COVER_PX_SMALL) },
-                contentDescription = null,
-                size = PLAYER_COVER,
-            )
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = state.nowPlayingTitle ?: "Nothing playing",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            }
-        }
+        Text(
+            text = state.nowPlayingTitle ?: "Nothing playing",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable(onClick = onExpand),
+        )
+        state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SeekBar(player)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
@@ -299,7 +290,15 @@ fun PlayerBar(
                 } else {
                     "Tempo ${"%.2f".format(tempo)}x"
                 }
-            Text(label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                // A tap on the label switches between BPM and multiplier.
+                modifier =
+                    Modifier.clickable {
+                        playbackVm.setTempoMode(if (bpmMode) TempoMode.Multiplier else TempoMode.Bpm)
+                    },
+            )
             val markerFraction = bpmMarkerFraction(bpmMode, state.trackBpm)
             Slider(
                 value = if (bpmMode) targetBpm else tempo,
@@ -321,6 +320,13 @@ fun PlayerBar(
                 track = { sliderState -> TrackWithMarker(sliderState, markerFraction) },
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = settings.keepTempoForNextTrack,
+                    onCheckedChange = { playbackVm.setKeepTempoForNextTrack(it) },
+                )
+                Text("Keep", style = MaterialTheme.typography.labelSmall)
+            }
             ResetTempoButton(playbackVm, bpmMode, state.trackBpm)
         }
     }
@@ -354,7 +360,6 @@ private fun TrackWithMarker(
 }
 
 private val MARKER_WIDTH = 3.dp
-private val PLAYER_COVER = 48.dp
 
 /** Where the track's own BPM sits on the BPM slider, from 0 to 1, or null when the slider shows no BPM. */
 private fun bpmMarkerFraction(

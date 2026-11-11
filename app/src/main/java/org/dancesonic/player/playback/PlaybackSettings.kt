@@ -23,6 +23,11 @@ data class PlaybackSettings(
     val multiplier: Float = 1f,
     /** The BPM that tracks with a known BPM play at, in [TempoMode.Bpm]. */
     val targetBpm: Int = PlaybackMath.DEFAULT_TARGET_BPM,
+    /**
+     * Whether the tempo chosen on the player bar carries over to the next track. When false, each new track starts
+     * at its own tempo (1x, or its own BPM), and the bar shows those values.
+     */
+    val keepTempoForNextTrack: Boolean = true,
 )
 
 /** Rules for the speed and volume of one track. Pure, so they are tested without Android. */
@@ -49,6 +54,18 @@ object PlaybackMath {
                 settings.multiplier
             }
         return speed.coerceIn(MIN_TEMPO, MAX_TEMPO)
+    }
+
+    /**
+     * The settings a track starts with when the tempo is not kept: 1x, and the track's own BPM as the target, so
+     * a track with a BPM plays at its original speed. Tracks without a BPM keep the target they had.
+     */
+    fun trackStartSettings(
+        settings: PlaybackSettings,
+        trackBpm: Int?,
+    ): PlaybackSettings {
+        val bpm = trackBpm?.takeIf { it > 0 }?.coerceIn(MIN_TARGET_BPM, MAX_TARGET_BPM) ?: settings.targetBpm
+        return settings.copy(multiplier = 1f, targetBpm = bpm)
     }
 
     /**
@@ -86,6 +103,7 @@ class PlaybackSettingsStore(private val dataStore: DataStore<Preferences>) {
                 targetBpm =
                     (prefs[TARGET_BPM] ?: PlaybackMath.DEFAULT_TARGET_BPM)
                         .coerceIn(PlaybackMath.MIN_TARGET_BPM, PlaybackMath.MAX_TARGET_BPM),
+                keepTempoForNextTrack = prefs[KEEP_TEMPO] ?: true,
             )
         }
 
@@ -95,6 +113,7 @@ class PlaybackSettingsStore(private val dataStore: DataStore<Preferences>) {
             prefs[TEMPO_MODE] = settings.tempoMode.name
             prefs[MULTIPLIER] = settings.multiplier
             prefs[TARGET_BPM] = settings.targetBpm
+            prefs[KEEP_TEMPO] = settings.keepTempoForNextTrack
         }
     }
 
@@ -103,5 +122,6 @@ class PlaybackSettingsStore(private val dataStore: DataStore<Preferences>) {
         val TEMPO_MODE = stringPreferencesKey("playback_tempo_mode")
         val MULTIPLIER = floatPreferencesKey("playback_multiplier")
         val TARGET_BPM = intPreferencesKey("playback_target_bpm")
+        val KEEP_TEMPO = booleanPreferencesKey("playback_keep_tempo")
     }
 }
