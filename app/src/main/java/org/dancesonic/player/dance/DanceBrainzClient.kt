@@ -10,6 +10,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.LanTls
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.http.Body
@@ -110,7 +111,8 @@ class DanceBrainzClient internal constructor(
         }
 
         internal fun defaultHttpClient(): OkHttpClient =
-            OkHttpClient.Builder()
+            LanTls.configure(OkHttpClient.Builder())
+                .followSslRedirects(false)
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .addInterceptor { chain ->

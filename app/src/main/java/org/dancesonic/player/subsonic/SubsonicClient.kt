@@ -40,14 +40,11 @@ class SubsonicClient internal constructor(
     @Volatile
     private var extensionsCache: List<OpenSubsonicExtensionDto>? = null
 
-    /** Whether the server advertises extension [name] at version 1. Asked once per client. */
-    suspend fun supports(name: String): Boolean {
-        val extensions =
-            extensionsCache ?: call { openSubsonicExtensions() }.openSubsonicExtensions.orEmpty().also {
-                extensionsCache = it
-            }
-        return extensions.any { it.name == name && it.versions.contains(1) }
-    }
+    /** The extensions the server advertises, asked once per client. */
+    suspend fun advertisedExtensions(): List<OpenSubsonicExtensionDto> =
+        extensionsCache ?: call { openSubsonicExtensions() }.openSubsonicExtensions.orEmpty().also {
+            extensionsCache = it
+        }
 
     /** Library totals and the last library change (folksonic `tinysonicLibraryInfo`). */
     suspend fun libraryInfo(): LibraryInfoDto =
@@ -224,6 +221,19 @@ private fun unwrap(response: SubsonicResponse): SubsonicResponse {
     }
     return response
 }
+
+/** Whether the server advertises extension [name] at version 1. Asked once per client. */
+suspend fun SubsonicClient.supports(name: String): Boolean =
+    advertisedExtensions().any { it.name == name && it.versions.contains(1) }
+
+/**
+ * Whether the server is folksonic or tinysonic, which take the API key in the `X-Api-Key` header. Both advertise their
+ * own `tinysonic…` extensions; other servers do not.
+ */
+suspend fun SubsonicClient.advertisesTinysonic(): Boolean =
+    advertisedExtensions().any {
+        it.name.startsWith("tinysonic")
+    }
 
 /** HTTP 429 and 5xx are worth retrying; other HTTP errors are not. */
 private fun isTransient(e: HttpException): Boolean = e.code() == HTTP_TOO_MANY_REQUESTS || e.code() >= HTTP_SERVER_ERROR

@@ -71,7 +71,10 @@ class ConnectViewModelTest {
 
         vm.connectFromScan("dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123")
 
-        assertEquals("The server address must start with https://", vm.state.value.error)
+        assertEquals(
+            "The server address must start with https://, or http:// for a private network address",
+            vm.state.value.error,
+        )
         assertFalse(vm.state.value.busy)
     }
 

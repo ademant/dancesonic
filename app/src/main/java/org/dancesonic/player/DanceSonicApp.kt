@@ -51,6 +51,7 @@ import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.subsonic.LanPins
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
@@ -259,7 +260,12 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     @Synchronized
     fun catalogClient(settings: ServerSettings): SubsonicClient {
         val cached = cachedCatalogClient ?: return SubsonicClient(settings).also { cachedCatalogClient = it }
-        if (cached.settings.baseUrl == settings.baseUrl && cached.settings.apiKey == settings.apiKey) return cached
+        if (cached.settings.baseUrl == settings.baseUrl &&
+            cached.settings.apiKey == settings.apiKey &&
+            cached.settings.keyInHeader == settings.keyInHeader
+        ) {
+            return cached
+        }
         return SubsonicClient(settings).also { cachedCatalogClient = it }
     }
 
@@ -289,6 +295,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
         settingsStore.settings
             .onEach {
                 currentSettings = it
+                LanPins.remember(it)
                 offline.kick()
             }
             .launchIn(appScope)

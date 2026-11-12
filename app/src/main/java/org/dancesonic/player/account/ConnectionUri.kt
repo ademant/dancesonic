@@ -55,7 +55,7 @@ object ConnectionUri {
         val server = params["server"] ?: throw IllegalArgumentException("The connection code has no server.")
         val key = params["key"]?.trim().orEmpty()
         require(key.isNotEmpty()) { "The connection code has no API key." }
-        val dance = params["dancebrainz"]?.let { ServerUrl.parse(it) }
+        val dance = params["dancebrainz"]?.let { ServerUrl.parseHttps(it) }
         return SharedConnection(ServerSettings(ServerUrl.parse(server), key), dance)
     }
 
