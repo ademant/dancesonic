@@ -1,6 +1,7 @@
 package org.dancesonic.player.account
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.coroutines.delay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -8,6 +9,8 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.PublicJwk
+import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicHttp
 import retrofit2.HttpException
 import retrofit2.Response
@@ -42,10 +45,15 @@ internal interface AccountService {
         @Header("Authorization") bearer: String,
     ): Response<Unit>
 
+    /** Sends the token and the app's public key. The pairing then waits for approval: 202, and no key. */
     @POST("api/pair/complete")
-    suspend fun completePairing(
-        @Body body: PairCompleteRequest,
-    ): PairCompleteResponse
+    suspend fun completeDevicePairing(
+        @Body body: DevicePairRequest,
+    ): Response<PairingPending>
+
+    /** The device this proof belongs to. Refused with `pairing_pending` until the owner approves it. */
+    @GET("api/device/me")
+    suspend fun deviceMe(): Response<DeviceMe>
 
     /** Keys can be listed and revoked with an API key, so the app needs no session for this. */
     @GET("api/keys")
@@ -99,17 +107,30 @@ internal data class CreateKeyResponse(
 )
 
 @Serializable
-internal data class PairCompleteRequest(
+internal data class DevicePairRequest(
     val token: String,
     val device: String,
+    val jwk: PublicJwk,
 ) {
-    override fun toString(): String = "PairCompleteRequest(device=$device, token=<redacted>)"
+    override fun toString(): String = "DevicePairRequest(device=$device, token=<redacted>)"
 }
 
+/** The pairing was accepted and waits for approval. [status] is `pending`. */
 @Serializable
-internal data class PairCompleteResponse(
-    val apiKey: String,
-    val username: String? = null,
+internal data class PairingPending(
+    val status: String = "",
+)
+
+@Serializable
+internal data class DeviceMe(
+    val id: Long = 0,
+    val name: String = "",
+)
+
+/** The body of a refusal: `{"error": "<code>", "message": "..."}`. */
+@Serializable
+internal data class RefusalBody(
+    val error: String? = null,
 )
 
 /** A failure the user can act on. The message is safe to show on screen. */
@@ -155,10 +176,59 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         }
     }
 
-    /** Redeems a single-use pairing token from the QR code for an API key. */
-    suspend fun redeemPairing(request: PairingRequest): String =
-        call(unauthorized = INVALID_PAIRING_CODE) {
-            service(request.server).completePairing(PairCompleteRequest(request.token, DEVICE_LABEL)).apiKey
+    /**
+     * Sends the pairing token with the device's public key (folksonic #101). No key is returned: the pairing waits for
+     * the owner to approve it on the account page, see [awaitDeviceApproval]. The request carries no DPoP proof.
+     */
+    suspend fun startDevicePairing(
+        request: PairingRequest,
+        device: String,
+        jwk: PublicJwk,
+    ) {
+        val response = service(request.server).completeDevicePairing(DevicePairRequest(request.token, device, jwk))
+        when {
+            response.code() == HTTP_ACCEPTED -> return
+            response.code() == HTTP_UNAUTHORIZED -> throw AccountException(pairingRefusal(response), null)
+            else -> throw AccountException("The server returned HTTP ${response.code()}.")
+        }
+    }
+
+    /**
+     * Polls the device until the owner approves its pairing. Returns when the device is approved; throws when the
+     * approval is refused, the device was removed, or [timeoutMillis] runs out.
+     */
+    suspend fun awaitDeviceApproval(
+        server: HttpUrl,
+        timeoutMillis: Long = PAIRING_WAIT_MILLIS,
+        pollMillis: Long = POLL_INTERVAL_MILLIS,
+    ) {
+        val deadline = System.nanoTime() + timeoutMillis * NANOS_PER_MILLI
+        while (true) {
+            val response = service(server).deviceMe()
+            if (response.isSuccessful) return
+            val code = refusalCode(response)
+            if (code != CODE_PAIRING_PENDING) throw approvalRefusal(code, response.code())
+            if (System.nanoTime() >= deadline) {
+                throw AccountException("The approval did not arrive in time. Create a new code on the account page.")
+            }
+            delay(pollMillis)
+        }
+    }
+
+    private fun approvalRefusal(
+        code: String?,
+        status: Int,
+    ): AccountException =
+        when (code) {
+            CODE_DEVICE_UNKNOWN -> AccountException("The device was removed on the account page. Pair it again.")
+            CODE_PAIRING_EXPIRED -> AccountException(INVALID_PAIRING_CODE)
+            else -> AccountException("The server returned HTTP $status.")
+        }
+
+    private fun pairingRefusal(response: Response<*>): String =
+        when (refusalCode(response)) {
+            CODE_PAIRING_EXPIRED, CODE_PAIRING_INVALID -> INVALID_PAIRING_CODE
+            else -> "The server refused the pairing (HTTP ${response.code()})."
         }
 
     /**
@@ -210,6 +280,29 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
     companion object {
         const val DEVICE_LABEL = "DanceSonic Android"
         private const val HTTP_UNAUTHORIZED = 401
+        private const val HTTP_ACCEPTED = 202
+        private const val CODE_PAIRING_PENDING = "pairing_pending"
+        private const val CODE_PAIRING_EXPIRED = "pairing_expired"
+        private const val CODE_PAIRING_INVALID = "pairing_invalid"
+        private const val CODE_DEVICE_UNKNOWN = "device_unknown"
+        private const val PAIRING_WAIT_MILLIS = 15L * 60_000L
+        private const val POLL_INTERVAL_MILLIS = 3_000L
+        private const val NANOS_PER_MILLI = 1_000_000L
+
+        /** A client for the device endpoints: every request carries the proof of [settings]' device key. */
+        fun forDevice(settings: ServerSettings): AccountClient = AccountClient(SubsonicHttp.okHttpClient { settings })
+
+        /** The refusal code in a failed response's body, or null when the body has none. */
+        @Suppress("SwallowedException")
+        internal fun refusalCode(response: Response<*>): String? {
+            val text = response.errorBody()?.string() ?: return null
+            return try {
+                accountJson.decodeFromString<RefusalBody>(text).error
+            } catch (e: SerializationException) {
+                // The body is not a refusal we know; the caller then reports the HTTP status.
+                null
+            }
+        }
 
         /** The id of the key whose prefix starts [apiKey], or null if zero or several match. */
         internal fun matchOwnKeyId(

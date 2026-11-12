@@ -10,8 +10,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import org.dancesonic.player.subsonic.ServerAuth
 import org.dancesonic.player.subsonic.ServerSettings
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -86,7 +86,7 @@ internal class KeystoreCipher(private val alias: String = KEY_ALIAS) : SecretCip
  */
 class ServerSettingsStore internal constructor(
     private val dataStore: DataStore<Preferences>,
-    private val cipher: KeystoreCipher,
+    private val cipher: SecretCipher,
 ) {
     constructor(dataStore: DataStore<Preferences>) : this(dataStore, KeystoreCipher())
 
@@ -94,13 +94,26 @@ class ServerSettingsStore internal constructor(
     val settings: Flow<ServerSettings?> = dataStore.data.map { prefs -> read(prefs) }
 
     suspend fun save(settings: ServerSettings) {
-        val (iv, ciphertext) = cipher.encrypt(settings.apiKey)
+        val encrypted = (settings.auth as? ServerAuth.ApiKey)?.let { cipher.encrypt(it.key) }
         dataStore.edit { prefs ->
             prefs[BASE_URL] = settings.baseUrl.toString()
-            prefs[API_KEY_IV] = iv
-            prefs[API_KEY_CIPHERTEXT] = ciphertext
             prefs[KEY_IN_HEADER] = settings.keyInHeader
             if (settings.tlsPin != null) prefs[TLS_PIN] = settings.tlsPin else prefs.remove(TLS_PIN)
+            when (val auth = settings.auth) {
+                is ServerAuth.ApiKey -> {
+                    val (iv, ciphertext) = requireNotNull(encrypted)
+                    prefs[AUTH_KIND] = KIND_API_KEY
+                    prefs[API_KEY_IV] = iv
+                    prefs[API_KEY_CIPHERTEXT] = ciphertext
+                    prefs.remove(DEVICE_ALIAS)
+                }
+                is ServerAuth.Device -> {
+                    prefs[AUTH_KIND] = KIND_DEVICE
+                    prefs[DEVICE_ALIAS] = auth.alias
+                    prefs.remove(API_KEY_IV)
+                    prefs.remove(API_KEY_CIPHERTEXT)
+                }
+            }
         }
     }
 
@@ -111,15 +124,30 @@ class ServerSettingsStore internal constructor(
             prefs.remove(API_KEY_CIPHERTEXT)
             prefs.remove(KEY_IN_HEADER)
             prefs.remove(TLS_PIN)
+            prefs.remove(AUTH_KIND)
+            prefs.remove(DEVICE_ALIAS)
         }
     }
 
     private fun read(prefs: Preferences): ServerSettings? {
-        val url = prefs[BASE_URL]?.toHttpUrlOrNull()
-        val iv = prefs[API_KEY_IV]
-        val ciphertext = prefs[API_KEY_CIPHERTEXT]
-        if (url == null || iv == null || ciphertext == null) return null
-        return decryptOrNull(url, iv, ciphertext, keyInHeader = prefs[KEY_IN_HEADER] == true, tlsPin = prefs[TLS_PIN])
+        val url = prefs[BASE_URL]?.toHttpUrlOrNull() ?: return null
+        val auth = readAuth(prefs) ?: return null
+        return ServerSettings(
+            baseUrl = url,
+            auth = auth,
+            keyInHeader = prefs[KEY_IN_HEADER] == true,
+            tlsPin = prefs[TLS_PIN],
+        )
+    }
+
+    /** The stored credential, or null when it is missing or the API key can no longer be decrypted. */
+    private fun readAuth(prefs: Preferences): ServerAuth? {
+        if (prefs[AUTH_KIND] == KIND_DEVICE) return prefs[DEVICE_ALIAS]?.let { ServerAuth.Device(it) }
+        val key =
+            prefs[API_KEY_IV]?.let { iv ->
+                prefs[API_KEY_CIPHERTEXT]?.let { ciphertext -> decryptOrNull(iv, ciphertext) }
+            }
+        return key?.let { ServerAuth.ApiKey(it) }
     }
 
     /**
@@ -128,14 +156,11 @@ class ServerSettingsStore internal constructor(
      */
     @Suppress("SwallowedException")
     private fun decryptOrNull(
-        url: HttpUrl,
         iv: String,
         ciphertext: String,
-        keyInHeader: Boolean,
-        tlsPin: String?,
-    ): ServerSettings? =
+    ): String? =
         try {
-            ServerSettings(url, cipher.decrypt(iv, ciphertext), keyInHeader, tlsPin)
+            cipher.decrypt(iv, ciphertext)
         } catch (e: GeneralSecurityException) {
             null
         } catch (e: ProviderException) {
@@ -150,5 +175,9 @@ class ServerSettingsStore internal constructor(
         val API_KEY_CIPHERTEXT = stringPreferencesKey("server_api_key_ciphertext")
         val KEY_IN_HEADER = booleanPreferencesKey("server_key_in_header")
         val TLS_PIN = stringPreferencesKey("server_tls_pin")
+        val AUTH_KIND = stringPreferencesKey("server_auth_kind")
+        val DEVICE_ALIAS = stringPreferencesKey("server_device_alias")
+        const val KIND_API_KEY = "api_key"
+        const val KIND_DEVICE = "device"
     }
 }

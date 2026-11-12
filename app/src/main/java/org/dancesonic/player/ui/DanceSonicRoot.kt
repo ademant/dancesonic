@@ -278,6 +278,8 @@ fun ConnectScreen(vm: ConnectViewModel) {
         }
 
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+        state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         if (state.busy) {
             CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }

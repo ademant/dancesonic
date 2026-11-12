@@ -66,9 +66,7 @@ fun ConfigScreen(
     val danceUrl by danceVm.baseUrl.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var revealKey by rememberSaveable { mutableStateOf(false) }
     // Not saved: the QR code leaves the screen with the screen, so a rotation or restore hides it again.
-    var showQr by remember { mutableStateOf(false) }
     var address by rememberSaveable { mutableStateOf(vm.settings.value?.baseUrl?.toString() ?: "https://") }
     // Not saved: the typed key never reaches the saved-instance state.
     var apiKey by remember { mutableStateOf("") }
@@ -91,20 +89,7 @@ fun ConfigScreen(
             Text("Not connected to a server.")
         } else {
             Text("Server: ${current.baseUrl}")
-            Text("API key: ${if (revealKey) current.apiKey else MASKED_KEY}")
-            TextButton(onClick = { revealKey = !revealKey }) { Text(if (revealKey) "Hide key" else "Show key") }
-            OutlinedButton(onClick = { showQr = !showQr }) {
-                Text(if (showQr) "Hide QR code" else "Show as QR code")
-            }
-            if (showQr) {
-                Text(
-                    "This code contains your API key. Anyone who scans it can use your server. " +
-                        "Show it only to a device you own, and hide it afterwards.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                ConnectionQr(current, danceUrl)
-            }
+            SubsonicKeySection(current, danceUrl)
             Text("Library", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { vm.sync() }, enabled = !state.busy) { Text("Refresh") }
@@ -156,6 +141,7 @@ fun ConfigScreen(
 
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         if (state.busy) {
             CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }
@@ -317,4 +303,33 @@ private fun ConnectionQr(
         contentDescription = "QR code with the server address, API key and DanceBrainz address",
         modifier = Modifier.size(QR_SIZE),
     )
+}
+
+/** The stored API key, masked until asked for, and the QR code that carries it. A paired device has no key to show. */
+@Composable
+private fun SubsonicKeySection(
+    current: ServerSettings,
+    danceUrl: HttpUrl,
+) {
+    var revealKey by rememberSaveable { mutableStateOf(false) }
+    var showQr by remember { mutableStateOf(false) }
+    val key = current.apiKey
+    if (key == null) {
+        Text("Paired device: this app holds no API key. Its signing key stays in the Android Keystore.")
+    } else {
+        Text("API key: ${if (revealKey) key else MASKED_KEY}")
+        TextButton(onClick = { revealKey = !revealKey }) { Text(if (revealKey) "Hide key" else "Show key") }
+        OutlinedButton(onClick = { showQr = !showQr }) {
+            Text(if (showQr) "Hide QR code" else "Show as QR code")
+        }
+        if (showQr) {
+            Text(
+                "This code contains your API key. Anyone who scans it can use your server. " +
+                    "Show it only to a device you own, and hide it afterwards.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            ConnectionQr(current, danceUrl)
+        }
+    }
 }

@@ -28,7 +28,7 @@ object ConnectionUri {
         danceBrainz: HttpUrl,
     ): String {
         val server = encode(settings.baseUrl.toString())
-        val key = encode(settings.apiKey)
+        val key = encode(requireNotNull(settings.apiKey) { "A paired device has no key to share." })
         val dance = encode(danceBrainz.toString())
         return "$SCHEME://$HOST?server=$server&key=$key&dancebrainz=$dance"
     }

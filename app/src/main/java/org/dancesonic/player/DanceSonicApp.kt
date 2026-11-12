@@ -261,7 +261,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     fun catalogClient(settings: ServerSettings): SubsonicClient {
         val cached = cachedCatalogClient ?: return SubsonicClient(settings).also { cachedCatalogClient = it }
         if (cached.settings.baseUrl == settings.baseUrl &&
-            cached.settings.apiKey == settings.apiKey &&
+            cached.settings.auth == settings.auth &&
             cached.settings.keyInHeader == settings.keyInHeader
         ) {
             return cached

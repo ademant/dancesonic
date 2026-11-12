@@ -30,9 +30,16 @@ import javax.net.ssl.X509TrustManager
 internal object LanTls {
     private const val HANDSHAKE_TIMEOUT_MILLIS = 15_000
 
-    /** The SHA-256 fingerprint of [certificate], base64, as stored in [ServerSettings.tlsPin]. */
+    /**
+     * The pin of [certificate] in folksonic's form: `sha256/` and the base64 SHA-256 of its public key info, the same
+     * value `tinysonic cert fingerprint` prints and the pairing QR code carries. It is stored in
+     * [ServerSettings.tlsPin].
+     */
     fun fingerprint(certificate: X509Certificate): String =
-        Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256").digest(certificate.encoded))
+        "sha256/" +
+            Base64.getEncoder().encodeToString(
+                MessageDigest.getInstance("SHA-256").digest(certificate.publicKey.encoded),
+            )
 
     /**
      * The pin to store for [url], read from the server now. Null for anything that is not https on a private
