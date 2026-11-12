@@ -10,6 +10,7 @@ import okhttp3.Response
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.Signature
 import java.security.interfaces.ECPublicKey
@@ -28,6 +29,15 @@ data class PublicJwk(
     val x: String,
     val y: String,
 ) {
+    /**
+     * The RFC 7638 thumbprint: base64url of the SHA-256 of the canonical JSON with the required members in
+     * lexical order. folksonic keeps this value, so it identifies the device without the server storing the key.
+     */
+    fun thumbprint(): String {
+        val canonical = """{"crv":"$crv","kty":"$kty","x":"$x","y":"$y"}"""
+        return base64Url(MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8)))
+    }
+
     companion object {
         /** A P-256 key from its affine coordinates, each 32 bytes big-endian. */
         fun of(

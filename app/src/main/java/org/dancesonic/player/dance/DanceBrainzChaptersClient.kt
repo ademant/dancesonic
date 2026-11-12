@@ -12,6 +12,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.HeaderMap
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -63,10 +64,10 @@ class DanceBrainzChaptersClient internal constructor(
         mbid: String,
         startMs: Long,
         version: String?,
-        token: String,
+        credential: DanceBrainzCredential,
     ): TagWriteResult {
         val body = buildJsonObject { put("start_ms", startMs) }
-        val outcome = danceBrainzCall { service.add(mbid, body, version?.let(::quoted), bearer(token)) }
+        val outcome = danceBrainzCall { service.add(mbid, body, version?.let(::quoted), credential.authHeaders()) }
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
 
@@ -76,11 +77,11 @@ class DanceBrainzChaptersClient internal constructor(
         startMs: Long,
         change: ChapterChange,
         version: String?,
-        token: String,
+        credential: DanceBrainzCredential,
     ): TagWriteResult {
         val outcome =
             danceBrainzCall {
-                service.update(mbid, startMs, change.toJson(), version?.let(::quoted), bearer(token))
+                service.update(mbid, startMs, change.toJson(), version?.let(::quoted), credential.authHeaders())
             }
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
@@ -90,13 +91,12 @@ class DanceBrainzChaptersClient internal constructor(
         mbid: String,
         startMs: Long,
         version: String?,
-        token: String,
+        credential: DanceBrainzCredential,
     ): TagWriteResult {
-        val outcome = danceBrainzCall { service.delete(mbid, startMs, version?.let(::quoted), bearer(token)) }
+        val outcome =
+            danceBrainzCall { service.delete(mbid, startMs, version?.let(::quoted), credential.authHeaders()) }
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
-
-    private fun bearer(token: String): String = "Bearer $token"
 
     private fun quoted(version: String): String = "\"$version\""
 
@@ -134,7 +134,7 @@ internal interface DanceBrainzChaptersService {
         @Path("mbid") mbid: String,
         @Body body: JsonObject,
         @Header("If-Match") ifMatch: String?,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
 
     @PATCH("api/v1/recordings/{mbid}/chapters/{startMs}")
@@ -143,7 +143,7 @@ internal interface DanceBrainzChaptersService {
         @Path("startMs") startMs: Long,
         @Body body: JsonObject,
         @Header("If-Match") ifMatch: String?,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
 
     @DELETE("api/v1/recordings/{mbid}/chapters/{startMs}")
@@ -151,7 +151,7 @@ internal interface DanceBrainzChaptersService {
         @Path("mbid") mbid: String,
         @Path("startMs") startMs: Long,
         @Header("If-Match") ifMatch: String?,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
 }
 

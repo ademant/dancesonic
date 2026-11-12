@@ -8,6 +8,7 @@ import okhttp3.HttpUrl
 import org.dancesonic.player.dance.ChapterChange
 import org.dancesonic.player.dance.ChapterList
 import org.dancesonic.player.dance.DanceBrainzChaptersClient
+import org.dancesonic.player.dance.DanceBrainzCredential
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceBrainzTokenStore
 import org.dancesonic.player.dance.TagWriteResult
@@ -35,20 +36,23 @@ class ChapterEdits(
     suspend fun add(
         mbid: String,
         startMs: Long,
-    ): Boolean = write(mbid) { client, version, token -> client.add(mbid, startMs, version, token) }
+    ): Boolean = write(mbid) { client, version, credential -> client.add(mbid, startMs, version, credential) }
 
     /** Applies [change] to the chapter starting at [startMs]. Returns true when DanceBrainz holds it for review. */
     suspend fun update(
         mbid: String,
         startMs: Long,
         change: ChapterChange,
-    ): Boolean = write(mbid) { client, version, token -> client.update(mbid, startMs, change, version, token) }
+    ): Boolean =
+        write(
+            mbid,
+        ) { client, version, credential -> client.update(mbid, startMs, change, version, credential) }
 
     /** Removes the chapter starting at [startMs]. Returns true when DanceBrainz holds it for review. */
     suspend fun delete(
         mbid: String,
         startMs: Long,
-    ): Boolean = write(mbid) { client, version, token -> client.delete(mbid, startMs, version, token) }
+    ): Boolean = write(mbid) { client, version, credential -> client.delete(mbid, startMs, version, credential) }
 
     /**
      * Sends one write against the current version of the list, then stores the list as it is after the write. A
@@ -56,15 +60,15 @@ class ChapterEdits(
      */
     private suspend fun write(
         mbid: String,
-        send: suspend (DanceBrainzChaptersClient, String?, String) -> TagWriteResult,
+        send: suspend (DanceBrainzChaptersClient, String?, DanceBrainzCredential) -> TagWriteResult,
     ): Boolean =
         writeLock.withLock {
-            val token = tokens.credential.first()?.token ?: throw DanceBrainzException(NOT_SIGNED_IN)
+            val credential = tokens.credential.first() ?: throw DanceBrainzException(NOT_SIGNED_IN)
             val client = newClient(baseUrl())
             val current = client.read(mbid)
             val result =
                 try {
-                    send(client, current.version, token)
+                    send(client, current.version, credential)
                 } catch (e: DanceBrainzException) {
                     if (e.httpCode == PRECONDITION_FAILED) store(mbid, client.read(mbid))
                     throw e

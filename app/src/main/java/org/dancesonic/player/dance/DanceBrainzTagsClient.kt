@@ -9,7 +9,7 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import retrofit2.http.Body
 import retrofit2.http.GET
-import retrofit2.http.Header
+import retrofit2.http.HeaderMap
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -62,12 +62,12 @@ class DanceBrainzTagsClient internal constructor(
                 }
         }
 
-    /** The dance tags of [mbid], with their qualifiers. Sends [token] when given. */
+    /** The dance tags of [mbid], with their qualifiers. Sends [credential] when given. */
     suspend fun currentDances(
         mbid: String,
-        token: String?,
+        credential: DanceBrainzCredential?,
     ): List<CurrentDance> =
-        danceBrainzCall { service.tags(mbid, token?.let(::bearer)) }
+        danceBrainzCall { service.tags(mbid, credential.authHeaders()) }
             .tags
             .filter { it.tag.type == DANCE_TYPE }
             .map { CurrentDance(tagId = it.tag.id, name = it.tag.name, qualifier = it.qualifier.orEmpty()) }
@@ -77,10 +77,10 @@ class DanceBrainzTagsClient internal constructor(
         mbid: String,
         path: String,
         qualifier: String,
-        token: String,
+        credential: DanceBrainzCredential,
     ): TagWriteResult {
         val body = AddTagsBody(listOf(AddTagDto(type = DANCE_TYPE, path = path, qualifier = qualifier)))
-        val outcome = danceBrainzCall { service.add(mbid, body, bearer(token)) }
+        val outcome = danceBrainzCall { service.add(mbid, body, credential.authHeaders()) }
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
 
@@ -88,14 +88,12 @@ class DanceBrainzTagsClient internal constructor(
     suspend fun replaceDances(
         mbid: String,
         dances: List<CurrentDance>,
-        token: String,
+        credential: DanceBrainzCredential,
     ): TagWriteResult {
         val body = ReplaceTagsBody(dances.map { ReplaceTagDto(tagId = it.tagId, qualifier = it.qualifier) })
-        val outcome = danceBrainzCall { service.replace(mbid, DANCE_TYPE, body, bearer(token)) }
+        val outcome = danceBrainzCall { service.replace(mbid, DANCE_TYPE, body, credential.authHeaders()) }
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
-
-    private fun bearer(token: String): String = "Bearer $token"
 
     companion object {
         /** The tag type that holds dance names; shared with [DanceBrainzClient.DANCE_TAG_TYPE]. */
@@ -125,14 +123,14 @@ internal interface DanceBrainzTagsService {
     @GET("api/v1/recordings/{mbid}/tags")
     suspend fun tags(
         @Path("mbid") mbid: String,
-        @Header("Authorization") bearer: String?,
+        @HeaderMap auth: Map<String, String>,
     ): TrackTagsDto
 
     @POST("api/v1/recordings/{mbid}/tags")
     suspend fun add(
         @Path("mbid") mbid: String,
         @Body body: AddTagsBody,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
 
     @PUT("api/v1/recordings/{mbid}/tags")
@@ -140,7 +138,7 @@ internal interface DanceBrainzTagsService {
         @Path("mbid") mbid: String,
         @Query("type") type: String,
         @Body body: ReplaceTagsBody,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
 }
 

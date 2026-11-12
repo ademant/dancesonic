@@ -142,6 +142,7 @@ fun ConfigScreen(
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        PairingVerification(state.verificationCode, vm.verifier::answer)
         if (state.busy) {
             CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
         }

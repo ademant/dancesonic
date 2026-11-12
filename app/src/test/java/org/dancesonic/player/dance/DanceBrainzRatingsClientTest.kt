@@ -3,6 +3,7 @@ package org.dancesonic.player.dance
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.testsupport.TestSubsonicServer
+import org.dancesonic.player.testsupport.tokenCredential
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -26,7 +27,7 @@ class DanceBrainzRatingsClientTest {
             server.server.enqueue(json("""{"recording":"$mbid","hearts":2,"shoes_median":3.5,"shoes_raters":4}"""))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
-            val ratings = runBlocking { client.ratings(mbid, token = null) }
+            val ratings = runBlocking { client.ratings(mbid, credential = null) }
 
             val request = server.server.takeRequest()
             assertEquals("GET", request.method)
@@ -44,7 +45,8 @@ class DanceBrainzRatingsClientTest {
             )
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
-            val ratings = runBlocking { client.ratings(mbid, token = "dbz_viewer_token_1234567890") }
+            val ratings =
+                runBlocking { client.ratings(mbid, credential = tokenCredential("dbz_viewer_token_1234567890")) }
 
             assertEquals("Bearer dbz_viewer_token_1234567890", server.server.takeRequest().getHeader("Authorization"))
             assertEquals(5, ratings.myShoes)
@@ -58,7 +60,13 @@ class DanceBrainzRatingsClientTest {
             server.server.enqueue(MockResponse().setResponseCode(204))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
-            runBlocking { client.setShoes(mbid, value = 4, token = "dbz_viewer_token_1234567890") }
+            runBlocking {
+                client.setShoes(
+                    mbid,
+                    value = 4,
+                    credential = tokenCredential("dbz_viewer_token_1234567890"),
+                )
+            }
 
             val request = server.server.takeRequest()
             assertEquals("PUT", request.method)
@@ -74,7 +82,7 @@ class DanceBrainzRatingsClientTest {
             server.server.enqueue(MockResponse().setResponseCode(204))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
-            runBlocking { client.clearShoes(mbid, token = "dbz_viewer_token_1234567890") }
+            runBlocking { client.clearShoes(mbid, credential = tokenCredential("dbz_viewer_token_1234567890")) }
 
             val request = server.server.takeRequest()
             assertEquals("DELETE", request.method)
@@ -89,7 +97,13 @@ class DanceBrainzRatingsClientTest {
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
             assertThrows(IllegalArgumentException::class.java) {
-                runBlocking { client.setShoes(mbid, value = 6, token = "dbz_viewer_token_1234567890") }
+                runBlocking {
+                    client.setShoes(
+                        mbid,
+                        value = 6,
+                        credential = tokenCredential("dbz_viewer_token_1234567890"),
+                    )
+                }
             }
 
             assertEquals(0, server.server.requestCount)
@@ -104,7 +118,13 @@ class DanceBrainzRatingsClientTest {
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
-                    runBlocking { client.setShoes(mbid, value = 2, token = "dbz_revoked_token_1234567890") }
+                    runBlocking {
+                        client.setShoes(
+                            mbid,
+                            value = 2,
+                            credential = tokenCredential("dbz_revoked_token_1234567890"),
+                        )
+                    }
                 }
 
             assertEquals(401, error.httpCode)

@@ -1,6 +1,7 @@
 package org.dancesonic.player.account
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.subsonic.DeviceProofInterceptor
@@ -185,6 +186,81 @@ class AccountClientTest {
                     runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 0, pollMillis = 1) }
                 }
             assertTrue(error.message.orEmpty().contains("did not arrive in time"))
+        }
+
+    @Test
+    fun `the answer asks for the code to be confirmed, and an older server does not`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"status":"pending","pendingId":12,"confirm":true}""").setResponseCode(202))
+            fake.server.enqueue(json("""{"status":"pending"}""").setResponseCode(202))
+            val jwk = SoftwareDeviceSigner().publicJwk()
+            val request = PairingRequest(base, "tsp_abcdefgh12345")
+
+            val withCode = account.startDevicePairing(request, "Pixel", jwk)
+            val older = account.startDevicePairing(request, "Pixel", jwk)
+
+            assertTrue(withCode.confirm)
+            assertEquals("12", withCode.pendingId.toString())
+            assertFalse(older.confirm)
+        }
+
+    @Test
+    fun `the confirmation carries the pending id, the answer and the device's proof`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(MockResponse().setResponseCode(200))
+
+            deviceAccount().confirmDevicePairing(base, JsonPrimitive(12), PairingDecision.MATCH)
+
+            val sent = fake.server.takeRequest()
+            assertEquals("/api/pair/confirm", sent.requestUrl!!.encodedPath)
+            val body = sent.body.readUtf8()
+            assertTrue(body.contains("\"pairing\":12"))
+            assertTrue(body.contains("\"result\":\"match\""))
+            assertNotNull(sent.getHeader("DPoP"))
+        }
+
+    @Test
+    fun `a code used by another device gives its own message when the phone confirms`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking {
+                        deviceAccount().confirmDevicePairing(base, JsonPrimitive(12), PairingDecision.MATCH)
+                    }
+                }
+            assertEquals(AccountClient.TOKEN_ALREADY_USED, error.message)
+        }
+
+    @Test
+    fun `a token already used at the start gives the same message`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking {
+                        account.startDevicePairing(
+                            PairingRequest(base, "tsp_abcdefgh12345"),
+                            "Pixel",
+                            SoftwareDeviceSigner().publicJwk(),
+                        )
+                    }
+                }
+            assertEquals(AccountClient.TOKEN_ALREADY_USED, error.message)
+        }
+
+    @Test
+    fun `a pairing the owner rejected ends the wait with that reason`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_rejected"}""").setResponseCode(401))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1) }
+                }
+            assertEquals(AccountClient.PAIRING_REJECTED, error.message)
         }
 
     /** The account client for a paired device: the proof is signed with an in-memory key and sent over the test TLS. */

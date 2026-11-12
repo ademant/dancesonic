@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl
+import org.dancesonic.player.dance.DanceBrainzCredential
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceBrainzRatingsClient
 import org.dancesonic.player.dance.DanceBrainzTagsClient
@@ -144,7 +145,7 @@ class DanceBrainzEdits(
     suspend fun flush(): Int =
         flushLock.withLock {
             val credential = tokens.credential.first() ?: return@withLock queue.queuedCount()
-            val sender = EditSender(ratings, queue, newClients(baseUrl()), credential.token)
+            val sender = EditSender(ratings, queue, newClients(baseUrl()), credential)
             for (edit in queue.withStatus(EditStatus.QUEUED)) {
                 try {
                     sender.send(edit)
@@ -170,12 +171,12 @@ class DanceBrainzEdits(
         val fresh = ratings.checkedSince(valid, clock() - MAX_AGE_MILLIS).toSet()
         val stale = valid.filterNot { it in fresh }.take(MAX_REFRESH_PER_CALL)
         if (stale.isEmpty()) return 0
-        val token = tokens.credential.first()?.token
+        val credential = tokens.credential.first()
         val client = newClients(baseUrl()).ratings
         var failed = 0
         for ((index, mbid) in stale.withIndex()) {
             try {
-                val read = client.ratings(mbid, token)
+                val read = client.ratings(mbid, credential)
                 ratings.upsert(ShoesRatingEntity(mbid, read.myShoes, read.shoesMedian, read.shoesRaters, clock()))
             } catch (e: CancellationException) {
                 throw e
@@ -232,14 +233,14 @@ class DanceBrainzEdits(
 }
 
 /**
- * Sends one queued change to DanceBrainz with the account's token. A send that succeeds leaves the queue, or is
+ * Sends one queued change to DanceBrainz with the account's credential. A send that succeeds leaves the queue, or is
  * held as pending review; a removal first checks the track, and is marked as a conflict if it changed.
  */
 private class EditSender(
     private val ratings: ShoesRatingDao,
     private val queue: EditQueueDao,
     private val clients: DanceBrainzClients,
-    private val token: String,
+    private val credential: DanceBrainzCredential,
 ) {
     suspend fun send(edit: EditEntity) {
         when (edit.kind) {
@@ -252,9 +253,9 @@ private class EditSender(
     private suspend fun sendShoes(edit: EditEntity) {
         val value = edit.value
         if (value == null) {
-            clients.ratings.clearShoes(edit.mbid, token)
+            clients.ratings.clearShoes(edit.mbid, credential)
         } else {
-            clients.ratings.setShoes(edit.mbid, value, token)
+            clients.ratings.setShoes(edit.mbid, value, credential)
         }
         queue.delete(edit.id)
         // The viewer's own value is now known; the median and count keep their last read until the next refresh.
@@ -271,13 +272,13 @@ private class EditSender(
     }
 
     private suspend fun sendAdd(edit: EditEntity) {
-        val result = clients.tags.addDance(edit.mbid, edit.path.orEmpty(), edit.qualifier.orEmpty(), token)
+        val result = clients.tags.addDance(edit.mbid, edit.path.orEmpty(), edit.qualifier.orEmpty(), credential)
         settle(edit, held = result.pending)
     }
 
     private suspend fun sendRemove(edit: EditEntity) {
         val name = edit.danceName.orEmpty()
-        val current = clients.tags.currentDances(edit.mbid, token)
+        val current = clients.tags.currentDances(edit.mbid, credential)
         if (current.none { it.name == name }) {
             queue.delete(edit.id)
             return
@@ -290,7 +291,7 @@ private class EditSender(
             queue.recordError(edit.id, CONFLICT)
             return
         }
-        val result = clients.tags.replaceDances(edit.mbid, current.filter { it.name != name }, token)
+        val result = clients.tags.replaceDances(edit.mbid, current.filter { it.name != name }, credential)
         settle(edit, held = result.pending)
     }
 

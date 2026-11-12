@@ -6,6 +6,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -50,6 +51,15 @@ internal interface AccountService {
     suspend fun completeDevicePairing(
         @Body body: DevicePairRequest,
     ): Response<PairingPending>
+
+    /**
+     * The phone's half of the verification (folksonic #103). Signed with the pending device's key, so only the holder
+     * of the key can confirm. Answers 200 when the confirmation is recorded.
+     */
+    @POST("api/pair/confirm")
+    suspend fun confirmPairing(
+        @Body body: PairConfirmRequest,
+    ): Response<Unit>
 
     /** The device this proof belongs to. Refused with `pairing_pending` until the owner approves it. */
     @GET("api/device/me")
@@ -115,11 +125,29 @@ internal data class DevicePairRequest(
     override fun toString(): String = "DevicePairRequest(device=$device, token=<redacted>)"
 }
 
-/** The pairing was accepted and waits for approval. [status] is `pending`. */
+/**
+ * The pairing was accepted and waits for approval. [status] is `pending`. [confirm] is true when the server also needs
+ * both sides to show the same verification code before it approves; an older server does not send it.
+ */
 @Serializable
-internal data class PairingPending(
+data class PairingPending(
     val status: String = "",
+    @SerialName("pendingId") val pendingId: JsonElement? = null,
+    val confirm: Boolean = false,
 )
+
+/** The phone's answer to the verification code. [pairing] is the pending id from the server, sent back unchanged. */
+@Serializable
+internal data class PairConfirmRequest(
+    val pairing: JsonElement,
+    val result: String,
+)
+
+/** What the owner's phone decides about the code shown on both screens. */
+enum class PairingDecision(internal val wire: String) {
+    MATCH("match"),
+    CANCEL("cancel"),
+}
 
 @Serializable
 internal data class DeviceMe(
@@ -179,18 +207,32 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
     /**
      * Sends the pairing token with the device's public key (folksonic #101). No key is returned: the pairing waits for
      * the owner to approve it on the account page, see [awaitDeviceApproval]. The request carries no DPoP proof.
+     * The answer says whether the code must be verified on both sides first (folksonic #103).
      */
     suspend fun startDevicePairing(
         request: PairingRequest,
         device: String,
         jwk: PublicJwk,
-    ) {
+    ): PairingPending {
         val response = service(request.server).completeDevicePairing(DevicePairRequest(request.token, device, jwk))
-        when {
-            response.code() == HTTP_ACCEPTED -> return
+        return when {
+            response.code() == HTTP_ACCEPTED -> response.body() ?: PairingPending()
             response.code() == HTTP_UNAUTHORIZED -> throw AccountException(pairingRefusal(response), null)
             else -> throw AccountException("The server returned HTTP ${response.code()}.")
         }
+    }
+
+    /**
+     * Records the phone's answer to the verification code. Call it on [forDevice] of the pending key's settings, so the
+     * request carries that key's proof. A refused confirmation is reported with the reason the server gives.
+     */
+    suspend fun confirmDevicePairing(
+        server: HttpUrl,
+        pendingId: JsonElement,
+        decision: PairingDecision,
+    ) {
+        val response = service(server).confirmPairing(PairConfirmRequest(pendingId, decision.wire))
+        if (!response.isSuccessful) throw AccountException(confirmRefusal(response))
     }
 
     /**
@@ -222,13 +264,24 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         when (code) {
             CODE_DEVICE_UNKNOWN -> AccountException("The device was removed on the account page. Pair it again.")
             CODE_PAIRING_EXPIRED -> AccountException(INVALID_PAIRING_CODE)
+            CODE_PAIRING_REJECTED -> AccountException(PAIRING_REJECTED)
+            CODE_PAIRING_TOKEN_USED -> AccountException(TOKEN_ALREADY_USED)
             else -> AccountException("The server returned HTTP $status.")
         }
 
     private fun pairingRefusal(response: Response<*>): String =
         when (refusalCode(response)) {
             CODE_PAIRING_EXPIRED, CODE_PAIRING_INVALID -> INVALID_PAIRING_CODE
+            CODE_PAIRING_TOKEN_USED -> TOKEN_ALREADY_USED
             else -> "The server refused the pairing (HTTP ${response.code()})."
+        }
+
+    private fun confirmRefusal(response: Response<*>): String =
+        when (refusalCode(response)) {
+            CODE_PAIRING_REJECTED -> PAIRING_REJECTED
+            CODE_PAIRING_TOKEN_USED -> TOKEN_ALREADY_USED
+            CODE_PAIRING_EXPIRED, CODE_PAIRING_INVALID -> INVALID_PAIRING_CODE
+            else -> "The server did not accept the confirmation (HTTP ${response.code()})."
         }
 
     /**
@@ -285,6 +338,8 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         private const val CODE_PAIRING_EXPIRED = "pairing_expired"
         private const val CODE_PAIRING_INVALID = "pairing_invalid"
         private const val CODE_DEVICE_UNKNOWN = "device_unknown"
+        private const val CODE_PAIRING_REJECTED = "pairing_rejected"
+        private const val CODE_PAIRING_TOKEN_USED = "pairing_token_used"
         private const val PAIRING_WAIT_MILLIS = 15L * 60_000L
         private const val POLL_INTERVAL_MILLIS = 3_000L
         private const val NANOS_PER_MILLI = 1_000_000L
@@ -315,6 +370,10 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
 
         const val INVALID_PAIRING_CODE =
             "This pairing code is invalid or expired. Create a new one on the account page."
+        const val PAIRING_REJECTED =
+            "The pairing was rejected on the account page. Create a new code there to try again."
+        const val TOKEN_ALREADY_USED =
+            "This QR code has already been used by another device. Create a new code on the account page."
 
         private val accountJson =
             Json {

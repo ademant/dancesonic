@@ -3,6 +3,7 @@ package org.dancesonic.player.dance
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.testsupport.TestSubsonicServer
+import org.dancesonic.player.testsupport.tokenCredential
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -90,7 +91,7 @@ class DanceBrainzChaptersClientTest {
                         mbid,
                         startMs = 61_500,
                         version = "v2",
-                        token = token,
+                        credential = tokenCredential(token),
                     )
                 }
 
@@ -110,7 +111,13 @@ class DanceBrainzChaptersClientTest {
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             runBlocking {
-                client.update(mbid, 112_000, ChapterChange(title = "Ton doubl"), version = "v3", token = token)
+                client.update(
+                    mbid,
+                    112_000,
+                    ChapterChange(title = "Ton doubl"),
+                    version = "v3",
+                    credential = tokenCredential(token),
+                )
             }
 
             val request = server.server.takeRequest()
@@ -133,9 +140,15 @@ class DanceBrainzChaptersClientTest {
                     112_000,
                     ChapterChange(clearTitle = true, clearDance = true),
                     version = "v3",
-                    token = token,
+                    credential = tokenCredential(token),
                 )
-                client.update(mbid, 112_000, ChapterChange(newStartMs = 115_000), version = null, token = token)
+                client.update(
+                    mbid,
+                    112_000,
+                    ChapterChange(newStartMs = 115_000),
+                    version = null,
+                    credential = tokenCredential(token),
+                )
             }
 
             assertEquals("""{"title":null,"tag_id":null}""", server.server.takeRequest().body.readUtf8())
@@ -151,7 +164,7 @@ class DanceBrainzChaptersClientTest {
             server.server.enqueue(json("""{"change":{"status":"pending"},"chapters":[]}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
-            val result = runBlocking { client.delete(mbid, 0, version = "v4", token = token) }
+            val result = runBlocking { client.delete(mbid, 0, version = "v4", credential = tokenCredential(token)) }
 
             val request = server.server.takeRequest()
             assertEquals("DELETE", request.method)
@@ -168,7 +181,7 @@ class DanceBrainzChaptersClientTest {
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
-                    runBlocking { client.delete(mbid, 0, version = "old", token = token) }
+                    runBlocking { client.delete(mbid, 0, version = "old", credential = tokenCredential(token)) }
                 }
 
             assertEquals(412, error.httpCode)
