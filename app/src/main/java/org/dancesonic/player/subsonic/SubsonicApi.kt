@@ -18,14 +18,33 @@ import java.io.IOException
 class ServerSettings(
     val baseUrl: HttpUrl,
     val apiKey: String,
+    /**
+     * True when the server takes the key in the `X-Api-Key` header (folksonic). The key then stays out of the URL,
+     * and the access log. False for other servers, which take it as the `apiKey` query parameter.
+     */
+    val keyInHeader: Boolean = false,
+    /**
+     * SHA-256 of the server's certificate, for an https server on a private network that has no CA-signed certificate.
+     * See [LanTls]. Null for every other server.
+     */
+    val tlsPin: String? = null,
 ) {
     init {
-        require(baseUrl.scheme == "https") { "Server must use https" }
+        require(baseUrl.isAllowedServer()) { "Server must use https, or http on a private network address" }
+        require(tlsPin == null || (baseUrl.isHttps && isPrivateNetworkHost(baseUrl.host))) {
+            "A certificate pin is only used for https on a private network"
+        }
         require(baseUrl.encodedPath.endsWith("/")) { "Base URL path must end with '/'" }
         require(apiKey.isNotBlank()) { "API key must not be blank" }
     }
 
-    override fun toString(): String = "ServerSettings(baseUrl=$baseUrl, apiKey=<redacted>)"
+    /** The same server and key, with the key sent in [header] or in the query. */
+    fun withKeyInHeader(header: Boolean): ServerSettings = ServerSettings(baseUrl, apiKey, header, tlsPin)
+
+    /** The same server and key, with [pin] as the certificate pin. */
+    fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, apiKey, keyInHeader, pin)
+
+    override fun toString(): String = "ServerSettings(baseUrl=$baseUrl, apiKey=<redacted>, keyInHeader=$keyInHeader)"
 }
 
 /**
@@ -53,17 +72,69 @@ fun ServerSettings.coverArtUrl(
         .build()
 
 /**
- * Parses user input into a server URL. Only `https://` is accepted. The address must be a plain base URL: user
+ * Whether a server at this URL may be used. `https://` always may. `http://` is allowed only to a private network
+ * address, so a home or LAN server works without a certificate; the key then travels unencrypted on that network.
+ */
+internal fun HttpUrl.isAllowedServer(): Boolean = isHttps || (scheme == "http" && isPrivateNetworkHost(host))
+
+/**
+ * Whether [host] is this device or a private network address: loopback (`localhost`, `127.x.x.x`, `::1`), RFC 1918
+ * (`10.x`, `172.16`–`172.31`, `192.168.x`), IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`). Public
+ * addresses and names are not private.
+ */
+internal fun isPrivateNetworkHost(host: String): Boolean =
+    host.equals("localhost", ignoreCase = true) ||
+        (if (host.contains(':')) isPrivateIpv6(host) else isPrivateIpv4(host))
+
+private fun isPrivateIpv6(host: String): Boolean {
+    val lower = host.lowercase()
+    return lower == "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80:")
+}
+
+private fun isPrivateIpv4(host: String): Boolean {
+    val octets = host.split('.').mapNotNull { it.toIntOrNull() }
+    if (octets.size != IPV4_OCTETS || octets.any { it !in 0..MAX_OCTET }) return false
+    val first = octets[0]
+    val second = octets[1]
+    return first == LOOPBACK_FIRST ||
+        first == CLASS_A_PRIVATE ||
+        (first == CLASS_B_PRIVATE && second in CLASS_B_PRIVATE_SECOND_MIN..CLASS_B_PRIVATE_SECOND_MAX) ||
+        (first == CLASS_C_PRIVATE && second == CLASS_C_PRIVATE_SECOND)
+}
+
+private const val IPV4_OCTETS = 4
+private const val MAX_OCTET = 255
+private const val LOOPBACK_FIRST = 127
+private const val CLASS_A_PRIVATE = 10
+private const val CLASS_B_PRIVATE = 172
+private const val CLASS_C_PRIVATE = 192
+private const val CLASS_C_PRIVATE_SECOND = 168
+private const val CLASS_B_PRIVATE_SECOND_MIN = 16
+private const val CLASS_B_PRIVATE_SECOND_MAX = 31
+
+/**
+ * Parses user input into a server URL. `https://` is accepted, and `http://` only to a private network address (see
+ * [isAllowedServer]). The address must be a plain base URL: user
  * information, a query and a fragment are rejected, so no credential can be stored or sent as part of it. The error
  * messages never repeat the address.
  */
 object ServerUrl {
+    /** Like [parse], but https only. For services that are not on a private network, such as DanceBrainz. */
+    fun parseHttps(input: String): HttpUrl {
+        require(input.trim().startsWith("https://", ignoreCase = true)) {
+            "The DanceBrainz address must start with https://"
+        }
+        return parse(input)
+    }
+
     fun parse(input: String): HttpUrl {
         val trimmed = input.trim()
-        require(trimmed.startsWith("https://", ignoreCase = true)) {
-            "The server address must start with https://"
+        // Without a scheme the address is taken as https, so a bare host name or IP never means plain http.
+        val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+        val url = withScheme.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid server address")
+        require(url.isAllowedServer()) {
+            "The server address must start with https://, or http:// for a private network address"
         }
-        val url = trimmed.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid server address")
         require(url.encodedUsername.isEmpty() && url.encodedPassword.isEmpty()) {
             "The server address must not contain a username or password. Enter the address only."
         }
@@ -147,18 +218,22 @@ internal class ApiKeyInterceptor(
         if (settings == null || !isSubsonicApi(request.url, settings.baseUrl)) {
             return chain.proceed(request)
         }
-        val url =
+        val builder =
             request.url.newBuilder()
                 .removeAllQueryParameters("apiKey")
                 .removeAllQueryParameters("c")
                 .removeAllQueryParameters("v")
                 .removeAllQueryParameters("f")
-                .addQueryParameter("apiKey", settings.apiKey)
                 .addQueryParameter("c", CLIENT_NAME)
                 .addQueryParameter("v", API_VERSION)
                 .addQueryParameter("f", "json")
-                .build()
-        return chain.proceed(request.newBuilder().url(url).build())
+        if (settings.keyInHeader) {
+            return chain.proceed(
+                request.newBuilder().url(builder.build()).header(API_KEY_HEADER, settings.apiKey).build(),
+            )
+        }
+        val withKey = builder.addQueryParameter("apiKey", settings.apiKey).build()
+        return chain.proceed(request.newBuilder().url(withKey).build())
     }
 
     /** True when [url] is a request to the configured server's Subsonic REST API, on the same origin. */
@@ -166,14 +241,14 @@ internal class ApiKeyInterceptor(
         url: HttpUrl,
         server: HttpUrl,
     ): Boolean =
-        url.scheme == "https" &&
-            url.scheme == server.scheme &&
+        url.scheme == server.scheme &&
             url.host == server.host &&
             url.port == server.port &&
             url.encodedPath.startsWith(server.encodedPath + "rest/")
 
     companion object {
         const val CLIENT_NAME = "DanceSonic"
+        const val API_KEY_HEADER = "X-Api-Key"
         const val API_VERSION = "1.16.1"
     }
 }
@@ -199,8 +274,11 @@ internal object SubsonicHttp {
             .addInterceptor { chain ->
                 chain.proceed(chain.request().newBuilder().header("Prefer", PREFER_MINIMAL).build())
             }
+            // A redirect from https to http would send the key in the clear, so it is not followed.
+            .followSslRedirects(false)
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .let { LanTls.configure(it) }
             .build()
 
     fun service(

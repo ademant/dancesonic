@@ -30,6 +30,7 @@ import org.dancesonic.player.subsonic.DeletedDto
 import org.dancesonic.player.subsonic.LibraryChangesDto
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
+import org.dancesonic.player.subsonic.supports
 import java.time.Instant
 
 /** How a sync obtained its data. */

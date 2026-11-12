@@ -38,7 +38,9 @@ class ConnectionUriTest {
             "dancesonic://connect?server=https%3A%2F%2Fmusic.example.com%2F&key=key-123" +
                 "&dancebrainz=http%3A%2F%2Fdance.example.com%2F"
 
-        assertFailsWithMessage("The server address must start with https://") { ConnectionUri.parse(code) }
+        assertFailsWithMessage("The DanceBrainz address must start with https://") {
+            ConnectionUri.parse(code)
+        }
     }
 
     @Test
@@ -58,7 +60,11 @@ class ConnectionUriTest {
     fun `plain http server address is rejected`() {
         val code = "dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123"
 
-        assertFailsWithMessage("The server address must start with https://") { ConnectionUri.parse(code) }
+        assertFailsWithMessage(
+            "The server address must start with https://, or http:// for a private network address",
+        ) {
+            ConnectionUri.parse(code)
+        }
     }
 
     @Test

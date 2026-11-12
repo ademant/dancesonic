@@ -5,6 +5,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -98,6 +99,8 @@ class ServerSettingsStore internal constructor(
             prefs[BASE_URL] = settings.baseUrl.toString()
             prefs[API_KEY_IV] = iv
             prefs[API_KEY_CIPHERTEXT] = ciphertext
+            prefs[KEY_IN_HEADER] = settings.keyInHeader
+            if (settings.tlsPin != null) prefs[TLS_PIN] = settings.tlsPin else prefs.remove(TLS_PIN)
         }
     }
 
@@ -106,6 +109,8 @@ class ServerSettingsStore internal constructor(
             prefs.remove(BASE_URL)
             prefs.remove(API_KEY_IV)
             prefs.remove(API_KEY_CIPHERTEXT)
+            prefs.remove(KEY_IN_HEADER)
+            prefs.remove(TLS_PIN)
         }
     }
 
@@ -114,7 +119,7 @@ class ServerSettingsStore internal constructor(
         val iv = prefs[API_KEY_IV]
         val ciphertext = prefs[API_KEY_CIPHERTEXT]
         if (url == null || iv == null || ciphertext == null) return null
-        return decryptOrNull(url, iv, ciphertext)
+        return decryptOrNull(url, iv, ciphertext, keyInHeader = prefs[KEY_IN_HEADER] == true, tlsPin = prefs[TLS_PIN])
     }
 
     /**
@@ -126,9 +131,11 @@ class ServerSettingsStore internal constructor(
         url: HttpUrl,
         iv: String,
         ciphertext: String,
+        keyInHeader: Boolean,
+        tlsPin: String?,
     ): ServerSettings? =
         try {
-            ServerSettings(url, cipher.decrypt(iv, ciphertext))
+            ServerSettings(url, cipher.decrypt(iv, ciphertext), keyInHeader, tlsPin)
         } catch (e: GeneralSecurityException) {
             null
         } catch (e: ProviderException) {
@@ -141,5 +148,7 @@ class ServerSettingsStore internal constructor(
         val BASE_URL = stringPreferencesKey("server_base_url")
         val API_KEY_IV = stringPreferencesKey("server_api_key_iv")
         val API_KEY_CIPHERTEXT = stringPreferencesKey("server_api_key_ciphertext")
+        val KEY_IN_HEADER = booleanPreferencesKey("server_key_in_header")
+        val TLS_PIN = stringPreferencesKey("server_tls_pin")
     }
 }

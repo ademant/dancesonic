@@ -39,10 +39,13 @@ import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.ChapterEntity
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
+import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.subsonic.LanTls
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
+import org.dancesonic.player.subsonic.advertisesTinysonic
 import org.dancesonic.player.subsonic.coverArtUrl
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
@@ -83,6 +86,19 @@ internal fun connectionChangesServer(
 ): Boolean = previous?.baseUrl != next.baseUrl
 
 /**
+ * Connections saved before the header option existed send the key in the query. A folksonic or tinysonic
+ * server is switched to the header the next time it syncs, so its key leaves the URLs and access logs.
+ */
+private suspend fun upgradeKeyHeader(
+    store: ServerSettingsStore,
+    settings: ServerSettings,
+    client: SubsonicClient,
+): ServerSettings {
+    if (settings.keyInHeader || !client.advertisesTinysonic()) return settings
+    return settings.withKeyInHeader(true).also { store.save(it) }
+}
+
+/**
  * Connection setup and catalog sync. Three ways in: a pairing QR code, a username and password
  * (exchanged for an API key), or an API key typed in. Every path ends with the same check and
  * only the API key is stored.
@@ -119,7 +135,7 @@ class ConnectViewModel(
             _state.value = ConnectUiState(error = "Enter an API key.")
             return
         }
-        withAddress(address) { url -> ServerSettings(url, key) }
+        withAddress(address) { url -> ServerSettings(url, key).withTlsPin(LanTls.connectPin(url)) }
     }
 
     /** Signs in with a username and password, then keeps only the API key the server issues. */
@@ -134,6 +150,8 @@ class ConnectViewModel(
         }
         val url = parseAddress(address) ?: return
         runConnect {
+            // The certificate is read before the password is sent, so a self-signed server is pinned first.
+            val pin = LanTls.connectPin(url)
             val session = account.login(url, username.trim(), password)
             val key =
                 try {
@@ -142,7 +160,7 @@ class ConnectViewModel(
                     // The session is only needed to mint the key. Revoke it either way, best effort.
                     endSessionQuietly(url, session)
                 }
-            ServerSettings(url, key)
+            ServerSettings(url, key).withTlsPin(pin)
         }
     }
 
@@ -163,7 +181,9 @@ class ConnectViewModel(
                 _state.value = ConnectUiState(error = e.message)
                 return
             }
-        runConnect(danceBrainz = shared.danceBrainz) { shared.server }
+        runConnect(
+            danceBrainz = shared.danceBrainz,
+        ) { shared.server.withTlsPin(LanTls.connectPin(shared.server.baseUrl)) }
     }
 
     /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
@@ -176,7 +196,8 @@ class ConnectViewModel(
                 return
             }
         runConnect {
-            ServerSettings(request.server, account.redeemPairing(request))
+            val pin = LanTls.connectPin(request.server)
+            ServerSettings(request.server, account.redeemPairing(request)).withTlsPin(pin)
         }
     }
 
@@ -224,7 +245,7 @@ class ConnectViewModel(
 
     private fun withAddress(
         address: String,
-        build: (HttpUrl) -> ServerSettings,
+        build: suspend (HttpUrl) -> ServerSettings,
     ) {
         val url = parseAddress(address) ?: return
         runConnect { build(url) }
@@ -251,9 +272,19 @@ class ConnectViewModel(
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
-                val settings = obtain()
-                val verified = SubsonicClient(settings)
-                verified.checkConnection()
+                val entered = obtain()
+                val probe = SubsonicClient(entered)
+                probe.checkConnection()
+                // Only folksonic and tinysonic take the key in the header; the probe above used the query.
+                val settings = if (probe.advertisesTinysonic()) entered.withKeyInHeader(true) else entered
+                val verified =
+                    if (settings.keyInHeader) {
+                        SubsonicClient(
+                            settings,
+                        ).also { it.checkConnection() }
+                    } else {
+                        probe
+                    }
                 container.adoptCatalogClient(verified)
                 danceBrainz?.let { DanceBrainzClient(it).checkServer() }
                 if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
@@ -309,7 +340,9 @@ class ConnectViewModel(
         _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
             try {
-                val client = container.catalogClient(settings)
+                val first = container.catalogClient(settings)
+                val active = upgradeKeyHeader(container.settingsStore, settings, first)
+                val client = if (active.keyInHeader == settings.keyInHeader) first else container.catalogClient(active)
                 val result =
                     if (incremental) {
                         container.library.syncIncremental(client)

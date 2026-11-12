@@ -17,6 +17,7 @@ import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.streamUrl
+import org.dancesonic.player.subsonic.supports
 import java.io.IOException
 
 /**
