@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
+    <!--
+        Pins the certificate chain of the folksonic server (cloud.ademant.de).
+        A pin matches any certificate in the verified chain, so the leaf can
+        renew freely. The pins are the Let's Encrypt intermediate YE2 and its
+        root, ISRG Root X2, which is the backup. Renewing the leaf does not
+        change either pin.
+
+        The set expires on the date shown: after it, Android ignores the pins
+        and uses normal certificate checks. Before then, renew the pins in a
+        release and check them against the live chain first:
+          echo | openssl s_client -connect cloud.ademant.de:443 -servername cloud.ademant.de -showcerts
+        Other servers are not pinned.
+    -->
+    <domain-config>
+        <domain includeSubdomains="false">cloud.ademant.de</domain>
+        <pin-set expiration="2027-11-12">
+            <pin digest="SHA-256">s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=</pin>
+            <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
+        </pin-set>
+    </domain-config>
 </network-security-config>
