@@ -9,6 +9,8 @@ import java.net.URLDecoder
 class PairingRequest(
     val server: HttpUrl,
     val token: String,
+    /** The certificate pin folksonic puts in the code for a self-signed LAN server, `sha256/…`, or null. */
+    val pin: String? = null,
 ) {
     override fun toString(): String = "PairingRequest(server=$server, token=<redacted>)"
 }
@@ -22,6 +24,7 @@ object PairingUri {
     private const val SCHEME = "tinysonic"
     private const val HOST = "pair"
     private val TOKEN_PATTERN = Regex("[A-Za-z0-9_-]{8,256}")
+    private val PIN_PATTERN = Regex("sha256/[A-Za-z0-9+/]{43}=")
 
     /** @throws IllegalArgumentException if the text is not a valid pairing code. */
     fun parse(raw: String): PairingRequest {
@@ -37,8 +40,13 @@ object PairingUri {
         val server = params["server"] ?: throw IllegalArgumentException("The pairing code has no server.")
         val token = params["token"] ?: throw IllegalArgumentException("The pairing code has no token.")
         require(TOKEN_PATTERN.matches(token)) { "The pairing code's token is malformed." }
+        // Form decoding reads a '+' in base64 as a space, so it is put back before the pin is checked.
+        val pin =
+            params["pin"]?.replace(' ', '+')?.also {
+                require(PIN_PATTERN.matches(it)) { "The pairing code's certificate pin is malformed." }
+            }
 
-        return PairingRequest(server = ServerUrl.parse(server), token = token)
+        return PairingRequest(server = ServerUrl.parse(server), token = token, pin = pin)
     }
 
     /** Splits and percent-decodes a query string. Shared with [ConnectionUri]. */

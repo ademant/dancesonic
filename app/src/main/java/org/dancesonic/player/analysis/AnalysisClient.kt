@@ -4,6 +4,7 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import kotlinx.serialization.Serializable
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.DeviceProofInterceptor
 import org.dancesonic.player.subsonic.LanTls
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicException
@@ -33,9 +34,9 @@ data class ServerAnalysis(
  */
 class AnalysisClient internal constructor(
     private val service: AnalysisService,
-    private val apiKey: String,
+    private val apiKey: String?,
 ) {
-    constructor(settings: ServerSettings, client: OkHttpClient = defaultClient()) : this(
+    constructor(settings: ServerSettings, client: OkHttpClient = defaultClient(settings)) : this(
         Retrofit.Builder()
             .baseUrl(settings.baseUrl)
             .client(client)
@@ -78,8 +79,9 @@ class AnalysisClient internal constructor(
         private const val CONNECT_TIMEOUT_SECONDS = 15L
         private const val READ_TIMEOUT_SECONDS = 30L
 
-        private fun defaultClient(): OkHttpClient =
+        private fun defaultClient(settings: ServerSettings): OkHttpClient =
             LanTls.configure(OkHttpClient.Builder())
+                .addInterceptor(DeviceProofInterceptor({ settings }))
                 .followSslRedirects(false)
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -92,7 +94,8 @@ internal interface AnalysisService {
     @GET("api/analysis")
     suspend fun analysis(
         @Query("id") id: String,
-        @Header("X-Api-Key") apiKey: String,
+        // Null for a paired device: Retrofit leaves the header out, and the DPoP proof authenticates the request.
+        @Header("X-Api-Key") apiKey: String?,
     ): Response<AnalysisDto>
 }
 

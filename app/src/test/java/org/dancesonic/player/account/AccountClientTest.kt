@@ -3,10 +3,16 @@ package org.dancesonic.player.account
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl
 import okhttp3.mockwebserver.MockResponse
+import org.dancesonic.player.subsonic.DeviceProofInterceptor
+import org.dancesonic.player.subsonic.ServerAuth
+import org.dancesonic.player.subsonic.ServerSettings
+import org.dancesonic.player.testsupport.SoftwareDeviceSigner
 import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -97,34 +103,97 @@ class AccountClientTest {
         }
 
     @Test
-    fun `pairing token is redeemed for an API key`() =
+    fun `the pairing sends the token and the public key, and waits for approval`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"apiKey":"key-from-qr","username":"ada","server":"$base"}"""))
+            fake.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"pending"}"""))
             val request = PairingRequest(server = base, token = "tsp_abcdefgh12345")
+            val jwk = SoftwareDeviceSigner().publicJwk()
 
-            val key = account.redeemPairing(request)
+            account.startDevicePairing(request, "Pixel", jwk)
 
-            assertEquals("key-from-qr", key)
             val sent = fake.server.takeRequest()
             assertEquals("/api/pair/complete", sent.requestUrl!!.encodedPath)
             val body = sent.body.readUtf8()
             assertTrue(body.contains("\"token\":\"tsp_abcdefgh12345\""))
-            assertTrue(body.contains("\"device\":\"DanceSonic Android\""))
+            assertTrue(body.contains("\"jwk\""))
+            assertTrue(body.contains("\"x\":\"${jwk.x}\""))
+            assertNull(sent.getHeader("DPoP"))
         }
 
     @Test
-    fun `expired pairing token gives the account page hint`() =
+    fun `an expired pairing token gives the account page hint`() =
         runBlocking<Unit> {
-            fake.server.enqueue(
-                MockResponse().setResponseCode(401).setBody("""{"error":"invalid or expired pairing token"}"""),
-            )
+            fake.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"pairing_expired"}"""))
 
             val error =
                 assertThrows(AccountException::class.java) {
-                    runBlocking { account.redeemPairing(PairingRequest(base, "tsp_abcdefgh12345")) }
+                    runBlocking {
+                        account.startDevicePairing(
+                            PairingRequest(base, "tsp_abcdefgh12345"),
+                            "Pixel",
+                            SoftwareDeviceSigner().publicJwk(),
+                        )
+                    }
                 }
             assertEquals(AccountClient.INVALID_PAIRING_CODE, error.message)
         }
+
+    @Test
+    fun `the wait ends when the owner approves the device`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
+
+            deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1)
+
+            assertEquals(3, fake.server.requestCount)
+        }
+
+    @Test
+    fun `every poll carries a proof for the device's own request`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
+
+            deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1)
+
+            val sent = fake.server.takeRequest()
+            assertEquals("/api/device/me", sent.requestUrl!!.encodedPath)
+            assertNotNull(sent.getHeader("DPoP"))
+            assertNull(sent.requestUrl!!.queryParameter("apiKey"))
+        }
+
+    @Test
+    fun `a removed device is told to pair again`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"device_unknown"}""").setResponseCode(401))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1) }
+                }
+            assertTrue(error.message.orEmpty().contains("Pair it again"))
+        }
+
+    @Test
+    fun `a pairing never approved gives up at its deadline`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 0, pollMillis = 1) }
+                }
+            assertTrue(error.message.orEmpty().contains("did not arrive in time"))
+        }
+
+    /** The account client for a paired device: the proof is signed with an in-memory key and sent over the test TLS. */
+    private fun deviceAccount(): AccountClient {
+        val settings = ServerSettings(base, ServerAuth.Device("test-device"))
+        val signer = SoftwareDeviceSigner()
+        val http = fake.plain.newBuilder().addInterceptor(DeviceProofInterceptor({ settings }, { signer })).build()
+        return AccountClient(http)
+    }
 
     @Test
     fun `unexpected status is reported with its code`() =
@@ -183,7 +252,7 @@ class AccountClientTest {
     @Test
     fun `request objects never print secrets`() {
         val login = LoginRequest("ada", "s3cret").toString()
-        val pair = PairCompleteRequest("tsp_abcdefgh12345", "phone").toString()
+        val pair = DevicePairRequest("tsp_abcdefgh12345", "phone", SoftwareDeviceSigner().publicJwk()).toString()
         val pairing = PairingRequest(base, "tsp_abcdefgh12345").toString()
 
         listOf(login, pair, pairing).forEach { text ->

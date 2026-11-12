@@ -14,37 +14,70 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 import java.io.IOException
 
+/** How the app proves who it is to the server. */
+sealed interface ServerAuth {
+    /** An API key, typed in or issued by a password sign-in. A secret: stored encrypted. */
+    data class ApiKey(val key: String) : ServerAuth {
+        init {
+            require(key.isNotBlank()) { "API key must not be blank" }
+        }
+
+        override fun toString(): String = "ApiKey(<redacted>)"
+    }
+
+    /**
+     * A paired device (folksonic #101): every request carries a DPoP proof signed by the Keystore key named [alias].
+     * The server never sees the key, and nothing secret is stored.
+     */
+    data class Device(val alias: String) : ServerAuth {
+        init {
+            require(alias.isNotBlank()) { "Device key alias must not be blank" }
+        }
+    }
+}
+
 /** Connection details for one Subsonic-compatible server. The API key is a secret. */
 class ServerSettings(
     val baseUrl: HttpUrl,
-    val apiKey: String,
+    val auth: ServerAuth,
     /**
      * True when the server takes the key in the `X-Api-Key` header (folksonic). The key then stays out of the URL,
-     * and the access log. False for other servers, which take it as the `apiKey` query parameter.
+     * and the access log. False for other servers, which take it as the `apiKey` query parameter. Not used for a
+     * device.
      */
     val keyInHeader: Boolean = false,
     /**
-     * SHA-256 of the server's certificate, for an https server on a private network that has no CA-signed certificate.
+     * The pin of the server's certificate, for an https server on a private network that has no CA-signed certificate.
      * See [LanTls]. Null for every other server.
      */
     val tlsPin: String? = null,
 ) {
+    /** Connects with an API key. */
+    constructor(
+        baseUrl: HttpUrl,
+        apiKey: String,
+        keyInHeader: Boolean = false,
+        tlsPin: String? = null,
+    ) : this(baseUrl, ServerAuth.ApiKey(apiKey), keyInHeader, tlsPin)
+
     init {
         require(baseUrl.isAllowedServer()) { "Server must use https, or http on a private network address" }
         require(tlsPin == null || (baseUrl.isHttps && isPrivateNetworkHost(baseUrl.host))) {
             "A certificate pin is only used for https on a private network"
         }
         require(baseUrl.encodedPath.endsWith("/")) { "Base URL path must end with '/'" }
-        require(apiKey.isNotBlank()) { "API key must not be blank" }
     }
 
-    /** The same server and key, with the key sent in [header] or in the query. */
-    fun withKeyInHeader(header: Boolean): ServerSettings = ServerSettings(baseUrl, apiKey, header, tlsPin)
+    /** The API key, or null when the connection is a paired device. */
+    val apiKey: String? get() = (auth as? ServerAuth.ApiKey)?.key
 
-    /** The same server and key, with [pin] as the certificate pin. */
-    fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, apiKey, keyInHeader, pin)
+    /** The same server and auth, with the key sent in [header] or in the query. */
+    fun withKeyInHeader(header: Boolean): ServerSettings = ServerSettings(baseUrl, auth, header, tlsPin)
 
-    override fun toString(): String = "ServerSettings(baseUrl=$baseUrl, apiKey=<redacted>, keyInHeader=$keyInHeader)"
+    /** The same server and auth, with [pin] as the certificate pin. */
+    fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, auth, keyInHeader, pin)
+
+    override fun toString(): String = "ServerSettings(baseUrl=$baseUrl, auth=$auth, keyInHeader=$keyInHeader)"
 }
 
 /**
@@ -227,13 +260,18 @@ internal class ApiKeyInterceptor(
                 .addQueryParameter("c", CLIENT_NAME)
                 .addQueryParameter("v", API_VERSION)
                 .addQueryParameter("f", "json")
-        if (settings.keyInHeader) {
-            return chain.proceed(
-                request.newBuilder().url(builder.build()).header(API_KEY_HEADER, settings.apiKey).build(),
-            )
-        }
-        val withKey = builder.addQueryParameter("apiKey", settings.apiKey).build()
-        return chain.proceed(request.newBuilder().url(withKey).build())
+        // A paired device has no key here: the DPoP interceptor signs the request instead.
+        val keyed =
+            when (val key = settings.apiKey) {
+                null -> request.newBuilder().url(builder.build())
+                else ->
+                    if (settings.keyInHeader) {
+                        request.newBuilder().url(builder.build()).header(API_KEY_HEADER, key)
+                    } else {
+                        request.newBuilder().url(builder.addQueryParameter("apiKey", key).build())
+                    }
+            }
+        return chain.proceed(keyed.build())
     }
 
     /** True when [url] is a request to the configured server's Subsonic REST API, on the same origin. */
@@ -270,6 +308,7 @@ internal object SubsonicHttp {
     fun okHttpClient(settingsProvider: () -> ServerSettings?): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(settingsProvider))
+            .addInterceptor(DeviceProofInterceptor(settingsProvider))
             // Asks folksonic for minimal responses (RFC 7240). Other servers ignore the Prefer header.
             .addInterceptor { chain ->
                 chain.proceed(chain.request().newBuilder().header("Prefer", PREFER_MINIMAL).build())

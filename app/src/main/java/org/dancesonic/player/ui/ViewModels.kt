@@ -1,5 +1,6 @@
 package org.dancesonic.player.ui
 
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -25,6 +26,7 @@ import org.dancesonic.player.AppContainer
 import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.ConnectionUri
+import org.dancesonic.player.account.PairingRequest
 import org.dancesonic.player.account.PairingUri
 import org.dancesonic.player.dance.ChapterChange
 import org.dancesonic.player.dance.DanceBrainzClient
@@ -40,7 +42,10 @@ import org.dancesonic.player.data.db.ChapterEntity
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.subsonic.DeviceKeys
+import org.dancesonic.player.subsonic.KeystoreDeviceSigner
 import org.dancesonic.player.subsonic.LanTls
+import org.dancesonic.player.subsonic.ServerAuth
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicClient
@@ -62,6 +67,8 @@ private const val FULL_SYNC_INTERVAL_MILLIS = 7L * 24 * 60 * 60 * 1000
 data class ConnectUiState(
     val busy: Boolean = false,
     val error: String? = null,
+    /** What the app is waiting for, such as the owner's approval of a pairing. */
+    val status: String? = null,
     val lastSync: String? = null,
     /** Albums fetched so far in the running sync, or null when no sync is running. */
     val syncProgress: SyncProgress? = null,
@@ -186,7 +193,10 @@ class ConnectViewModel(
         ) { shared.server.withTlsPin(LanTls.connectPin(shared.server.baseUrl)) }
     }
 
-    /** Redeems a scanned pairing code for an API key. The server address comes from the code. */
+    /**
+     * Pairs this install as a device (folksonic #101). The server address and the pin come from the code. The app keeps
+     * no API key: its requests are signed with a key in the Keystore once the owner approves the pairing.
+     */
     fun pairWithCode(rawCode: String) {
         val request =
             try {
@@ -197,7 +207,10 @@ class ConnectViewModel(
             }
         runConnect {
             val pin = LanTls.connectPin(request.server)
-            ServerSettings(request.server, account.redeemPairing(request)).withTlsPin(pin)
+            require(request.pin == null || request.pin == pin) {
+                "The server certificate does not match the pin in this code. Create a new code on the account page."
+            }
+            pairThisDevice(account, request, pin) { _state.value = _state.value.copy(status = WAITING_FOR_APPROVAL) }
         }
     }
 
@@ -224,14 +237,20 @@ class ConnectViewModel(
         val settings = container.currentSettings
         viewModelScope.launch {
             var warning: String? = null
-            if (settings != null) {
+            val key = settings?.apiKey
+            if (settings != null && key != null) {
                 try {
-                    account.revokeOwnKey(settings.baseUrl, settings.apiKey)
+                    account.revokeOwnKey(settings.baseUrl, key)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: AccountException) {
                     warning = "Could not revoke the key on the server (${e.message}). Revoke it on the account page."
                 }
+            }
+            val device = settings?.auth as? ServerAuth.Device
+            if (device != null) {
+                DeviceKeys.delete(device.alias)
+                warning = "This device stays paired on the server. Remove it on the account page."
             }
             container.library.clearCatalog()
             container.syncState.clear()
@@ -678,3 +697,32 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 }
+
+private const val WAITING_FOR_APPROVAL = "Waiting for approval on the account page. The code expires in 15 minutes."
+private const val MAX_DEVICE_NAME = 100
+
+/**
+ * Creates the device key, sends its public half with the token, and waits for the owner's approval. The new key is
+ * deleted again unless the pairing completes, so a failed attempt leaves nothing behind in the Keystore.
+ */
+private suspend fun pairThisDevice(
+    account: AccountClient,
+    request: PairingRequest,
+    pin: String?,
+    onWaiting: () -> Unit,
+): ServerSettings {
+    val alias = DeviceKeys.create()
+    val settings = ServerSettings(request.server, ServerAuth.Device(alias), tlsPin = pin)
+    var paired = false
+    try {
+        account.startDevicePairing(request, deviceName(), KeystoreDeviceSigner(alias).publicJwk())
+        onWaiting()
+        AccountClient.forDevice(settings).awaitDeviceApproval(request.server)
+        paired = true
+    } finally {
+        if (!paired) DeviceKeys.delete(alias)
+    }
+    return settings
+}
+
+private fun deviceName(): String = "DanceSonic on ${Build.MODEL}".take(MAX_DEVICE_NAME)
