@@ -123,6 +123,7 @@ class DanceBrainzClient internal constructor(
                             .build(),
                     )
                 }
+                .addInterceptor(DanceBrainzDeviceInterceptor())
                 .build()
     }
 }

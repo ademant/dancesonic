@@ -19,10 +19,13 @@ internal fun tokenStoreFor(token: String?): DanceBrainzTokenStore {
     val file = File(context.cacheDir, "tokens-${UUID.randomUUID()}.preferences_pb")
     val store = DanceBrainzTokenStore(PreferenceDataStoreFactory.create(produceFile = { file }), PassThroughCipher)
     if (token != null) {
-        runBlocking { store.save(DanceBrainzCredential(token, tokenId = TOKEN_ID)) }
+        runBlocking { store.save(DanceBrainzCredential.Token(token, tokenId = TOKEN_ID)) }
     }
     return store
 }
+
+/** A bearer credential for a request in a test. */
+internal fun tokenCredential(token: String): DanceBrainzCredential = DanceBrainzCredential.Token(token, tokenId = null)
 
 /** The token id that [tokenStoreFor] stores with its token. */
 internal const val TOKEN_ID = 7L

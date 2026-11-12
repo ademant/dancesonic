@@ -26,8 +26,11 @@ import org.dancesonic.player.AppContainer
 import org.dancesonic.player.account.AccountClient
 import org.dancesonic.player.account.AccountException
 import org.dancesonic.player.account.ConnectionUri
+import org.dancesonic.player.account.PairingDecision
 import org.dancesonic.player.account.PairingRequest
 import org.dancesonic.player.account.PairingUri
+import org.dancesonic.player.account.PairingVerifier
+import org.dancesonic.player.account.VerificationCode
 import org.dancesonic.player.dance.ChapterChange
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzDescriptionClient
@@ -69,6 +72,8 @@ data class ConnectUiState(
     val error: String? = null,
     /** What the app is waiting for, such as the owner's approval of a pairing. */
     val status: String? = null,
+    /** The code to compare with the account page while a pairing waits for both sides to confirm it. */
+    val verificationCode: String? = null,
     val lastSync: String? = null,
     /** Albums fetched so far in the running sync, or null when no sync is running. */
     val syncProgress: SyncProgress? = null,
@@ -101,7 +106,7 @@ private suspend fun upgradeKeyHeader(
     settings: ServerSettings,
     client: SubsonicClient,
 ): ServerSettings {
-    if (settings.keyInHeader || !client.advertisesTinysonic()) return settings
+    if (settings.auth !is ServerAuth.ApiKey || settings.keyInHeader || !client.advertisesTinysonic()) return settings
     return settings.withKeyInHeader(true).also { store.save(it) }
 }
 
@@ -126,6 +131,19 @@ class ConnectViewModel(
 
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
+
+    /**
+     * Shows the pairing's verification code on this screen. The user's answer goes to [PairingVerifier.answer]:
+     * [PairingDecision.MATCH] when the code equals the one on the account page.
+     */
+    val verifier: PairingVerifier =
+        PairingVerifier(show = { code ->
+            _state.value =
+                _state.value.copy(
+                    verificationCode = code,
+                    status = if (code == null) _state.value.status else VERIFY_STATUS,
+                )
+        })
 
     /** Shows an error that happened outside the ViewModel, such as a failed scanner launch. */
     fun reportError(message: String) {
@@ -210,7 +228,13 @@ class ConnectViewModel(
             require(request.pin == null || request.pin == pin) {
                 "The server certificate does not match the pin in this code. Create a new code on the account page."
             }
-            pairThisDevice(account, request, pin) { _state.value = _state.value.copy(status = WAITING_FOR_APPROVAL) }
+            pairThisDevice(
+                account,
+                request,
+                pin,
+                verify = verifier::await,
+                onWaiting = { _state.value = _state.value.copy(status = WAITING_FOR_APPROVAL) },
+            )
         }
     }
 
@@ -294,8 +318,7 @@ class ConnectViewModel(
                 val entered = obtain()
                 val probe = SubsonicClient(entered)
                 probe.checkConnection()
-                // Only folksonic and tinysonic take the key in the header; the probe above used the query.
-                val settings = if (probe.advertisesTinysonic()) entered.withKeyInHeader(true) else entered
+                val settings = settingsAfterProbe(entered, probe.advertisesTinysonic())
                 val verified =
                     if (settings.keyInHeader) {
                         SubsonicClient(
@@ -699,23 +722,35 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
 }
 
 private const val WAITING_FOR_APPROVAL = "Waiting for approval on the account page. The code expires in 15 minutes."
+private const val VERIFY_STATUS =
+    "Compare this code with the one on the account page. Confirm only if they are the same."
+private const val CANCELLED_ON_PHONE = "The pairing was cancelled on this phone."
 private const val MAX_DEVICE_NAME = 100
 
 /**
- * Creates the device key, sends its public half with the token, and waits for the owner's approval. The new key is
- * deleted again unless the pairing completes, so a failed attempt leaves nothing behind in the Keystore.
+ * Creates the device key, sends its public half with the token, and completes the pairing. When the server asks for it,
+ * both sides first show the same verification code, and [verify] returns the phone's answer to it (folksonic #103).
+ * The new key is deleted again unless the pairing completes, so a failed attempt leaves nothing behind in the Keystore.
  */
 private suspend fun pairThisDevice(
     account: AccountClient,
     request: PairingRequest,
     pin: String?,
+    verify: suspend (String) -> PairingDecision,
     onWaiting: () -> Unit,
 ): ServerSettings {
     val alias = DeviceKeys.create()
     val settings = ServerSettings(request.server, ServerAuth.Device(alias), tlsPin = pin)
     var paired = false
     try {
-        account.startDevicePairing(request, deviceName(), KeystoreDeviceSigner(alias).publicJwk())
+        val jwk = KeystoreDeviceSigner(alias).publicJwk()
+        val pending = account.startDevicePairing(request, deviceName(), jwk)
+        if (pending.confirm) {
+            val pendingId = pending.pendingId ?: throw AccountException("The server sent an incomplete pairing answer.")
+            val decision = verify(VerificationCode.of(request.token, jwk))
+            AccountClient.forDevice(settings).confirmDevicePairing(request.server, pendingId, decision)
+            if (decision == PairingDecision.CANCEL) throw AccountException(CANCELLED_ON_PHONE)
+        }
         onWaiting()
         AccountClient.forDevice(settings).awaitDeviceApproval(request.server)
         paired = true
@@ -724,5 +759,15 @@ private suspend fun pairThisDevice(
     }
     return settings
 }
+
+/**
+ * The settings to save after the probe. An API key moves to the header on folksonic and tinysonic, which needs a second
+ * check. A device has no key, so it is kept as it is and is not checked twice.
+ */
+internal fun settingsAfterProbe(
+    entered: ServerSettings,
+    advertisesTinysonic: Boolean,
+): ServerSettings =
+    if (entered.auth is ServerAuth.ApiKey && advertisesTinysonic) entered.withKeyInHeader(true) else entered
 
 private fun deviceName(): String = "DanceSonic on ${Build.MODEL}".take(MAX_DEVICE_NAME)

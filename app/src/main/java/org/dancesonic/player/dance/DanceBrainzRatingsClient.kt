@@ -7,7 +7,7 @@ import okhttp3.OkHttpClient
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
-import retrofit2.http.Header
+import retrofit2.http.HeaderMap
 import retrofit2.http.PUT
 import retrofit2.http.Path
 
@@ -32,12 +32,12 @@ class DanceBrainzRatingsClient internal constructor(
         DanceBrainzClient.retrofitFor(baseUrl, client).create(DanceBrainzRatingsService::class.java),
     )
 
-    /** The ratings of the recording [mbid]. Sends [token] when given, so the viewer's own value is included. */
+    /** The ratings of the recording [mbid]. Sends [credential] when given, so the viewer's own value is included. */
     suspend fun ratings(
         mbid: String,
-        token: String?,
+        credential: DanceBrainzCredential?,
     ): RecordingRatings {
-        val dto = danceBrainzCall { service.ratings(mbid, token?.let(::bearer)) }
+        val dto = danceBrainzCall { service.ratings(mbid, credential.authHeaders()) }
         return RecordingRatings(dto.shoesMedian, dto.shoesRaters, dto.myShoes)
     }
 
@@ -45,21 +45,19 @@ class DanceBrainzRatingsClient internal constructor(
     suspend fun setShoes(
         mbid: String,
         value: Int,
-        token: String,
+        credential: DanceBrainzCredential,
     ) {
         require(value in SHOES_RANGE) { "A shoes rating is from 1 to 5" }
-        danceBrainzCall { service.setShoes(mbid, ShoesValueDto(value), bearer(token)) }
+        danceBrainzCall { service.setShoes(mbid, ShoesValueDto(value), credential.authHeaders()) }
     }
 
     /** Clears the viewer's shoes rating of [mbid]. */
     suspend fun clearShoes(
         mbid: String,
-        token: String,
+        credential: DanceBrainzCredential,
     ) {
-        danceBrainzCall { service.clearShoes(mbid, bearer(token)) }
+        danceBrainzCall { service.clearShoes(mbid, credential.authHeaders()) }
     }
-
-    private fun bearer(token: String): String = "Bearer $token"
 
     private companion object {
         val SHOES_RANGE = 1..5
@@ -71,20 +69,20 @@ internal interface DanceBrainzRatingsService {
     @GET("api/v1/recordings/{mbid}/ratings")
     suspend fun ratings(
         @Path("mbid") mbid: String,
-        @Header("Authorization") bearer: String?,
+        @HeaderMap auth: Map<String, String>,
     ): RatingsDto
 
     @PUT("api/v1/recordings/{mbid}/shoes")
     suspend fun setShoes(
         @Path("mbid") mbid: String,
         @Body body: ShoesValueDto,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     )
 
     @DELETE("api/v1/recordings/{mbid}/shoes")
     suspend fun clearShoes(
         @Path("mbid") mbid: String,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     )
 }
 

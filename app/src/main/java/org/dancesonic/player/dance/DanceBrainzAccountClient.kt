@@ -1,18 +1,23 @@
 package org.dancesonic.player.dance
 
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.PublicJwk
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
-import retrofit2.http.Header
+import retrofit2.http.HeaderMap
 import retrofit2.http.POST
 import retrofit2.http.Path
 
 /**
- * The signed-in DanceBrainz calls: redeeming a pairing code, checking a token, and revoking one. Every call here
- * is the only place a token is sent, as a bearer header to the DanceBrainz server.
+ * The signed-in DanceBrainz calls: pairing this phone as a device, waiting for the owner's approval, checking a
+ * credential, and revoking a token. A credential is sent only as its request headers (see [authHeaders]).
  */
 class DanceBrainzAccountClient internal constructor(
     private val service: DanceBrainzAccountService,
@@ -21,67 +26,141 @@ class DanceBrainzAccountClient internal constructor(
         DanceBrainzClient.retrofitFor(baseUrl, client).create(DanceBrainzAccountService::class.java),
     )
 
-    /** Exchanges a one-time pairing [code] for a device token that never expires. */
-    suspend fun redeem(
+    /**
+     * Sends the pairing [code] with the device's public key. The server answers 202 and keeps the device pending until
+     * the owner approves it; no secret is returned.
+     */
+    suspend fun pairDevice(
         code: String,
         device: String,
-    ): DanceBrainzCredential {
-        val answer = answerOrThrow { service.complete(PairCompleteDto(code, device)) }
-        return DanceBrainzCredential(token = answer.token, tokenId = answer.id)
+        jwk: PublicJwk,
+    ) {
+        val response = danceBrainzCall { service.completeDevicePairing(DevicePairDto(code, device, jwk)) }
+        if (response.code() != HTTP_ACCEPTED) throw refusal(response.code(), refusalCode(response))
     }
 
-    /** Confirms that [token] is accepted by the server. A revoked or wrong token is reported, not accepted. */
-    suspend fun check(token: String) {
-        answerOrThrow { service.me(bearer(token)) }
+    /**
+     * Polls until the owner approves the device with [credential]. Returns when it is approved. Throws when the
+     * approval is refused, the device was removed, or [timeoutMillis] runs out.
+     */
+    suspend fun awaitApproval(
+        credential: DanceBrainzCredential.Device,
+        timeoutMillis: Long = APPROVAL_WAIT_MILLIS,
+        pollMillis: Long = POLL_INTERVAL_MILLIS,
+    ) {
+        val deadline = System.nanoTime() + timeoutMillis * NANOS_PER_MILLI
+        while (true) {
+            val response = danceBrainzCall { service.deviceMe(credential.authHeaders()) }
+            if (response.isSuccessful) return
+            val code = refusalCode(response)
+            if (code != PAIRING_PENDING) throw refusal(response.code(), code)
+            if (System.nanoTime() >= deadline) {
+                throw DanceBrainzException("The approval did not arrive in time. Pair this phone again.")
+            }
+            delay(pollMillis)
+        }
     }
 
-    /** Revokes the token with [tokenId] on the server. */
+    /** Confirms that [credential] is accepted by the server. A revoked or wrong one is reported, not accepted. */
+    suspend fun check(credential: DanceBrainzCredential) {
+        danceBrainzCall { service.me(credential.authHeaders()) }
+    }
+
+    /** Revokes the token with [tokenId] on the server, sent with [credential]. */
     suspend fun revoke(
-        token: String,
+        credential: DanceBrainzCredential,
         tokenId: Long,
     ) {
-        answerOrThrow { service.revoke(tokenId, bearer(token)) }
+        danceBrainzCall { service.revoke(tokenId, credential.authHeaders()) }
     }
 
-    private fun bearer(token: String): String = "Bearer $token"
+    private fun refusal(
+        status: Int,
+        code: String?,
+    ): DanceBrainzException =
+        DanceBrainzException(
+            when (code) {
+                CODE_PAIRING_INVALID, CODE_PAIRING_EXPIRED -> INVALID_PAIRING_CODE
+                CODE_DEVICE_UNKNOWN -> "The device was removed on the account page. Pair it again."
+                CODE_PROOF_REPLAYED -> "DanceBrainz refused a repeated request. Try again."
+                CODE_PROOF_INVALID -> "This phone's key was refused. Pair the phone again."
+                else -> "DanceBrainz answered with HTTP $status"
+            },
+            httpCode = status,
+        )
 
-    private suspend fun <T> answerOrThrow(block: suspend () -> T): T = danceBrainzCall(block)
+    /** The refusal code in a failed response's body, or null when there is none. */
+    @Suppress("SwallowedException")
+    private fun refusalCode(response: Response<*>): String? {
+        val text = response.errorBody()?.string() ?: return null
+        return try {
+            accountJson.decodeFromString<RefusalDto>(text).error
+        } catch (e: SerializationException) {
+            // Not a refusal the app knows; the caller reports the HTTP status instead.
+            null
+        }
+    }
+
+    companion object {
+        private const val HTTP_ACCEPTED = 202
+        private const val PAIRING_PENDING = "pairing_pending"
+        private const val CODE_PAIRING_INVALID = "pairing_invalid"
+        private const val CODE_PAIRING_EXPIRED = "pairing_expired"
+        private const val CODE_DEVICE_UNKNOWN = "device_unknown"
+        private const val CODE_PROOF_REPLAYED = "proof_replayed"
+        private const val CODE_PROOF_INVALID = "proof_invalid"
+        private const val INVALID_PAIRING_CODE =
+            "This pairing code is invalid or expired. Create a new one on the account page."
+
+        /** A pairing code lasts five minutes on DanceBrainz, so the approval is awaited no longer than that. */
+        const val APPROVAL_WAIT_MILLIS = 5L * 60_000L
+        private const val POLL_INTERVAL_MILLIS = 3_000L
+        private const val NANOS_PER_MILLI = 1_000_000L
+
+        private val accountJson = Json { ignoreUnknownKeys = true }
+    }
 }
 
 /** Retrofit endpoints of the signed-in DanceBrainz API, relative to the base URL. */
 internal interface DanceBrainzAccountService {
     @POST("api/v1/pairings/complete")
-    suspend fun complete(
-        @Body body: PairCompleteDto,
-    ): PairedTokenDto
+    suspend fun completeDevicePairing(
+        @Body body: DevicePairDto,
+    ): Response<Void>
+
+    /** Answers 200 once the device is approved; a refusal names why in its body. */
+    @GET("api/v1/devices/me")
+    suspend fun deviceMe(
+        @HeaderMap auth: Map<String, String>,
+    ): Response<Void>
 
     @GET("api/v1/me")
     suspend fun me(
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     ): MeDto
 
     @DELETE("api/v1/tokens/{id}")
     suspend fun revoke(
         @Path("id") id: Long,
-        @Header("Authorization") bearer: String,
+        @HeaderMap auth: Map<String, String>,
     )
 }
 
+/** The body of a pairing: the code from the account page, the device's name, and its public key. */
 @Serializable
-internal data class PairCompleteDto(
+internal data class DevicePairDto(
     val token: String,
     val device: String,
+    val jwk: PublicJwk,
 ) {
-    override fun toString(): String = "PairCompleteDto(token=<redacted>, device=$device)"
+    override fun toString(): String = "DevicePairDto(device=$device, token=<redacted>)"
 }
 
+/** A refusal: `{"error": "<code>"}`. */
 @Serializable
-internal data class PairedTokenDto(
-    val token: String,
-    val id: Long,
-) {
-    override fun toString(): String = "PairedTokenDto(token=<redacted>, id=$id)"
-}
+internal data class RefusalDto(
+    val error: String? = null,
+)
 
 @Serializable
 internal data class MeDto(

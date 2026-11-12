@@ -35,10 +35,10 @@ class DanceBrainzTokenStoreTest {
     @Test
     fun `the token is stored encrypted and read back with its id`() =
         runBlocking {
-            store.save(DanceBrainzCredential("dbz_stored_token_1234567890", tokenId = 9L))
+            store.save(DanceBrainzCredential.Token("dbz_stored_token_1234567890", tokenId = 9L))
 
             store.credential.test {
-                val credential = awaitItem()!!
+                val credential = awaitItem() as DanceBrainzCredential.Token
                 assertEquals("dbz_stored_token_1234567890", credential.token)
                 assertEquals(9L, credential.tokenId)
                 cancelAndIgnoreRemainingEvents()
@@ -47,12 +47,36 @@ class DanceBrainzTokenStoreTest {
         }
 
     @Test
-    fun `a pasted token has no id`() =
+    fun `a paired device stores only the name of its key`() =
         runBlocking {
-            store.save(DanceBrainzCredential("dbz_pasted_token_1234567890", tokenId = null))
+            store.save(DanceBrainzCredential.Device("dancesonic.device.abc"))
 
             store.credential.test {
-                assertNull(awaitItem()!!.tokenId)
+                assertEquals(DanceBrainzCredential.Device("dancesonic.device.abc"), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertFalse(file.readText().contains("dbz_"))
+        }
+
+    @Test
+    fun `a device replaces a stored token`() =
+        runBlocking {
+            store.save(DanceBrainzCredential.Token("dbz_stored_token_1234567890", tokenId = 9L))
+            store.save(DanceBrainzCredential.Device("dancesonic.device.abc"))
+
+            store.credential.test {
+                assertEquals(DanceBrainzCredential.Device("dancesonic.device.abc"), awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a pasted token has no id`() =
+        runBlocking {
+            store.save(DanceBrainzCredential.Token("dbz_pasted_token_1234567890", tokenId = null))
+
+            store.credential.test {
+                assertNull((awaitItem() as DanceBrainzCredential.Token).tokenId)
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -60,7 +84,7 @@ class DanceBrainzTokenStoreTest {
     @Test
     fun `clearing signs out`() =
         runBlocking {
-            store.save(DanceBrainzCredential("dbz_stored_token_1234567890", tokenId = 9L))
+            store.save(DanceBrainzCredential.Token("dbz_stored_token_1234567890", tokenId = 9L))
             store.clear()
 
             store.credential.test {
@@ -72,7 +96,7 @@ class DanceBrainzTokenStoreTest {
     @Test
     fun `a token the keystore can no longer decrypt reads as signed out`() =
         runBlocking {
-            store.save(DanceBrainzCredential("dbz_stored_token_1234567890", tokenId = 9L))
+            store.save(DanceBrainzCredential.Token("dbz_stored_token_1234567890", tokenId = 9L))
             val broken =
                 DanceBrainzTokenStore(
                     dataStore,

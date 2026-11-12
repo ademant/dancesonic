@@ -21,6 +21,8 @@ import org.dancesonic.player.dance.DanceBrainzCredential
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceBrainzPairingUri
 import org.dancesonic.player.data.DanceRefresh
+import org.dancesonic.player.subsonic.DeviceKeys
+import org.dancesonic.player.subsonic.KeystoreDeviceSigner
 import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.subsonic.SubsonicException
 
@@ -104,9 +106,7 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
             }
             _state.value = DanceBrainzUiState(busy = true)
             try {
-                val credential = DanceBrainzAccountClient(configured).redeem(pairing.token, deviceName())
-                container.danceBrainzTokens.save(credential)
-                _state.value = DanceBrainzUiState(message = "Signed in to DanceBrainz on this phone.")
+                pairThisPhone(configured, pairing.token)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: DanceBrainzException) {
@@ -129,8 +129,9 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 val configured = container.danceBrainzSettings.baseUrl.first()
-                DanceBrainzAccountClient(configured).check(token)
-                container.danceBrainzTokens.save(DanceBrainzCredential(token, tokenId = null))
+                val credential = DanceBrainzCredential.Token(token, tokenId = null)
+                DanceBrainzAccountClient(configured).check(credential)
+                container.danceBrainzTokens.save(credential)
                 _state.value = DanceBrainzUiState(message = SIGNED_IN_BY_TOKEN)
             } catch (e: CancellationException) {
                 throw e
@@ -141,33 +142,66 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
-     * Revokes the token on the server when the app knows its id, then removes it from this phone. A failed
-     * revoke still signs out here; the message says so.
+     * Signs out: a device key is deleted and a token is revoked on the server when its id is known. The message says
+     * what the owner still has to do on the account page.
      */
     fun signOut() {
         _state.value = DanceBrainzUiState(busy = true)
         viewModelScope.launch {
-            val credential = container.danceBrainzTokens.credential.first()
-            var note = "Signed out."
-            if (credential != null) {
-                val id = credential.tokenId
-                if (id != null) {
-                    try {
-                        DanceBrainzAccountClient(container.danceBrainzSettings.baseUrl.first())
-                            .revoke(credential.token, id)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: DanceBrainzException) {
-                        note = "Signed out here, but the token could not be revoked on the server: ${e.message}"
-                    }
-                } else {
-                    note = "Signed out. Revoke the token on the account page too."
-                }
-            }
+            val note = revokeCredential(container.danceBrainzTokens.credential.first())
             val unsent = container.edits.forgetAccount()
             container.danceBrainzTokens.clear()
-            if (unsent > 0) note = "$note $unsent changes were not sent yet and are removed."
-            _state.value = DanceBrainzUiState(message = note)
+            _state.value =
+                DanceBrainzUiState(
+                    message = if (unsent > 0) "$note $unsent changes were not sent yet and are removed." else note,
+                )
+        }
+    }
+
+    /**
+     * Pairs this phone as a device (dancesonic #69). The key stays in the Keystore and only its name is stored, and
+     * only once the owner has approved the device. A pairing that fails leaves no key behind.
+     */
+    private suspend fun pairThisPhone(
+        server: HttpUrl,
+        code: String,
+    ) {
+        val alias = DeviceKeys.create()
+        var paired = false
+        try {
+            val account = DanceBrainzAccountClient(server)
+            account.pairDevice(code, deviceName(), KeystoreDeviceSigner(alias).publicJwk())
+            _state.value = DanceBrainzUiState(busy = true, message = WAITING_FOR_APPROVAL)
+            val credential = DanceBrainzCredential.Device(alias)
+            account.awaitApproval(credential)
+            container.danceBrainzTokens.save(credential)
+            paired = true
+            _state.value = DanceBrainzUiState(message = "Signed in to DanceBrainz on this phone.")
+        } finally {
+            if (!paired) DeviceKeys.delete(alias)
+        }
+    }
+
+    /** Removes what this phone holds for [credential] and returns the note for the user. */
+    private suspend fun revokeCredential(credential: DanceBrainzCredential?): String =
+        when (credential) {
+            null -> "Signed out."
+            is DanceBrainzCredential.Device -> {
+                DeviceKeys.delete(credential.alias)
+                "Signed out. Remove this phone on the DanceBrainz account page too."
+            }
+            is DanceBrainzCredential.Token -> revokeToken(credential)
+        }
+
+    private suspend fun revokeToken(credential: DanceBrainzCredential.Token): String {
+        val id = credential.tokenId ?: return "Signed out. Revoke the token on the account page too."
+        return try {
+            DanceBrainzAccountClient(container.danceBrainzSettings.baseUrl.first()).revoke(credential, id)
+            "Signed out."
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: DanceBrainzException) {
+            "Signed out here, but the token could not be revoked on the server: ${e.message}"
         }
     }
 
@@ -231,5 +265,6 @@ class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
             "Signed in. Signing out only removes the token from this phone; revoke it on the account page too."
         val TOKEN_PATTERN = Regex("dbz_[A-Za-z0-9_-]{16,256}")
         const val MAX_DEVICE_NAME = 60
+        const val WAITING_FOR_APPROVAL = "Waiting for approval on the account page…"
     }
 }
