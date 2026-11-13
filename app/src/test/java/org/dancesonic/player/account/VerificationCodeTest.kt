@@ -3,10 +3,14 @@ package org.dancesonic.player.account
 import org.dancesonic.player.subsonic.PublicJwk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VerificationCodeTest {
-    // Expected values come from an independent Python computation of the same definition, not from this code.
+    // The test vector from folksonic #103's final definition: the server computes the same code from these inputs.
+    private val folksonicThumbprint = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+
+    // Coordinates with an independently computed thumbprint, so the RFC 7638 canonicalisation is checked too.
     private val jwk =
         PublicJwk(
             kty = "EC",
@@ -21,23 +25,37 @@ class VerificationCodeTest {
     }
 
     @Test
-    fun `code matches the fixed vector`() {
-        assertEquals("812 567", VerificationCode.of("tok_Example-123", jwk))
+    fun `code matches folksonic's test vector`() {
+        assertEquals("446 284", VerificationCode.of("tsp_example-pairing-token", folksonicThumbprint))
+    }
+
+    @Test
+    fun `code from a key is the code from its thumbprint`() {
+        assertEquals(
+            VerificationCode.of("tsp_example-pairing-token", jwk.thumbprint()),
+            VerificationCode.of("tsp_example-pairing-token", jwk),
+        )
     }
 
     @Test
     fun `another device key gives another code for the same token`() {
         val other = jwk.copy(x = jwk.y, y = jwk.x)
-        assertNotEquals(VerificationCode.of("tok_Example-123", jwk), VerificationCode.of("tok_Example-123", other))
+        assertNotEquals(
+            VerificationCode.of("tsp_example-pairing-token", jwk),
+            VerificationCode.of("tsp_example-pairing-token", other),
+        )
     }
 
     @Test
     fun `another token gives another code for the same key`() {
-        assertNotEquals(VerificationCode.of("tok_Example-123", jwk), VerificationCode.of("tok_Example-124", jwk))
+        assertNotEquals(
+            VerificationCode.of("tsp_example-pairing-token", jwk),
+            VerificationCode.of("tsp_other-token", jwk),
+        )
     }
 
     @Test
     fun `code is six digits in two groups of three`() {
-        assertEquals(true, Regex("""\d{3} \d{3}""").matches(VerificationCode.of("tok_Example-123", jwk)))
+        assertTrue(Regex("""\d{3} \d{3}""").matches(VerificationCode.of("tsp_example-pairing-token", jwk)))
     }
 }

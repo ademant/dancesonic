@@ -6,7 +6,6 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -132,14 +131,12 @@ internal data class DevicePairRequest(
 @Serializable
 data class PairingPending(
     val status: String = "",
-    @SerialName("pendingId") val pendingId: JsonElement? = null,
     val confirm: Boolean = false,
 )
 
-/** The phone's answer to the verification code. [pairing] is the pending id from the server, sent back unchanged. */
+/** The phone's answer to the verification code. The key that signs the request identifies the pairing. */
 @Serializable
 internal data class PairConfirmRequest(
-    val pairing: JsonElement,
     val result: String,
 )
 
@@ -228,10 +225,9 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
      */
     suspend fun confirmDevicePairing(
         server: HttpUrl,
-        pendingId: JsonElement,
         decision: PairingDecision,
     ) {
-        val response = service(server).confirmPairing(PairConfirmRequest(pendingId, decision.wire))
+        val response = service(server).confirmPairing(PairConfirmRequest(decision.wire))
         if (!response.isSuccessful) throw AccountException(confirmRefusal(response))
     }
 

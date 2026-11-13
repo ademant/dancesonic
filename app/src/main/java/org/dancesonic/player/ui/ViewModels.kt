@@ -746,9 +746,8 @@ private suspend fun pairThisDevice(
         val jwk = KeystoreDeviceSigner(alias).publicJwk()
         val pending = account.startDevicePairing(request, deviceName(), jwk)
         if (pending.confirm) {
-            val pendingId = pending.pendingId ?: throw AccountException("The server sent an incomplete pairing answer.")
             val decision = verify(VerificationCode.of(request.token, jwk))
-            AccountClient.forDevice(settings).confirmDevicePairing(request.server, pendingId, decision)
+            AccountClient.forDevice(settings).confirmDevicePairing(request.server, decision)
             if (decision == PairingDecision.CANCEL) throw AccountException(CANCELLED_ON_PHONE)
         }
         onWaiting()
