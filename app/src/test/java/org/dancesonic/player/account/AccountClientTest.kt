@@ -1,7 +1,6 @@
 package org.dancesonic.player.account
 
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.subsonic.DeviceProofInterceptor
@@ -191,7 +190,7 @@ class AccountClientTest {
     @Test
     fun `the answer asks for the code to be confirmed, and an older server does not`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"status":"pending","pendingId":12,"confirm":true}""").setResponseCode(202))
+            fake.server.enqueue(json("""{"status":"pending","confirm":true}""").setResponseCode(202))
             fake.server.enqueue(json("""{"status":"pending"}""").setResponseCode(202))
             val jwk = SoftwareDeviceSigner().publicJwk()
             val request = PairingRequest(base, "tsp_abcdefgh12345")
@@ -200,21 +199,20 @@ class AccountClientTest {
             val older = account.startDevicePairing(request, "Pixel", jwk)
 
             assertTrue(withCode.confirm)
-            assertEquals("12", withCode.pendingId.toString())
             assertFalse(older.confirm)
         }
 
     @Test
-    fun `the confirmation carries the pending id, the answer and the device's proof`() =
+    fun `the confirmation carries the answer and the device's proof`() =
         runBlocking<Unit> {
             fake.server.enqueue(MockResponse().setResponseCode(200))
 
-            deviceAccount().confirmDevicePairing(base, JsonPrimitive(12), PairingDecision.MATCH)
+            deviceAccount().confirmDevicePairing(base, PairingDecision.MATCH)
 
             val sent = fake.server.takeRequest()
             assertEquals("/api/pair/confirm", sent.requestUrl!!.encodedPath)
             val body = sent.body.readUtf8()
-            assertTrue(body.contains("\"pairing\":12"))
+            assertFalse(body.contains("pairing"))
             assertTrue(body.contains("\"result\":\"match\""))
             assertNotNull(sent.getHeader("DPoP"))
         }
@@ -227,7 +225,7 @@ class AccountClientTest {
             val error =
                 assertThrows(AccountException::class.java) {
                     runBlocking {
-                        deviceAccount().confirmDevicePairing(base, JsonPrimitive(12), PairingDecision.MATCH)
+                        deviceAccount().confirmDevicePairing(base, PairingDecision.MATCH)
                     }
                 }
             assertEquals(AccountClient.TOKEN_ALREADY_USED, error.message)
