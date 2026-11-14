@@ -159,8 +159,14 @@ fun DanceSonicRoot(container: AppContainer) {
                             connectVm,
                             onOpenConfig = { showConfig = true },
                         )
-                    Tab.Dance -> DanceScreen(libraryVm, container.player, playlistVm)
-                    Tab.Playlists -> PlaylistsScreen(playlistVm)
+                    Tab.Dance ->
+                        DanceScreen(
+                            libraryVm,
+                            container.player,
+                            playlistVm,
+                            onOpenConfig = { showConfig = true },
+                        )
+                    Tab.Playlists -> PlaylistsScreen(playlistVm, onOpenConfig = { showConfig = true })
                 }
             }
         }

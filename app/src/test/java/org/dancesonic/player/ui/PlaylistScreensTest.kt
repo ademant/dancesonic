@@ -56,7 +56,7 @@ class PlaylistScreensTest {
     fun `typing a course name and tapping Create lists the new playlist`() {
         val playlists = host.create { PlaylistViewModel(container) }
         composeRule.setContent {
-            MaterialTheme { PlaylistsScreen(playlists) }
+            MaterialTheme { PlaylistsScreen(playlists, onOpenConfig = {}) }
         }
 
         composeRule.onNode(isEditable()).performTextInput("Waltz course")

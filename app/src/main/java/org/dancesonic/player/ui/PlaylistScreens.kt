@@ -36,15 +36,21 @@ import org.dancesonic.player.data.db.PlaylistItemRow
 
 /** Course playlists: list, then a detail view grouped by dance type. */
 @Composable
-fun PlaylistsScreen(vm: PlaylistViewModel) {
+fun PlaylistsScreen(
+    vm: PlaylistViewModel,
+    onOpenConfig: () -> Unit,
+) {
     var openId by rememberSaveable { mutableStateOf<Long?>(null) }
     BackHandler(enabled = openId != null) { openId = null }
 
-    val id = openId
-    if (id == null) {
-        PlaylistList(vm, onOpen = { openId = it })
-    } else {
-        PlaylistDetail(vm, playlistId = id, onBack = { openId = null })
+    Column(Modifier.fillMaxSize()) {
+        TabHeader("Playlists", onOpenConfig)
+        val id = openId
+        if (id == null) {
+            PlaylistList(vm, onOpen = { openId = it })
+        } else {
+            PlaylistDetail(vm, playlistId = id, onBack = { openId = null })
+        }
     }
 }
 
@@ -57,7 +63,6 @@ private fun PlaylistList(
     var newName by rememberSaveable { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize()) {
-        Text("Playlists", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = newName,
