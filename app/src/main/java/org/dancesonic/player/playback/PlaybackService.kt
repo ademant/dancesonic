@@ -7,6 +7,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import org.dancesonic.player.DanceSonicApp
+import org.dancesonic.player.playback.stretch.StretchRenderersFactory
 
 /**
  * Owns the ExoPlayer instance and the media session. Being a [MediaSessionService] keeps audio
@@ -32,7 +33,7 @@ class PlaybackService : MediaSessionService() {
                     ),
                 )
         val player =
-            ExoPlayer.Builder(this)
+            ExoPlayer.Builder(this, StretchRenderersFactory(this))
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
                 .build()

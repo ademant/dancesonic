@@ -21,6 +21,7 @@ ksp {
 android {
     namespace = "org.dancesonic.player"
     compileSdk = 37
+    ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
         applicationId = "org.dancesonic.player"
@@ -29,6 +30,16 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // The time-stretch library (Signalsmith Stretch). Phones are ARM; x86_64 is for the emulator.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
     }
 
     buildTypes {
