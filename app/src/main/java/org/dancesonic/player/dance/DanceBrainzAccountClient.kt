@@ -2,10 +2,9 @@ package org.dancesonic.player.dance
 
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import org.dancesonic.player.account.refusalCodeOf
 import org.dancesonic.player.subsonic.PublicJwk
 import retrofit2.Response
 import retrofit2.http.Body
@@ -84,22 +83,14 @@ class DanceBrainzAccountClient internal constructor(
                 CODE_DEVICE_UNKNOWN -> "The device was removed on the account page. Pair it again."
                 CODE_PROOF_REPLAYED -> "DanceBrainz refused a repeated request. Try again."
                 CODE_PROOF_INVALID -> "This phone's key was refused. Pair the phone again."
+                CODE_DEVICE_EXISTS -> "This phone is already paired. Create a new pairing code on the account page."
                 else -> "DanceBrainz answered with HTTP $status"
             },
             httpCode = status,
         )
 
-    /** The refusal code in a failed response's body, or null when there is none. */
-    @Suppress("SwallowedException")
-    private fun refusalCode(response: Response<*>): String? {
-        val text = response.errorBody()?.string() ?: return null
-        return try {
-            accountJson.decodeFromString<RefusalDto>(text).error
-        } catch (e: SerializationException) {
-            // Not a refusal the app knows; the caller reports the HTTP status instead.
-            null
-        }
-    }
+    /** The refusal code in a failed response's body, nested as DanceBrainz sends it, or null when there is none. */
+    private fun refusalCode(response: Response<*>): String? = refusalCodeOf(response.errorBody()?.string())
 
     companion object {
         private const val HTTP_ACCEPTED = 202
@@ -109,6 +100,7 @@ class DanceBrainzAccountClient internal constructor(
         private const val CODE_DEVICE_UNKNOWN = "device_unknown"
         private const val CODE_PROOF_REPLAYED = "proof_replayed"
         private const val CODE_PROOF_INVALID = "proof_invalid"
+        private const val CODE_DEVICE_EXISTS = "device_exists"
         private const val INVALID_PAIRING_CODE =
             "This pairing code is invalid or expired. Create a new one on the account page."
 
@@ -116,8 +108,6 @@ class DanceBrainzAccountClient internal constructor(
         const val APPROVAL_WAIT_MILLIS = 5L * 60_000L
         private const val POLL_INTERVAL_MILLIS = 3_000L
         private const val NANOS_PER_MILLI = 1_000_000L
-
-        private val accountJson = Json { ignoreUnknownKeys = true }
     }
 }
 
@@ -155,12 +145,6 @@ internal data class DevicePairDto(
 ) {
     override fun toString(): String = "DevicePairDto(device=$device, token=<redacted>)"
 }
-
-/** A refusal: `{"error": "<code>"}`. */
-@Serializable
-internal data class RefusalDto(
-    val error: String? = null,
-)
 
 @Serializable
 internal data class MeDto(

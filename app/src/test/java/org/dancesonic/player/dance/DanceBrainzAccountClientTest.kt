@@ -41,7 +41,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a rejected code is reported without the code`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"pairing_invalid"}"""))
+            server.server.enqueue(nested("pairing_invalid").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -59,7 +59,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `the wait ends when the owner approves the device, and each poll is signed for the device`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            server.server.enqueue(nested("pairing_pending").setResponseCode(401))
             server.server.enqueue(MockResponse().setResponseCode(200))
 
             runBlocking {
@@ -86,7 +86,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a removed device is told to pair again`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"error":"device_unknown"}""").setResponseCode(401))
+            server.server.enqueue(nested("device_unknown").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -107,7 +107,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a replayed proof is reported as a repeat`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"error":"proof_replayed"}""").setResponseCode(401))
+            server.server.enqueue(nested("proof_replayed").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -126,9 +126,25 @@ class DanceBrainzAccountClientTest {
     }
 
     @Test
+    fun `an already paired phone is told to create a new code`() {
+        TestSubsonicServer().use { server ->
+            server.server.enqueue(nested("device_exists").setResponseCode(409))
+
+            val error =
+                assertThrows(DanceBrainzException::class.java) {
+                    runBlocking {
+                        DanceBrainzAccountClient(server.server.url("/"), server.plain)
+                            .pairDevice("dbp_abcdefghijklmnop1234", "DanceSonic", SoftwareDeviceSigner().publicJwk())
+                    }
+                }
+            assertTrue(error.message.orEmpty().contains("already paired"))
+        }
+    }
+
+    @Test
     fun `a device never approved gives up at its deadline`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            server.server.enqueue(nested("pairing_pending").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -198,6 +214,9 @@ class DanceBrainzAccountClientTest {
     }
 
     private fun json(body: String) = MockResponse().addHeader("Content-Type", "application/json").setBody(body)
+
+    /** A refusal in DanceBrainz's nested shape: `{"error": {"code": ..., "message": ..., "hint": ...}}`. */
+    private fun nested(code: String) = json("""{"error":{"code":"$code","message":"m","hint":"h"}}""")
 
     private companion object {
         const val AWAITED_INVALID_CODE =
