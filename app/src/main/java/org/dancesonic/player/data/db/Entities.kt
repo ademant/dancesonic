@@ -227,3 +227,17 @@ data class WaveformEntity(
     val source: String,
     val computedAt: Long,
 )
+
+/**
+ * Where notes start in a song, from folksonic's analysis, for the time-stretch: [timesMs] and [strengths] are
+ * comma-separated values at matching positions (see `Onsets`). Both empty means the server was asked at
+ * [fetchedAt] (epoch milliseconds) and had none. Keyed by the server's song id like [WaveformEntity], with no
+ * foreign key for the same reason.
+ */
+@Entity(tableName = "onsets")
+data class OnsetsEntity(
+    @PrimaryKey val songId: String,
+    val timesMs: String,
+    val strengths: String,
+    val fetchedAt: Long,
+)

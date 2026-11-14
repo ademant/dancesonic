@@ -1,5 +1,7 @@
 package org.dancesonic.player.playback
 
+import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -7,6 +9,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import org.dancesonic.player.DanceSonicApp
+import org.dancesonic.player.playback.stretch.OnsetCache
+import org.dancesonic.player.playback.stretch.StreamTracker
 import org.dancesonic.player.playback.stretch.StretchRenderersFactory
 
 /**
@@ -32,12 +36,46 @@ class PlaybackService : MediaSessionService() {
                         ),
                     ),
                 )
+        val tracker = StreamTracker()
+        val onsets = container.onsetCache
         val player =
-            ExoPlayer.Builder(this, StretchRenderersFactory(this))
+            ExoPlayer.Builder(this, StretchRenderersFactory(this, tracker, onsets::onsetsFor))
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
                 .build()
+        player.addListener(QueueFollower(tracker, onsets))
         session = MediaSession.Builder(this, player).build()
+    }
+
+    /**
+     * Tells the time-stretch which songs play now and next, and keeps their onsets loaded. Runs on the application
+     * thread as the queue, the current item, repeat or shuffle change.
+     */
+    private class QueueFollower(
+        private val tracker: StreamTracker,
+        private val onsets: OnsetCache,
+    ) : Player.Listener {
+        override fun onEvents(
+            player: Player,
+            events: Player.Events,
+        ) {
+            if (QUEUE_EVENTS.none(events::contains)) return
+            val current = player.currentMediaItem?.mediaId
+            val nextIndex = player.nextMediaItemIndex
+            val next = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex).mediaId
+            tracker.setQueue(current, next)
+            onsets.prefetch(setOfNotNull(current, next))
+        }
+
+        private companion object {
+            val QUEUE_EVENTS =
+                intArrayOf(
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_TIMELINE_CHANGED,
+                    Player.EVENT_REPEAT_MODE_CHANGED,
+                    Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
+                )
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session

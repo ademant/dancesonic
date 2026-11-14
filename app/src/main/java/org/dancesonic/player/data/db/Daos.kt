@@ -372,4 +372,15 @@ interface WaveformDao {
     /** Clears every waveform. Used when the connection changes, since song ids belong to one server. */
     @Query("DELETE FROM waveform")
     suspend fun deleteAll()
+
+    /** The onsets of [songId], which come with the same analysis as its waveform. */
+    @Query("SELECT * FROM onsets WHERE songId = :songId")
+    suspend fun getOnsets(songId: String): OnsetsEntity?
+
+    @Upsert
+    suspend fun upsertOnsets(entity: OnsetsEntity)
+
+    /** Clears every onset list, like [deleteAll]. */
+    @Query("DELETE FROM onsets")
+    suspend fun deleteAllOnsets()
 }

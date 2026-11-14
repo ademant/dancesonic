@@ -17,12 +17,14 @@ import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 /**
- * What folksonic holds for one song. [peaks] is the waveform, or null while the server has none. [retryAfterSeconds]
+ * What folksonic holds for one song. [peaks] is the waveform, or null while the server has none. [onsets] are where
+ * notes start, or null when the server does not serve them (older folksonic, or not analysed). [retryAfterSeconds]
  * is set when the server is still working on it, and says how long to wait before asking again.
  */
 data class ServerAnalysis(
     val peaks: List<Int>?,
     val retryAfterSeconds: Int?,
+    val onsets: Onsets? = null,
 )
 
 /**
@@ -56,8 +58,9 @@ class AnalysisClient internal constructor(
         if (!response.isSuccessful) {
             throw SubsonicException(response.code(), "Analysis request failed with HTTP ${response.code()}")
         }
+        val body = response.body()
         val peaks =
-            response.body()?.waveform?.peaks
+            body?.waveform?.peaks
                 ?.takeIf { it.isNotEmpty() }
                 ?.map { it.coerceIn(0, PEAK_MAX) }
         val retryAfter =
@@ -66,7 +69,8 @@ class AnalysisClient internal constructor(
             } else {
                 null
             }
-        return ServerAnalysis(peaks, retryAfter)
+        val onsets = body?.onsets?.let { Onsets.of(it.timesMs, it.strengths) }
+        return ServerAnalysis(peaks, retryAfter, onsets)
     }
 
     companion object {
@@ -102,10 +106,17 @@ internal interface AnalysisService {
 @Serializable
 internal data class AnalysisDto(
     val waveform: WaveformDto? = null,
+    val onsets: OnsetsDto? = null,
 )
 
 @Serializable
 internal data class WaveformDto(
     val bins: Int? = null,
     val peaks: List<Int> = emptyList(),
+)
+
+@Serializable
+internal data class OnsetsDto(
+    val timesMs: List<Long> = emptyList(),
+    val strengths: List<Int> = emptyList(),
 )
