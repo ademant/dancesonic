@@ -50,6 +50,7 @@ import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
+import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.LanPins
 import org.dancesonic.player.subsonic.ServerSettings
@@ -131,6 +132,9 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     val waveforms: WaveformStore by lazy {
         WaveformStore(database.waveformDao(), database.trackDao(), audioCache, { currentSettings })
     }
+
+    /** Onsets of the songs playing now and next, in memory for the time-stretch on the audio thread. */
+    val onsetCache: OnsetCache by lazy { OnsetCache(appScope) { songId -> waveforms.onsets(songId) } }
 
     /**
      * Downloads a track into the audio cache when it starts, so playback reads it once. When a download completes, the
@@ -216,7 +220,10 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             onTrackStarted = { songId ->
                 refreshPlayingTrack(songId)
                 prefetchStarted(songId)
-                appScope.launch { waveforms.loadFromServer(songId) }
+                appScope.launch {
+                    waveforms.loadFromServer(songId)
+                    onsetCache.refresh(songId)
+                }
             },
             onQueued = ::onQueued,
         )

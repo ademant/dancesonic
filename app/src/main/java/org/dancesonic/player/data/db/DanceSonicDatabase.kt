@@ -20,8 +20,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         KeptCollectionEntity::class,
         ChapterEntity::class,
         WaveformEntity::class,
+        OnsetsEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -64,6 +65,7 @@ abstract class DanceSonicDatabase : RoomDatabase() {
                     MIGRATION_9_10,
                     MIGRATION_10_11,
                     MIGRATION_11_12,
+                    MIGRATION_12_13,
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addCallback(

@@ -18,7 +18,16 @@ import kotlin.math.roundToInt
 class StretchAudioProcessorTest {
     private val stereo = AudioFormat(44_100, 2, C.ENCODING_PCM_16BIT)
     private val created = mutableListOf<FakeStretcher>()
-    private val processor = StretchAudioProcessor { format -> FakeStretcher(format).also { created += it } }
+    private val planned = mutableListOf<Float>()
+    private val plan = StretchPlan(4_000, 1_000, longArrayOf(0, 10), doubleArrayOf(0.0, 10.0))
+    private val processor =
+        StretchAudioProcessor(
+            createStretcher = { format -> FakeStretcher(format).also { created += it } },
+            planFor = { speed, _ ->
+                planned += speed
+                plan
+            },
+        )
 
     @Test
     fun `rejects anything but 16-bit PCM`() {
@@ -113,6 +122,26 @@ class StretchAudioProcessorTest {
     }
 
     @Test
+    fun `each flush asks for the plan of the stream that starts and hands it to the stretcher`() {
+        processor.configure(stereo)
+        processor.setSpeed(0.7f)
+        processor.flush(StreamMetadata.DEFAULT)
+        processor.setSpeed(0.5f)
+        processor.flush(StreamMetadata.DEFAULT)
+
+        assertEquals(listOf(0.7f, 0.5f), planned)
+        assertSame(plan, created.single().plans.last())
+    }
+
+    @Test
+    fun `no plan is asked for at 1x`() {
+        processor.configure(stereo)
+        processor.flush(StreamMetadata.DEFAULT)
+
+        assertTrue(planned.isEmpty())
+    }
+
+    @Test
     fun `reset frees the stretcher and returns to 1x`() {
         processor.configure(stereo)
         processor.setSpeed(0.8f)
@@ -157,6 +186,7 @@ class StretchAudioProcessorTest {
         val format: AudioFormat,
     ) : TimeStretcher {
         val starts = mutableListOf<Float>()
+        val plans = mutableListOf<StretchPlan>()
         var closed = false
         private var speed = 1f
         private var inputFrames = 0
@@ -167,8 +197,10 @@ class StretchAudioProcessorTest {
         override fun start(
             speed: Float,
             pitch: Float,
+            plan: StretchPlan,
         ) {
             starts += speed
+            plans += plan
             this.speed = speed
             inputFrames = 0
             outputFrames = 0

@@ -3,8 +3,10 @@
 
 #include <jni.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <new>
+#include <vector>
 
 #include "stream_stretcher.h"
 
@@ -30,6 +32,20 @@ Java_org_dancesonic_player_playback_stretch_NativeTimeStretcher_nativeCreate(
 JNIEXPORT void JNICALL
 Java_org_dancesonic_player_playback_stretch_NativeTimeStretcher_nativeDestroy(JNIEnv *, jobject, jlong handle) {
     delete fromHandle(handle);
+}
+
+JNIEXPORT void JNICALL
+Java_org_dancesonic_player_playback_stretch_NativeTimeStretcher_nativeSetPlan(
+    JNIEnv *env, jobject, jlong handle, jint blockSamples, jint intervalSamples, jlongArray breakIn,
+    jdoubleArray breakOut) {
+    jsize count = std::min(env->GetArrayLength(breakIn), env->GetArrayLength(breakOut));
+    std::vector<int64_t> in(static_cast<size_t>(count));
+    std::vector<double> out(static_cast<size_t>(count));
+    if (count > 0) {
+        env->GetLongArrayRegion(breakIn, 0, count, reinterpret_cast<jlong *>(in.data()));
+        env->GetDoubleArrayRegion(breakOut, 0, count, out.data());
+    }
+    fromHandle(handle)->setPlan(blockSamples, intervalSamples, in.data(), out.data(), int(count));
 }
 
 JNIEXPORT void JNICALL

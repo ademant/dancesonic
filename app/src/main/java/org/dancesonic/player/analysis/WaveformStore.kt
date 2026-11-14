@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import org.dancesonic.player.data.db.OnsetsEntity
 import org.dancesonic.player.data.db.TrackDao
 import org.dancesonic.player.data.db.WaveformDao
 import org.dancesonic.player.data.db.WaveformEntity
@@ -26,6 +27,9 @@ import java.io.IOException
  * in the audio cache, is the waveform decoded on the device. A track is never streamed just to analyse it.
  *
  * A server waveform replaces a local one; a local one is never replaced.
+ *
+ * The same answer carries the song's onsets, where folksonic serves them; they are stored next to the waveform for
+ * the time-stretch. A server that had none is asked again after [ONSETS_RECHECK_MS], in case it was upgraded.
  */
 class WaveformStore(
     private val dao: WaveformDao,
@@ -41,13 +45,19 @@ class WaveformStore(
     fun observe(songId: String): Flow<List<Int>?> =
         dao.observe(songId).map { row -> row?.let { decodePeaks(it.peaks) } }
 
+    /** The stored onsets of [songId], or null when there are none. */
+    suspend fun onsets(songId: String): Onsets? {
+        val row = dao.getOnsets(songId) ?: return null
+        return decodeOnsets(row.timesMs, row.strengths)?.takeIf { it.size > 0 }
+    }
+
     /**
-     * Asks folksonic for the stored waveform of [songId], waiting out its 202 answers a few times. Does nothing when
-     * the server does not advertise the analysis endpoint, or when a server waveform is already stored.
+     * Asks folksonic for the stored waveform and onsets of [songId], waiting out its 202 answers a few times. Does
+     * nothing when the server does not advertise the analysis endpoint, or when both are already stored.
      */
     suspend fun loadFromServer(songId: String) {
         val settings = settingsProvider() ?: return
-        if (dao.get(songId)?.source == SOURCE_SERVER) return
+        if (dao.get(songId)?.source == SOURCE_SERVER && hasOnsetsAnswer(songId)) return
         try {
             fetchServerWaveform(settings, songId)
         } catch (e: CancellationException) {
@@ -73,12 +83,29 @@ class WaveformStore(
             val peaks = answer.peaks
             if (peaks != null) {
                 dao.upsert(WaveformEntity(songId, encodePeaks(peaks), SOURCE_SERVER, System.currentTimeMillis()))
+                // A finished analysis without onsets is stored as none, so the song is not asked again at once.
+                saveOnsets(songId, answer.onsets ?: Onsets.NONE)
                 return
             }
+            answer.onsets?.let { saveOnsets(songId, it) }
             // No retry hint means the server has nothing for the song and will not compute it on request.
             val wait = answer.retryAfterSeconds ?: return
             if (attempt < MAX_SERVER_ATTEMPTS - 1) delay(wait * MILLIS_PER_SECOND)
         }
+    }
+
+    /** True when onsets are stored, or the server said recently that it has none. */
+    private suspend fun hasOnsetsAnswer(songId: String): Boolean {
+        val row = dao.getOnsets(songId) ?: return false
+        return row.timesMs.isNotEmpty() || System.currentTimeMillis() - row.fetchedAt < ONSETS_RECHECK_MS
+    }
+
+    private suspend fun saveOnsets(
+        songId: String,
+        onsets: Onsets,
+    ) {
+        val now = System.currentTimeMillis()
+        dao.upsertOnsets(OnsetsEntity(songId, encodeInts(onsets.timesMs), encodeInts(onsets.strengths), now))
     }
 
     /**
@@ -121,8 +148,11 @@ class WaveformStore(
         return if (source.failed) null else peaks
     }
 
-    /** Removes every waveform, when the connection changes. */
-    suspend fun clear() = dao.deleteAll()
+    /** Removes every waveform and every onset list, when the connection changes. */
+    suspend fun clear() {
+        dao.deleteAll()
+        dao.deleteAllOnsets()
+    }
 
     companion object {
         /** Bins per waveform. Matches folksonic's default, so server and local waveforms look alike. */
@@ -130,6 +160,9 @@ class WaveformStore(
 
         const val SOURCE_SERVER = "server"
         const val SOURCE_LOCAL = "local"
+
+        /** How long a server's "no onsets" answer stands before the song is asked again. */
+        const val ONSETS_RECHECK_MS = 24 * 60 * 60 * 1_000L
 
         private const val MAX_SERVER_ATTEMPTS = 4
         private const val MILLIS_PER_SECOND = 1_000L

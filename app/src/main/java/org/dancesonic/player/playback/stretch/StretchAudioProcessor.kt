@@ -17,13 +17,18 @@ import kotlin.math.roundToLong
  * PCM, like Sonic. At 1x speed and pitch it is inactive, so the audio passes through untouched.
  *
  * New values from [setSpeed] and [setPitch] apply at the next flush; the audio sink drains and flushes the
- * processors when the playback parameters change.
+ * processors when the playback parameters change, and at every seek and track start.
+ *
+ * At each flush [planFor] gives the [StretchPlan] for the stream that starts: with the song's onsets, attacks play at
+ * close to their original speed (see [StretchPlanner]). The media position is still reported on the nominal timeline,
+ * which the plan meets at every anchor.
  */
 @UnstableApi
 class StretchAudioProcessor(
     private val createStretcher: (AudioFormat) -> TimeStretcher = { format ->
         NativeTimeStretcher(format.channelCount, format.sampleRate)
     },
+    private val planFor: (speed: Float, format: AudioFormat) -> StretchPlan = { _, _ -> StretchPlan.UNIFORM },
 ) : AudioProcessor {
     private var speed = 1f
     private var pitch = 1f
@@ -107,7 +112,7 @@ class StretchAudioProcessor(
             }
             format = pendingFormat
             streamSpeed = speed
-            stretcher?.start(speed, pitch)
+            stretcher?.start(speed, pitch, planFor(speed, format))
         } else {
             streamSpeed = 1f
         }

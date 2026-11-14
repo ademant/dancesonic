@@ -119,6 +119,43 @@ class AnalysisClientTest {
         }
 
     @Test
+    fun `onsets are read sorted by time, with strengths clamped and negative times dropped`() =
+        runBlocking {
+            server.server.enqueue(
+                MockResponse().setBody(
+                    """{"id":"song-1","waveform":{"bins":1,"peaks":[1]},""" +
+                        """"onsets":{"timesMs":[900,-5,40],"strengths":[300,7,-1]}}""",
+                ),
+            )
+
+            val onsets = client.fetch("song-1").onsets
+
+            assertEquals(listOf(40, 900), onsets?.timesMs?.toList())
+            assertEquals(listOf(0, 255), onsets?.strengths?.toList())
+        }
+
+    @Test
+    fun `an older server without onsets gives none and still the waveform`() =
+        runBlocking {
+            server.server.enqueue(MockResponse().setBody(waveformBody("[1,2]")))
+
+            val answer = client.fetch("song-1")
+
+            assertNull(answer.onsets)
+            assertEquals(listOf(1, 2), answer.peaks)
+        }
+
+    @Test
+    fun `onsets whose lists differ in length are dropped`() =
+        runBlocking {
+            server.server.enqueue(
+                MockResponse().setBody("""{"id":"song-1","onsets":{"timesMs":[10,20],"strengths":[5]}}"""),
+            )
+
+            assertNull(client.fetch("song-1").onsets)
+        }
+
+    @Test
     fun `a server error is reported with its status`() {
         server.server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
 

@@ -167,3 +167,18 @@ val MIGRATION_11_12 =
 
 private const val FROM_11 = 11
 private const val TO_12 = 12
+
+/** Adds the onsets table: one row per song with where its notes start. Existing rows are untouched. */
+val MIGRATION_12_13 =
+    object : Migration(FROM_12, TO_13) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `onsets` " +
+                    "(`songId` TEXT NOT NULL, `timesMs` TEXT NOT NULL, `strengths` TEXT NOT NULL, " +
+                    "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`songId`))",
+            )
+        }
+    }
+
+private const val FROM_12 = 12
+private const val TO_13 = 13

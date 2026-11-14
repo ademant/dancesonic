@@ -22,7 +22,12 @@ class NativeTimeStretcher(
     override fun start(
         speed: Float,
         pitch: Float,
-    ) = nativeStart(live(), speed, pitch)
+        plan: StretchPlan,
+    ) {
+        val handle = live()
+        nativeSetPlan(handle, plan.blockSamples, plan.intervalSamples, plan.breakIn, plan.breakOut)
+        nativeStart(handle, speed, pitch)
+    }
 
     override fun queueInput(input: ByteBuffer) {
         val frames = input.remaining() / bytesPerFrame
@@ -82,6 +87,14 @@ class NativeTimeStretcher(
     ): Long
 
     private external fun nativeDestroy(handle: Long)
+
+    private external fun nativeSetPlan(
+        handle: Long,
+        blockSamples: Int,
+        intervalSamples: Int,
+        breakIn: LongArray,
+        breakOut: DoubleArray,
+    )
 
     private external fun nativeStart(
         handle: Long,

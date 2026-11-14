@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.data.db.DanceSonicDatabase
+import org.dancesonic.player.data.db.OnsetsEntity
 import org.dancesonic.player.data.db.WaveformEntity
 import org.dancesonic.player.playback.AudioCache
 import org.dancesonic.player.testsupport.TestSubsonicServer
@@ -90,14 +91,78 @@ class WaveformStoreTest {
         }
 
     @Test
-    fun `a stored server waveform is not requested again or replaced`() =
+    fun `a stored server waveform with its onsets is not requested again or replaced`() =
         runBlocking {
             db.waveformDao().upsert(WaveformEntity(SONG, "9", "server", 1L))
+            db.waveformDao().upsertOnsets(OnsetsEntity(SONG, "10", "200", 1L))
 
             store.loadFromServer(SONG)
 
             assertEquals(0, server.server.requestCount)
             assertEquals("9", db.waveformDao().get(SONG)?.peaks)
+        }
+
+    @Test
+    fun `onsets are stored with the waveform and read back`() =
+        runBlocking {
+            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+
+            store.loadFromServer(SONG)
+
+            val onsets = store.onsets(SONG)
+            assertEquals(listOf(120, 480), onsets?.timesMs?.toList())
+            assertEquals(listOf(200, 60), onsets?.strengths?.toList())
+            assertEquals("1,2,3", db.waveformDao().get(SONG)?.peaks)
+        }
+
+    @Test
+    fun `a server waveform stored before onsets existed is asked once more for them`() =
+        runBlocking {
+            db.waveformDao().upsert(WaveformEntity(SONG, "9", "server", 1L))
+            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+
+            store.loadFromServer(SONG)
+
+            assertEquals(1, server.server.requestCount)
+            assertEquals(2, store.onsets(SONG)?.size)
+        }
+
+    @Test
+    fun `a server without onsets is not asked again at once`() =
+        runBlocking {
+            server.server.enqueue(MockResponse().setBody(WAVEFORM_123))
+            store.loadFromServer(SONG)
+            assertNull(store.onsets(SONG))
+
+            store.loadFromServer(SONG)
+
+            assertEquals(1, server.server.requestCount)
+        }
+
+    @Test
+    fun `a day after the server had no onsets, it is asked again`() =
+        runBlocking {
+            val dayAgo = System.currentTimeMillis() - WaveformStore.ONSETS_RECHECK_MS - 1
+            db.waveformDao().upsert(WaveformEntity(SONG, "9", "server", 1L))
+            db.waveformDao().upsertOnsets(OnsetsEntity(SONG, "", "", dayAgo))
+            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+
+            store.loadFromServer(SONG)
+
+            assertEquals(1, server.server.requestCount)
+            assertEquals(2, store.onsets(SONG)?.size)
+        }
+
+    @Test
+    fun `clear removes the onsets too`() =
+        runBlocking {
+            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+            store.loadFromServer(SONG)
+
+            store.clear()
+
+            assertNull(store.onsets(SONG))
+            assertNull(db.waveformDao().get(SONG))
         }
 
     @Test
@@ -141,5 +206,8 @@ class WaveformStoreTest {
     private companion object {
         const val SONG = "so-1"
         const val WAVEFORM_123 = """{"id":"so-1","waveform":{"bins":3,"peaks":[1,2,3]}}"""
+        const val WITH_ONSETS =
+            """{"id":"so-1","waveform":{"bins":3,"peaks":[1,2,3]},""" +
+                """"onsets":{"timesMs":[480,120],"strengths":[60,200]}}"""
     }
 }
