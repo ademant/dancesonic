@@ -250,6 +250,42 @@ class AccountClientTest {
         }
 
     @Test
+    fun `a code used by another device gives its message whatever the status`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(409))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking {
+                        account.startDevicePairing(
+                            PairingRequest(base, "tsp_abcdefgh12345"),
+                            "Pixel",
+                            SoftwareDeviceSigner().publicJwk(),
+                        )
+                    }
+                }
+            assertEquals(AccountClient.TOKEN_ALREADY_USED, error.message)
+        }
+
+    @Test
+    fun `a busy QR code gives its message whatever the status`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"error":"pairing_busy"}""").setResponseCode(429))
+
+            val error =
+                assertThrows(AccountException::class.java) {
+                    runBlocking {
+                        account.startDevicePairing(
+                            PairingRequest(base, "tsp_abcdefgh12345"),
+                            "Pixel",
+                            SoftwareDeviceSigner().publicJwk(),
+                        )
+                    }
+                }
+            assertEquals(AccountClient.PAIRING_BUSY, error.message)
+        }
+
+    @Test
     fun `a pairing the owner rejected ends the wait with that reason`() =
         runBlocking<Unit> {
             fake.server.enqueue(json("""{"error":"pairing_rejected"}""").setResponseCode(401))

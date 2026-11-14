@@ -152,12 +152,6 @@ internal data class DeviceMe(
     val name: String = "",
 )
 
-/** The body of a refusal: `{"error": "<code>", "message": "..."}`. */
-@Serializable
-internal data class RefusalBody(
-    val error: String? = null,
-)
-
 /** A failure the user can act on. The message is safe to show on screen. */
 class AccountException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -212,10 +206,9 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         jwk: PublicJwk,
     ): PairingPending {
         val response = service(request.server).completeDevicePairing(DevicePairRequest(request.token, device, jwk))
-        return when {
-            response.code() == HTTP_ACCEPTED -> response.body() ?: PairingPending()
-            response.code() == HTTP_UNAUTHORIZED -> throw AccountException(pairingRefusal(response), null)
-            else -> throw AccountException("The server returned HTTP ${response.code()}.")
+        return when (response.code()) {
+            HTTP_ACCEPTED -> response.body() ?: PairingPending()
+            else -> throw AccountException(pairingRefusal(response))
         }
     }
 
@@ -265,11 +258,18 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             else -> AccountException("The server returned HTTP $status.")
         }
 
+    /** The message for a refused pairing start. The code decides it, whatever the status: 409 and 429 carry codes. */
     private fun pairingRefusal(response: Response<*>): String =
-        when (refusalCode(response)) {
+        when (val code = refusalCode(response)) {
             CODE_PAIRING_EXPIRED, CODE_PAIRING_INVALID -> INVALID_PAIRING_CODE
             CODE_PAIRING_TOKEN_USED -> TOKEN_ALREADY_USED
-            else -> "The server refused the pairing (HTTP ${response.code()})."
+            CODE_PAIRING_BUSY -> PAIRING_BUSY
+            else ->
+                if (response.code() == HTTP_UNAUTHORIZED) {
+                    "The server refused the pairing (HTTP ${response.code()})."
+                } else {
+                    "The server returned HTTP ${response.code()}${code?.let { " ($it)" }.orEmpty()}."
+                }
         }
 
     private fun confirmRefusal(response: Response<*>): String =
@@ -336,6 +336,7 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         private const val CODE_DEVICE_UNKNOWN = "device_unknown"
         private const val CODE_PAIRING_REJECTED = "pairing_rejected"
         private const val CODE_PAIRING_TOKEN_USED = "pairing_token_used"
+        private const val CODE_PAIRING_BUSY = "pairing_busy"
         private const val PAIRING_WAIT_MILLIS = 15L * 60_000L
         private const val POLL_INTERVAL_MILLIS = 3_000L
         private const val NANOS_PER_MILLI = 1_000_000L
@@ -344,16 +345,7 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         fun forDevice(settings: ServerSettings): AccountClient = AccountClient(SubsonicHttp.okHttpClient { settings })
 
         /** The refusal code in a failed response's body, or null when the body has none. */
-        @Suppress("SwallowedException")
-        internal fun refusalCode(response: Response<*>): String? {
-            val text = response.errorBody()?.string() ?: return null
-            return try {
-                accountJson.decodeFromString<RefusalBody>(text).error
-            } catch (e: SerializationException) {
-                // The body is not a refusal we know; the caller then reports the HTTP status.
-                null
-            }
-        }
+        internal fun refusalCode(response: Response<*>): String? = refusalCodeOf(response.errorBody()?.string())
 
         /** The id of the key whose prefix starts [apiKey], or null if zero or several match. */
         internal fun matchOwnKeyId(
@@ -368,6 +360,7 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             "This pairing code is invalid or expired. Create a new one on the account page."
         const val PAIRING_REJECTED =
             "The pairing was rejected on the account page. Create a new code there to try again."
+        const val PAIRING_BUSY = "Too many devices are waiting on this QR code. Create a new code on the account page."
         const val TOKEN_ALREADY_USED =
             "This QR code has already been used by another device. Create a new code on the account page."
 
