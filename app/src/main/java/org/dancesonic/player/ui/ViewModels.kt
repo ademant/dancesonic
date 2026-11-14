@@ -36,6 +36,8 @@ import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzDescriptionClient
 import org.dancesonic.player.dance.DanceBrainzException
 import org.dancesonic.player.dance.DanceSuggestion
+import org.dancesonic.player.dance.MeterValue
+import org.dancesonic.player.data.MeterView
 import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.SyncMode
 import org.dancesonic.player.data.SyncResult
@@ -454,6 +456,11 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         container.edits.observeShoes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
 
+    /** The meter and sub-meter by recording MBID, including a meter change not yet sent. */
+    val meters: StateFlow<Map<String, MeterView>> =
+        container.edits.meters.observe()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
+
     /** Every DanceBrainz change not yet confirmed: queued, held for review, or in conflict. */
     val queue: StateFlow<List<EditEntity>> =
         container.edits.observeQueue()
@@ -640,6 +647,22 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         viewModelScope.launch { container.edits.removeDance(mbid, name) }
     }
+
+    /** The meters and sub-meters DanceBrainz offers. Throws [DanceBrainzException] when it cannot be reached. */
+    suspend fun meterOptions(): List<MeterValue> = container.edits.meters.options()
+
+    /** Queues setting the meter of [mbid] to [name], a sub-meter when [parentName] names its meter. */
+    fun setMeter(
+        mbid: String,
+        name: String,
+        parentName: String?,
+    ) {
+        viewModelScope.launch { container.edits.meters.set(mbid, name, parentName) }
+    }
+
+    /** The dance description of [mbid], or null when none is stored. Throws [DanceBrainzException] on failure. */
+    suspend fun danceDescription(mbid: String): String? =
+        DanceBrainzDescriptionClient(container.currentDanceBrainzUrl).descriptionText(mbid)
 
     /** Removes a queued, held or conflicting change from the queue. */
     fun dismissChange(id: Long) {

@@ -36,6 +36,16 @@ data class CurrentDance(
     val qualifier: String,
 )
 
+/**
+ * A meter value of DanceBrainz. A top-level value is a meter such as `8/4`; a value with a [parentId] is a sub-meter
+ * such as `3+3+2` under its meter.
+ */
+data class MeterValue(
+    val tagId: Long,
+    val name: String,
+    val parentId: Long?,
+)
+
 /** The answer to a tag write: [pending] is true when the server held the change for review (a moderated server). */
 data class TagWriteResult(
     val pending: Boolean,
@@ -84,6 +94,24 @@ class DanceBrainzTagsClient internal constructor(
         return TagWriteResult(pending = outcome.change.status == PENDING)
     }
 
+    /** Every meter and sub-meter value of DanceBrainz. The list is public, so no token is needed. */
+    suspend fun meterValues(): List<MeterValue> =
+        danceBrainzCall { service.meterValues() }.map { MeterValue(it.id, it.name, it.parentId) }
+
+    /**
+     * Sets the meter of [mbid] to the value with [tagId], a meter or a sub-meter. The server replaces the recording's
+     * meter with it and derives the meter from a sub-meter's parent.
+     */
+    suspend fun replaceMeter(
+        mbid: String,
+        tagId: Long,
+        credential: DanceBrainzCredential,
+    ): TagWriteResult {
+        val body = ReplaceTagsBody(listOf(ReplaceTagDto(tagId = tagId)))
+        val outcome = danceBrainzCall { service.replace(mbid, METER_TYPE, body, credential.authHeaders()) }
+        return TagWriteResult(pending = outcome.change.status == PENDING)
+    }
+
     /** Replaces all dance tags of [mbid] with [dances]. Tags of other types are left alone. */
     suspend fun replaceDances(
         mbid: String,
@@ -98,6 +126,7 @@ class DanceBrainzTagsClient internal constructor(
     companion object {
         /** The tag type that holds dance names; shared with [DanceBrainzClient.DANCE_TAG_TYPE]. */
         private const val DANCE_TYPE = DanceBrainzClient.DANCE_TAG_TYPE
+        private const val METER_TYPE = DanceBrainzClient.METER_TAG_TYPE
         private const val PENDING = "pending"
     }
 }
@@ -132,6 +161,9 @@ internal interface DanceBrainzTagsService {
         @Body body: AddTagsBody,
         @HeaderMap auth: Map<String, String>,
     ): TagChangeDto
+
+    @GET("api/v1/tag-types/meter/tags")
+    suspend fun meterValues(): List<MeterValueDto>
 
     @PUT("api/v1/recordings/{mbid}/tags")
     suspend fun replace(
@@ -194,8 +226,19 @@ internal data class ReplaceTagsBody(
     val tags: List<ReplaceTagDto>,
 )
 
+/**
+ * One tag of a replace. A qualifier applies to dances only, so it is left out (null) for a meter, and the default
+ * null is not encoded.
+ */
 @Serializable
 internal data class ReplaceTagDto(
     @SerialName("tag_id") val tagId: Long,
-    val qualifier: String,
+    val qualifier: String? = null,
+)
+
+@Serializable
+internal data class MeterValueDto(
+    val id: Long = 0,
+    val name: String = "",
+    @SerialName("parent_id") val parentId: Long? = null,
 )

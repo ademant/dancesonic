@@ -64,6 +64,8 @@ class DanceBrainzClient internal constructor(
                     raters = recording.raters,
                     chapters = recording.chapters.map { it.toDomain() },
                     chaptersVersion = recording.chaptersVersion,
+                    meter = meterOf(recording.tags),
+                    subMeter = subMeterOf(recording.tags),
                 )
         }
     }
@@ -77,6 +79,9 @@ class DanceBrainzClient internal constructor(
 
         /** The tag type that holds dance names. */
         const val DANCE_TAG_TYPE = "dance"
+
+        /** The tag type that holds meters. A sub-meter is a child value of its meter. */
+        const val METER_TAG_TYPE = "meter"
 
         /** DanceBrainz accepts tempos from 1 to 400 bpm. */
         private val BPM_RANGE = 1..400
@@ -199,9 +204,30 @@ internal data class ChapterDanceDto(
     val name: String,
 )
 
-/** One tag on a recording. Only the type and the display name are used; other fields are ignored. */
+/**
+ * One tag on a recording. Only the type, the display name and the path are used; other fields are ignored. [path]
+ * lists the tag's parents, so a sub-meter's path starts with its meter.
+ */
 @Serializable
 internal data class TagDto(
     val type: String,
     val name: String,
+    val path: List<PathItemDto> = emptyList(),
 )
+
+@Serializable
+internal data class PathItemDto(
+    val name: String = "",
+)
+
+/** The meter of a recording: its meter tag's name, or the meter above a sub-meter. Null when it has no meter. */
+private fun meterOf(tags: List<TagDto>): String? {
+    val tag = tags.firstOrNull { it.type == DanceBrainzClient.METER_TAG_TYPE } ?: return null
+    return tag.path.firstOrNull()?.name ?: tag.name
+}
+
+/** The sub-meter of a recording: its meter tag's name when that tag sits under a meter, otherwise null. */
+private fun subMeterOf(tags: List<TagDto>): String? {
+    val tag = tags.firstOrNull { it.type == DanceBrainzClient.METER_TAG_TYPE } ?: return null
+    return tag.name.takeIf { tag.path.isNotEmpty() }
+}

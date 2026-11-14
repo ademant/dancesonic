@@ -19,15 +19,22 @@ interface EditQueueDao {
     @Insert
     suspend fun insert(edit: EditEntity): Long
 
-    /** Queues a shoes change, replacing any older queued shoes change of the same recording. */
+    /**
+     * Queues a shoes or meter change, replacing any older queued change of the same kind for the same recording, so
+     * one recording has one queued shoes rating and one queued meter.
+     */
     @Transaction
-    suspend fun replaceShoes(edit: EditEntity) {
-        deleteShoesFor(edit.mbid)
+    suspend fun replaceQueued(edit: EditEntity) {
+        deleteQueuedFor(edit.kind, edit.mbid)
         insert(edit)
     }
 
-    @Query("DELETE FROM edit_queue WHERE kind = 'shoes' AND mbid = :mbid AND status = 'queued'")
-    suspend fun deleteShoesFor(mbid: String)
+    /** Drops the queued changes of one kind for one recording. Changes already sent or held are kept. */
+    @Query("DELETE FROM edit_queue WHERE kind = :kind AND mbid = :mbid AND status = 'queued'")
+    suspend fun deleteQueuedFor(
+        kind: String,
+        mbid: String,
+    )
 
     @Query("DELETE FROM edit_queue WHERE id = :id")
     suspend fun delete(id: Long)

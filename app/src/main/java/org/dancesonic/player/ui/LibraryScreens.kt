@@ -170,7 +170,6 @@ private fun TrackList(
     listState: LazyListState,
 ) {
     var addingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
-    var editingTrack by remember { mutableStateOf<TrackWithTempo?>(null) }
     var previewing by remember { mutableStateOf<TrackWithTempo?>(null) }
     val shoesState by libraryVm.shoes.collectAsStateWithLifecycle()
     val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
@@ -189,7 +188,6 @@ private fun TrackList(
                         onPlay = { onPlay(tracks.indexOf(row)) },
                         onInfo = { previewing = row },
                         onAddToPlaylist = { addingTrack = row },
-                        onEdit = { editingTrack = row },
                     ),
             )
         }
@@ -208,17 +206,6 @@ private fun TrackList(
             onPlay = { onPlay(tracks.indexOf(row)) },
             onDismiss = { previewing = null },
         )
-    }
-    editingTrack?.let { row ->
-        val mbid = row.track.mbid
-        if (mbid != null) {
-            TrackEditDialog(
-                title = row.track.title,
-                mbid = mbid,
-                libraryVm = libraryVm,
-                onDismiss = { editingTrack = null },
-            )
-        }
     }
 }
 
@@ -300,12 +287,11 @@ internal fun keptListState(
     return state
 }
 
-/** What a track row does: a tap plays it; the buttons show its info, edit it or add it to a playlist. */
+/** What a track row does: a tap plays it; the buttons show its info, or add it to a playlist. */
 private class TrackRowActions(
     val onPlay: () -> Unit,
     val onInfo: () -> Unit,
     val onAddToPlaylist: () -> Unit,
-    val onEdit: () -> Unit,
 )
 
 @Composable
@@ -328,7 +314,6 @@ private fun TrackRow(
             shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
         TextButton(onClick = actions.onInfo) { Text("Info") }
-        TextButton(onClick = actions.onEdit, enabled = shoes.canRate) { Text("Edit") }
         TextButton(onClick = actions.onAddToPlaylist) { Text("+ Playlist") }
     }
     HorizontalDivider()

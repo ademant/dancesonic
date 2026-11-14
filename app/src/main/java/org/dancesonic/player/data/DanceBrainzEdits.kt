@@ -13,6 +13,8 @@ import org.dancesonic.player.dance.DanceBrainzRatingsClient
 import org.dancesonic.player.dance.DanceBrainzTagsClient
 import org.dancesonic.player.dance.DanceBrainzTokenStore
 import org.dancesonic.player.dance.DanceSuggestion
+import org.dancesonic.player.dance.resolveMeter
+import org.dancesonic.player.data.db.DanceLookupDao
 import org.dancesonic.player.data.db.DanceMetadataDao
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.EditEntity
@@ -30,6 +32,17 @@ data class ShoesView(
     val mine: Int?,
     val median: Double?,
     val raters: Int,
+    val pending: Boolean,
+    val error: String?,
+)
+
+/**
+ * What the phone shows for one recording's meter. [meter] and [subMeter] already include a queued change; [pending]
+ * is true while that change waits to be sent, and [error] is why the last send failed.
+ */
+data class MeterView(
+    val meter: String?,
+    val subMeter: String?,
     val pending: Boolean,
     val error: String?,
 )
@@ -57,7 +70,17 @@ class DanceBrainzEdits(
     private val ratings: ShoesRatingDao = database.shoesRatingDao()
     private val queue: EditQueueDao = database.editQueueDao()
     private val danceMetadata: DanceMetadataDao = database.danceMetadataDao()
+    private val lookups: DanceLookupDao = database.danceLookupDao()
     private val flushLock = Mutex()
+
+    /** The meter of each recording: what it shows, the choices DanceBrainz offers, and setting one. */
+    val meters: MeterEdits =
+        MeterEdits(
+            database = database,
+            tags = { newClients(baseUrl()).tags },
+            flush = { flush() },
+            clock = clock,
+        )
 
     /** The shoes state of every recording with a rating read or a shoes change queued, by MBID. */
     fun observeShoes(): Flow<Map<String, ShoesView>> =
@@ -145,7 +168,7 @@ class DanceBrainzEdits(
     suspend fun flush(): Int =
         flushLock.withLock {
             val credential = tokens.credential.first() ?: return@withLock queue.queuedCount()
-            val sender = EditSender(ratings, queue, newClients(baseUrl()), credential)
+            val sender = EditSender(ratings, lookups, queue, newClients(baseUrl()), credential)
             for (edit in queue.withStatus(EditStatus.QUEUED)) {
                 try {
                     sender.send(edit)
@@ -205,7 +228,7 @@ class DanceBrainzEdits(
         value: Int?,
     ) {
         require(MBID_PATTERN.matches(mbid)) { NOT_RATEABLE }
-        queue.replaceShoes(EditEntity(kind = EditKind.SHOES, mbid = mbid, value = value, queuedAt = clock()))
+        queue.replaceQueued(EditEntity(kind = EditKind.SHOES, mbid = mbid, value = value, queuedAt = clock()))
     }
 
     private fun shoesView(
@@ -238,6 +261,7 @@ class DanceBrainzEdits(
  */
 private class EditSender(
     private val ratings: ShoesRatingDao,
+    private val lookups: DanceLookupDao,
     private val queue: EditQueueDao,
     private val clients: DanceBrainzClients,
     private val credential: DanceBrainzCredential,
@@ -247,7 +271,30 @@ private class EditSender(
             EditKind.SHOES -> sendShoes(edit)
             EditKind.DANCE_ADD -> sendAdd(edit)
             EditKind.DANCE_REMOVE -> sendRemove(edit)
+            EditKind.METER -> sendMeter(edit)
         }
+    }
+
+    /**
+     * Sets the meter to the value the change names. A value DanceBrainz no longer has is a conflict: nothing is sent,
+     * and the user is asked to choose it again.
+     */
+    private suspend fun sendMeter(edit: EditEntity) {
+        val name = edit.path.orEmpty()
+        val parent = edit.meterParent
+        val value = resolveMeter(clients.tags.meterValues(), name, parent)
+        if (value == null) {
+            queue.markStatus(edit.id, EditStatus.CONFLICT)
+            queue.recordError(edit.id, METER_GONE)
+            return
+        }
+        val result = clients.tags.replaceMeter(edit.mbid, value.tagId, credential)
+        if (result.pending) {
+            queue.markStatus(edit.id, EditStatus.PENDING_REVIEW)
+            return
+        }
+        queue.delete(edit.id)
+        lookups.setMeter(edit.mbid, meter = parent ?: name, subMeter = if (parent != null) name else null)
     }
 
     private suspend fun sendShoes(edit: EditEntity) {
@@ -309,6 +356,7 @@ private class EditSender(
 
     private companion object {
         const val NAME_SEPARATOR = "\n"
+        const val METER_GONE = "DanceBrainz no longer has this meter. Dismiss this and choose the meter again."
         const val CONFLICT =
             "The dances changed on DanceBrainz since you saw them, so nothing was sent. " +
                 "Dismiss this and remove the dance again if you still want it."

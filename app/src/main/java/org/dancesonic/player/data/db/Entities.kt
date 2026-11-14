@@ -95,6 +95,9 @@ data class DanceLookupEntity(
     val raters: Int? = null,
     /** The version of the recording's chapters when last looked up; a chapter write sends it as `If-Match`. */
     val chaptersVersion: String? = null,
+    /** The meter of the recording, such as `8/4`, and its sub-meter, such as `3+3+2`. Both null when none is set. */
+    val meter: String? = null,
+    val subMeter: String? = null,
 )
 
 /**
@@ -138,6 +141,9 @@ object EditKind {
 
     /** A dance removed from a recording, named [EditEntity.danceName]. */
     const val DANCE_REMOVE = "dance_remove"
+
+    /** The meter set to [EditEntity.path], with [EditEntity.meterParent] above it when it is a sub-meter. */
+    const val METER = "meter"
 }
 
 /** The states in [EditEntity.status]. */
@@ -171,6 +177,8 @@ data class EditEntity(
     val path: String? = null,
     val qualifier: String? = null,
     val expectedDances: String? = null,
+    /** For a meter change: the meter above a sub-meter, or null when [path] is the meter itself. */
+    val meterParent: String? = null,
     val status: String = EditStatus.QUEUED,
     val queuedAt: Long,
     val lastError: String? = null,

@@ -308,6 +308,19 @@ internal fun ServerAddressField(
     )
 }
 
+/** Previous, play or pause, and next. Shared by the player bar and the now-playing sheet. */
+@Composable
+internal fun TransportRow(player: PlayerController) {
+    val state by player.state.collectAsStateWithLifecycle()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
+        Spacer(Modifier.width(8.dp))
+        Button(onClick = { player.togglePlayPause() }) { Text(if (state.isPlaying) "Pause" else "Play") }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { player.next() }) { Text("Next") }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerBar(
@@ -331,13 +344,7 @@ fun PlayerBar(
         )
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SeekBar(player, libraryVm.nowPlayingWaveform)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = { player.togglePlayPause() }) { Text(if (state.isPlaying) "Pause" else "Play") }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { player.next() }) { Text("Next") }
-        }
+        TransportRow(player)
         Row(verticalAlignment = Alignment.CenterVertically) {
             val label =
                 if (bpmMode) {
