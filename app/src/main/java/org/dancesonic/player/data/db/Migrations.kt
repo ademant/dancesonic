@@ -154,3 +154,16 @@ private const val FROM_9 = 9
 private const val TO_10 = 10
 private const val FROM_10 = 10
 private const val TO_11 = 11
+
+/** Meters: each looked-up recording keeps its meter and sub-meter, and a queued meter change keeps its parent meter. */
+val MIGRATION_11_12 =
+    object : Migration(FROM_11, TO_12) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `dance_lookup` ADD COLUMN `meter` TEXT")
+            db.execSQL("ALTER TABLE `dance_lookup` ADD COLUMN `subMeter` TEXT")
+            db.execSQL("ALTER TABLE `edit_queue` ADD COLUMN `meterParent` TEXT")
+        }
+    }
+
+private const val FROM_11 = 11
+private const val TO_12 = 12

@@ -29,6 +29,14 @@ class DanceBrainzDescriptionClient internal constructor(
             if (e.httpCode == NOT_FOUND) false else throw e
         }
 
+    /** The description text of [mbid], or null when none is stored. Other failures throw [DanceBrainzException]. */
+    suspend fun descriptionText(mbid: String): String? =
+        try {
+            danceBrainzCall { service.description(mbid) }.text
+        } catch (e: DanceBrainzException) {
+            if (e.httpCode == NOT_FOUND) null else throw e
+        }
+
     private companion object {
         const val NOT_FOUND = 404
     }

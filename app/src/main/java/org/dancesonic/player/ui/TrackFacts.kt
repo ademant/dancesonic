@@ -1,6 +1,8 @@
 package org.dancesonic.player.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -16,11 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.TrackDetail
 import org.dancesonic.player.playback.PlayerController
 
@@ -37,29 +37,8 @@ internal fun formatLength(seconds: Int): String {
 }
 
 /**
- * The shoes rating shown for a track. The viewer's own rating comes first; the public median is the fallback. The
- * own rating is only present while signed in, so the same rule holds with and without sign-in.
- */
-internal fun shoesFacts(
-    view: ShoesView?,
-    hasMbid: Boolean,
-): String {
-    if (!hasMbid) return "No shoes rating: no MusicBrainz ID"
-    val mine = view?.mine
-    val median = view?.median
-    val raters = view?.raters ?: 0
-    val text =
-        when {
-            mine != null -> "Shoes rating: $mine (yours)"
-            median != null -> "Shoes rating: median ${formatOneDecimal(median)} from $raters raters"
-            else -> "No shoes rating yet"
-        }
-    return if (view?.pending == true) "$text · not sent yet" else text
-}
-
-/**
- * The cover, title, release, artist and dance of a track, with a link to its dance description when DanceBrainz has
- * one. The link opens the recording's DanceBrainz page.
+ * The fixed facts of a track, at the top of its detail view: the cover, title, release and artist. Every line after
+ * the title has the same font size, as the editable rows below it.
  */
 @Composable
 internal fun TrackHeader(
@@ -68,13 +47,6 @@ internal fun TrackHeader(
     coverSize: Dp,
 ) {
     val track = detail.track
-    val descriptionUrl by produceState<String?>(null, track.mbid) {
-        value =
-            track.mbid?.let { mbid ->
-                if (libraryVm.hasDanceDescription(mbid)) libraryVm.danceBrainzPageUrl(mbid) else null
-            }
-    }
-    val uriHandler = LocalUriHandler.current
     Column(Modifier.fillMaxWidth()) {
         CoverImage(
             url = libraryVm.coverUrl(track.albumId, COVER_PX_LARGE),
@@ -82,33 +54,35 @@ internal fun TrackHeader(
             size = coverSize,
         )
         Text(track.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-        detail.albumName?.let { Text("Release: $it", style = MaterialTheme.typography.bodyMedium) }
-        Text("Artist: ${track.artistName}", style = MaterialTheme.typography.bodyMedium)
-        Text(
-            if (detail.danceTypes.isEmpty()) {
-                "Dance: none assigned"
-            } else {
-                "Dance: ${detail.danceTypes.joinToString(", ")}"
-            },
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        descriptionUrl?.let { url ->
-            TextButton(onClick = { uriHandler.openUri(url) }) { Text("Dance description") }
-        }
+        detail.albumName?.let { Text("Release: $it", style = MaterialTheme.typography.bodyLarge) }
+        Text("Artist: ${track.artistName}", style = MaterialTheme.typography.bodyLarge)
     }
 }
 
-/** The facts about one track that are not in its header: length, tempo and shoes rating. */
+/** The length and tempo of a track, the fixed facts under its header. */
 @Composable
-internal fun TrackFacts(
-    detail: TrackDetail,
-    shoes: ShoesView?,
-) {
+internal fun TrackFacts(detail: TrackDetail) {
     val track = detail.track
     Column(Modifier.fillMaxWidth()) {
-        Text(track.durationSec?.let { "Length ${formatLength(it)}" } ?: "Length unknown")
-        Text(detail.bpm?.let { "Tempo $it BPM" } ?: "Tempo unknown")
-        Text(shoesFacts(shoes, hasMbid = track.mbid != null))
+        Text(
+            track.durationSec?.let { "Length ${formatLength(it)}" } ?: "Length unknown",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(detail.bpm?.let { "Tempo $it BPM" } ?: "Tempo unknown", style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** The editable entries of a track, or a note why it cannot be edited (no MusicBrainz ID). */
+@Composable
+internal fun TrackEntries(
+    detail: TrackDetail,
+    libraryVm: LibraryViewModel,
+) {
+    val mbid = detail.track.mbid
+    if (mbid == null) {
+        Text("Cannot be edited: no MusicBrainz ID", style = MaterialTheme.typography.bodyLarge)
+    } else {
+        TrackDetailEditor(mbid, libraryVm)
     }
 }
 
@@ -123,7 +97,6 @@ internal fun TrackPreviewDialog(
     val detail by produceState<TrackDetail?>(initialValue = null, trackId) {
         value = libraryVm.trackDetail(trackId)
     }
-    val shoes by libraryVm.shoes.collectAsStateWithLifecycle()
     AlertDialog(
         onDismissRequest = onDismiss,
         text = {
@@ -133,7 +106,8 @@ internal fun TrackPreviewDialog(
                     Text("Loading…")
                 } else {
                     TrackHeader(current, libraryVm, coverSize = PREVIEW_COVER)
-                    TrackFacts(current, current.track.mbid?.let { shoes[it] })
+                    TrackFacts(current)
+                    TrackEntries(current, libraryVm)
                 }
             }
         },
@@ -160,21 +134,23 @@ internal fun NowPlayingSheet(
     onDismiss: () -> Unit,
 ) {
     val detail by libraryVm.nowPlaying.collectAsStateWithLifecycle()
-    val shoes by libraryVm.shoes.collectAsStateWithLifecycle()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.fillMaxHeight(),
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
+            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
         ) {
             val current = detail
             if (current == null) {
                 Text("Nothing playing")
             } else {
                 TrackHeader(current, libraryVm, coverSize = SHEET_COVER)
-                TrackFacts(current, current.track.mbid?.let { shoes[it] })
+                TrackFacts(current)
+                TrackEntries(current, libraryVm)
                 SeekBar(player, libraryVm.nowPlayingWaveform)
+                TransportRow(player)
                 current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
             }
         }

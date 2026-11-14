@@ -10,6 +10,10 @@ data class RecordingDance(
     val raters: Int?,
     /** The recording's chapter marks, in order. Empty when it has none. */
     val chapters: List<DanceChapter> = emptyList(),
+    /** The meter tag's name, such as `8/4`, or null when the recording has none. */
+    val meter: String? = null,
+    /** The sub-meter under [meter], such as `3+3+2`, or null when none is set. */
+    val subMeter: String? = null,
     /** Version of the chapters; a chapter write sends it back as `If-Match`. Null when the server has no chapters. */
     val chaptersVersion: String? = null,
 )

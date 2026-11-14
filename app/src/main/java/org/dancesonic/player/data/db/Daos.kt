@@ -213,6 +213,13 @@ interface DanceMetadataDao {
     suspend fun insertAll(rows: List<DanceMetadataEntity>)
 }
 
+/** The meter columns of one looked-up recording. */
+data class MeterRow(
+    val mbid: String,
+    val meter: String?,
+    val subMeter: String?,
+)
+
 @Dao
 interface DanceLookupDao {
     /** The MBIDs among [mbids] that were looked up at or after [since]. */
@@ -230,6 +237,18 @@ interface DanceLookupDao {
     suspend fun setChaptersVersion(
         mbid: String,
         version: String?,
+    )
+
+    /** The meter and sub-meter of every looked-up recording, for the detail views. */
+    @Query("SELECT mbid, meter, subMeter FROM dance_lookup")
+    fun observeMeters(): Flow<List<MeterRow>>
+
+    /** Records the meter a send has just set, so the detail view shows it without another lookup. */
+    @Query("UPDATE dance_lookup SET meter = :meter, subMeter = :subMeter WHERE mbid = :mbid")
+    suspend fun setMeter(
+        mbid: String,
+        meter: String?,
+        subMeter: String?,
     )
 
     /** The chapters version of one recording from its last lookup, or null when unknown. */
