@@ -119,14 +119,7 @@ private fun LibraryToolbar(
     onOpenConfig: () -> Unit,
 ) {
     LaunchedEffect(Unit) { connectVm.checkForChanges() }
-    Row(
-        Modifier.fillMaxWidth().padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text("Library", style = MaterialTheme.typography.titleMedium)
-        TextButton(onClick = onOpenConfig) { Text("Config") }
-    }
+    TabHeader("Library", onOpenConfig)
 }
 
 @Composable
@@ -234,6 +227,7 @@ fun DanceScreen(
     vm: LibraryViewModel,
     player: PlayerController,
     playlistVm: PlaylistViewModel,
+    onOpenConfig: () -> Unit,
 ) {
     val danceTypes by vm.danceTypes.collectAsStateWithLifecycle()
     var danceType by rememberSaveable { mutableStateOf<String?>(null) }
@@ -246,7 +240,9 @@ fun DanceScreen(
             if (selected != null) add(Crumb(selected, current = true))
         }
     Column(Modifier.fillMaxSize()) {
-        Breadcrumbs(crumbs)
+        TabHeader("Dance", onOpenConfig)
+        // The header names the tab; the path only appears once a dance is open.
+        if (selected != null) Breadcrumbs(crumbs)
         if (selected == null) {
             if (danceTypes.isEmpty()) {
                 EmptyHint(

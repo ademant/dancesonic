@@ -84,7 +84,7 @@ class LibraryScreensTest {
         val library = host.create { LibraryViewModel(container) }
         val playlists = host.create { PlaylistViewModel(container) }
         composeRule.setContent {
-            MaterialTheme { DanceScreen(library, container.player, playlists) }
+            MaterialTheme { DanceScreen(library, container.player, playlists, onOpenConfig = {}) }
         }
 
         composeRule.waitUntilAtLeastOneExists(hasText("W · 1"))
