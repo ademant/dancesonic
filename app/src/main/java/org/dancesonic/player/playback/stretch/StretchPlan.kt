@@ -111,15 +111,22 @@ object StretchPlanner {
             if (strengths[i] < STRENGTH_THRESHOLD) continue
             val start = max(0L, (onsetFrames[i] - before).roundToLong())
             val end = (onsetFrames[i] + after).roundToLong()
-            if (end <= start) continue
-            val last = windows.lastOrNull()
-            if (last != null && start <= last.last) {
-                windows[windows.size - 1] = last.first..max(last.last, end)
-            } else {
-                windows += start..end
-            }
+            if (end > start) addWindow(windows, start..end)
         }
         return windows
+    }
+
+    /** Adds [window] to [windows], merging it into the last window when they overlap. Windows arrive in order. */
+    private fun addWindow(
+        windows: MutableList<LongRange>,
+        window: LongRange,
+    ) {
+        val last = windows.lastOrNull()
+        if (last != null && window.first <= last.last) {
+            windows[windows.size - 1] = last.first..max(last.last, window.last)
+        } else {
+            windows += window
+        }
     }
 
     /**

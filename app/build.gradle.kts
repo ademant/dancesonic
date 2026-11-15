@@ -1,3 +1,19 @@
+// The version comes from git, so Config shows the commit that was built: the name is the base version with the short
+// commit (and `-dirty` for uncommitted tracked changes); the code is the commit count, which only grows. Without git
+// (for example a source archive) the base name and code 1 are used.
+fun gitOutput(vararg args: String): String? =
+    runCatching {
+        val process = ProcessBuilder(listOf("git") + args).directory(rootDir).start()
+        val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        if (process.waitFor() == 0) text.ifEmpty { null } else null
+    }.getOrNull()
+
+val baseVersionName = "0.1.0"
+val gitCommit = gitOutput("rev-parse", "--short", "HEAD")
+val gitDirty = gitOutput("status", "--porcelain", "--untracked-files=no")?.isNotEmpty() == true
+val appVersionName = gitCommit?.let { "$baseVersionName-$it" + if (gitDirty) "-dirty" else "" } ?: baseVersionName
+val appVersionCode = gitOutput("rev-list", "--count", "HEAD")?.toIntOrNull() ?: 1
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -27,8 +43,8 @@ android {
         applicationId = "org.dancesonic.player"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // The time-stretch library (Signalsmith Stretch). Phones are ARM; x86_64 is for the emulator.
