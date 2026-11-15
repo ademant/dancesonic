@@ -13,7 +13,7 @@ class NativeTimeStretcher(
 ) : TimeStretcher {
     private val bytesPerFrame = channelCount * Short.SIZE_BYTES
     private var handle: Long = nativeCreate(channelCount, sampleRate)
-    private var scratch: ByteBuffer = ByteBuffer.allocateDirect(0)
+    private val scratch = ScratchBuffer()
 
     init {
         check(handle != 0L) { "Could not create the time stretcher" }
@@ -24,7 +24,7 @@ class NativeTimeStretcher(
         pitch: Float,
         plan: StretchPlan,
     ) {
-        val handle = live()
+        val handle = liveHandle
         nativeSetPlan(handle, plan.blockSamples, plan.intervalSamples, plan.breakIn, plan.breakOut)
         nativeStart(handle, speed, pitch)
     }
@@ -35,33 +35,33 @@ class NativeTimeStretcher(
         val bytes = frames * bytesPerFrame
         val queued =
             if (input.isDirect) {
-                nativeQueueInput(live(), input, input.position(), frames)
+                nativeQueueInput(liveHandle, input, input.position(), frames)
             } else {
                 // Decoder output is direct; a heap buffer only comes from unusual upstream processors.
-                val direct = scratchOf(bytes)
+                val direct = scratch.of(bytes)
                 val slice = input.duplicate()
                 slice.limit(input.position() + bytes)
                 direct.put(slice)
-                nativeQueueInput(live(), direct, 0, frames)
+                nativeQueueInput(liveHandle, direct, 0, frames)
             }
         check(queued) { "Audio buffer has no native address" }
         input.position(input.position() + bytes)
     }
 
-    override fun queueEndOfStream() = nativeQueueEndOfStream(live())
+    override fun queueEndOfStream() = nativeQueueEndOfStream(liveHandle)
 
     override val availableFrames: Int
-        get() = nativeAvailableFrames(live())
+        get() = nativeAvailableFrames(liveHandle)
 
     override fun readOutput(output: ByteBuffer) {
         check(output.isDirect) { "Output buffer must be direct" }
-        val frames = nativeReadOutput(live(), output, output.position(), output.remaining() / bytesPerFrame)
+        val frames = nativeReadOutput(liveHandle, output, output.position(), output.remaining() / bytesPerFrame)
         check(frames >= 0) { "Audio buffer has no native address" }
         output.position(output.position() + frames * bytesPerFrame)
     }
 
     override val isEnded: Boolean
-        get() = nativeIsEnded(live())
+        get() = nativeIsEnded(liveHandle)
 
     override fun close() {
         if (handle != 0L) {
@@ -70,16 +70,12 @@ class NativeTimeStretcher(
         }
     }
 
-    private fun live(): Long {
-        check(handle != 0L) { "Time stretcher was closed" }
-        return handle
-    }
-
-    private fun scratchOf(bytes: Int): ByteBuffer {
-        if (scratch.capacity() < bytes) scratch = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
-        scratch.clear()
-        return scratch
-    }
+    /** The native handle, or an error once the stretcher is closed. A property, so the class keeps few functions. */
+    private val liveHandle: Long
+        get() {
+            check(handle != 0L) { "Time stretcher was closed" }
+            return handle
+        }
 
     private external fun nativeCreate(
         channels: Int,
@@ -126,5 +122,17 @@ class NativeTimeStretcher(
         init {
             System.loadLibrary("dancestretch")
         }
+    }
+}
+
+/** A direct buffer for handing input to the native side, reused and grown when a call needs more. */
+private class ScratchBuffer {
+    private var buffer: ByteBuffer = ByteBuffer.allocateDirect(0)
+
+    /** A cleared buffer of at least [bytes] bytes in native byte order. */
+    fun of(bytes: Int): ByteBuffer {
+        if (buffer.capacity() < bytes) buffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
+        buffer.clear()
+        return buffer
     }
 }
