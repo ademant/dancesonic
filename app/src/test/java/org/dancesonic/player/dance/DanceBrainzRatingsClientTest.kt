@@ -133,5 +133,32 @@ class DanceBrainzRatingsClientTest {
         }
     }
 
+    @Test
+    fun `a removed device is told to pair again (#69)`() {
+        TestSubsonicServer().use { server ->
+            server.server.enqueue(
+                MockResponse().setResponseCode(401).setBody("""{"error":{"code":"device_unknown","message":"x"}}"""),
+            )
+            val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
+
+            val error =
+                assertThrows(DanceBrainzException::class.java) {
+                    runBlocking { client.setShoes(mbid, value = 2, credential = tokenCredential("dbz_t_1234567890")) }
+                }
+
+            assertEquals(401, error.httpCode)
+            assertEquals("This phone was removed on the DanceBrainz account page. Pair it again.", error.message)
+        }
+    }
+
+    @Test
+    fun `refusal codes about this phone's sign-in have their own messages`() {
+        assertTrue(refusalMessage("pairing_pending").orEmpty().contains("not approved yet"))
+        assertTrue(refusalMessage("proof_replayed").orEmpty().contains("repeated request"))
+        assertTrue(refusalMessage("proof_invalid").orEmpty().contains("Pair the phone again"))
+        assertNull(refusalMessage("something_else"))
+        assertNull(refusalMessage(null))
+    }
+
     private fun json(body: String): MockResponse = MockResponse().setResponseCode(200).setBody(body)
 }
