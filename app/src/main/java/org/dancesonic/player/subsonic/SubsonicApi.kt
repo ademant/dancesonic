@@ -85,7 +85,7 @@ class ServerSettings(
  * [ApiKeyInterceptor] adds it when the request is sent, so the URL itself is not a secret.
  */
 fun ServerSettings.streamUrl(songId: String): HttpUrl =
-    baseUrl.resolve("rest/stream.view")!!
+    baseUrl.endpoint(STREAM_PATH)
         .newBuilder()
         .addQueryParameter("id", songId)
         .build()
@@ -98,11 +98,21 @@ fun ServerSettings.coverArtUrl(
     albumId: String,
     size: Int,
 ): HttpUrl =
-    baseUrl.resolve("rest/getCoverArt.view")!!
+    baseUrl.endpoint(COVER_ART_PATH)
         .newBuilder()
         .addQueryParameter("id", albumId)
         .addQueryParameter("size", size.toString())
         .build()
+
+private const val STREAM_PATH = "rest/stream.view"
+private const val COVER_ART_PATH = "rest/getCoverArt.view"
+
+/**
+ * The fixed Subsonic endpoint [path] under this base URL. A failed resolution is an [IllegalStateException] that
+ * names the path only, never the server address, so it is safe to log or show.
+ */
+internal fun HttpUrl.endpoint(path: String): HttpUrl =
+    resolve(path) ?: error("Could not build the server address for $path")
 
 /**
  * Whether a server at this URL may be used. `https://` always may. `http://` is allowed only to a private network
