@@ -1,13 +1,9 @@
 package org.dancesonic.player.dance
 
-/** What DanceBrainz says about one recording. */
+/** What DanceBrainz says about one recording. Tempo is not taken from DanceBrainz: folksonic measures it. */
 data class RecordingDance(
     /** Names of the recording's dance tags. Empty when the recording has none. */
     val danceTypes: List<String>,
-    /** Public tempo in beats per minute, or null when nobody has reported one. */
-    val bpm: Int?,
-    /** Number of tempo reports behind [bpm]. */
-    val raters: Int?,
     /** The recording's chapter marks, in order. Empty when it has none. */
     val chapters: List<DanceChapter> = emptyList(),
     /** The meter tag's name, such as `8/4`, or null when the recording has none. */

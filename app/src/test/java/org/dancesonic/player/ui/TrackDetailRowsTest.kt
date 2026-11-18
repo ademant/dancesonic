@@ -10,6 +10,7 @@ import org.dancesonic.player.data.MeterView
 import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.EditKind
+import org.dancesonic.player.data.db.EditStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -29,6 +30,7 @@ class TrackDetailRowsTest {
         canEdit: Boolean = true,
         meter: MeterView? = MeterView("8/4", "3+3+2", pending = false, error = null),
         actions: TrackEntryActions = TrackEntryActions(),
+        changes: FieldChanges = FieldChanges(),
     ) {
         val shoes = ShoesView(mine = 3, median = null, raters = 0, pending = false, error = null)
         val entries =
@@ -38,6 +40,7 @@ class TrackDetailRowsTest {
                 hasDescription = hasDescription,
                 shoes = shoes,
                 canEdit = canEdit,
+                changes = changes,
             )
         composeRule.setContent { TrackDetailRows(entries = entries, actions = actions) }
     }
@@ -93,10 +96,73 @@ class TrackDetailRowsTest {
     }
 
     @Test
+    fun `each row shows where its own change stands (#75)`() {
+        val changes = FieldChanges(dances = FieldChange.HELD, meter = FieldChange.QUEUED, shoes = FieldChange.CONFLICT)
+        show(changes = changes)
+
+        composeRule.onNodeWithText("Dance: gavotte · held for review").assertIsDisplayed()
+        composeRule.onNodeWithText("Meter: 8/4 - 3+3+2 · not sent yet").assertIsDisplayed()
+        composeRule.onNodeWithText("Shoes (changed on DanceBrainz, not sent):").assertIsDisplayed()
+    }
+
+    @Test
+    fun `rows without an open change show no state`() {
+        show()
+
+        composeRule.onNodeWithText("Dance: gavotte").assertIsDisplayed()
+        composeRule.onNodeWithText("Meter: 8/4 - 3+3+2").assertIsDisplayed()
+        composeRule.onNodeWithText("Shoes:").assertIsDisplayed()
+    }
+
+    @Test
     fun `the shoes are five, one for each point of the rating`() {
         show()
 
         composeRule.onAllNodesWithText("👟").assertCountEquals(5)
+    }
+}
+
+/** Which field each queued change belongs to, and which state its row shows (#75). */
+class FieldChangesTest {
+    private fun edit(
+        kind: String,
+        status: String,
+        mbid: String = "m",
+    ) = EditEntity(kind = kind, mbid = mbid, status = status, queuedAt = 0)
+
+    @Test
+    fun `changes are sorted by field`() {
+        val queue =
+            listOf(
+                edit(EditKind.DANCE_ADD, EditStatus.PENDING_REVIEW),
+                edit(EditKind.METER, EditStatus.QUEUED),
+                edit(EditKind.SHOES, EditStatus.CONFLICT),
+            )
+
+        assertEquals(
+            FieldChanges(dances = FieldChange.HELD, meter = FieldChange.QUEUED, shoes = FieldChange.CONFLICT),
+            fieldChanges(queue, "m"),
+        )
+    }
+
+    @Test
+    fun `the change to act on wins when a field has several`() {
+        val queue =
+            listOf(
+                edit(EditKind.DANCE_ADD, EditStatus.PENDING_REVIEW),
+                edit(EditKind.DANCE_REMOVE, EditStatus.QUEUED),
+            )
+        assertEquals(FieldChange.QUEUED, fieldChanges(queue, "m").dances)
+
+        val withConflict = queue + edit(EditKind.DANCE_ADD, EditStatus.CONFLICT)
+        assertEquals(FieldChange.CONFLICT, fieldChanges(withConflict, "m").dances)
+    }
+
+    @Test
+    fun `another track's changes do not show`() {
+        val queue = listOf(edit(EditKind.SHOES, EditStatus.QUEUED, mbid = "other"))
+
+        assertEquals(FieldChanges(), fieldChanges(queue, "m"))
     }
 }
 

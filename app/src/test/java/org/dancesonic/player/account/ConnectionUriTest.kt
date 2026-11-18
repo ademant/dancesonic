@@ -60,11 +60,24 @@ class ConnectionUriTest {
     fun `plain http server address is rejected`() {
         val code = "dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123"
 
-        assertFailsWithMessage(
-            "The server address must start with https://, or http:// for a private network address",
-        ) {
-            ConnectionUri.parse(code)
-        }
+        assertFailsWithMessage(ServerUrl.HTTP_NOT_PRIVATE) { ConnectionUri.parse(code) }
+    }
+
+    @Test
+    fun `plain http to a private server needs the opt-in (#84)`() {
+        val code = "dancesonic://connect?server=http%3A%2F%2F192.168.1.20%3A4533%2F&key=key-123"
+
+        assertFailsWithMessage(ServerUrl.HTTP_NOT_ALLOWED) { ConnectionUri.parse(code) }
+        val shared = ConnectionUri.parse(code, allowCleartext = true)
+        assertEquals("http://192.168.1.20:4533/", shared.server.baseUrl.toString())
+        assertTrue(shared.server.allowCleartext)
+    }
+
+    @Test
+    fun `plain http to a public server is rejected even with the opt-in`() {
+        val code = "dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123"
+
+        assertFailsWithMessage(ServerUrl.HTTP_NOT_PRIVATE) { ConnectionUri.parse(code, allowCleartext = true) }
     }
 
     @Test

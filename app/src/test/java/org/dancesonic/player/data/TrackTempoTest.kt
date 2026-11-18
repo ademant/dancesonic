@@ -41,25 +41,25 @@ class TrackTempoTest {
     }
 
     @Test
-    fun `the server's tempo is shown, and DanceBrainz's only when the server has none`() =
+    fun `only the server's tempo is shown, never one from DanceBrainz (#82)`() =
         runBlocking(Dispatchers.IO) {
             seedTrack(id = "s-1", mbid = "rec-1", bpm = 118)
             seedTrack(id = "s-2", mbid = "rec-2", bpm = null)
             seedTrack(id = "s-3", mbid = "rec-3", bpm = null)
             seedTrack(id = "s-4", mbid = null, bpm = null)
-            db.danceLookupDao().upsert(DanceLookupEntity("rec-1", checkedAt = 1L, bpm = 90, raters = 2))
-            db.danceLookupDao().upsert(DanceLookupEntity("rec-2", checkedAt = 1L, bpm = 90, raters = 2))
+            db.danceLookupDao().upsert(DanceLookupEntity("rec-1", checkedAt = 1L))
+            db.danceLookupDao().upsert(DanceLookupEntity("rec-2", checkedAt = 1L))
 
             val tempos = db.trackDao().observeByAlbumWithTempo("al-1").first().associate { it.track.id to it.tempoBpm }
 
             assertEquals(118, tempos["s-1"])
-            assertEquals(90, tempos["s-2"])
+            assertNull(tempos["s-2"])
             assertNull(tempos["s-3"])
             assertNull(tempos["s-4"])
         }
 
     @Test
-    fun `a song's bpm from folksonic reaches the track during a sync, and DanceBrainz fills the rest`() {
+    fun `a song's bpm from folksonic reaches the track during a sync`() {
         TestSubsonicServer().use { server ->
             server.enqueueJson(ARTISTS)
             server.enqueueJson(ALBUM_LIST_ONE)

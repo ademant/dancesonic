@@ -51,6 +51,11 @@ class ServerSettings(
      * See [LanTls]. Null for every other server.
      */
     val tlsPin: String? = null,
+    /**
+     * True when the user allowed plain http to a server on a private network, after a warning that http is not
+     * encrypted (#84). Off by default; without it only https is accepted.
+     */
+    val allowCleartext: Boolean = false,
 ) {
     /** Connects with an API key. */
     constructor(
@@ -58,10 +63,13 @@ class ServerSettings(
         apiKey: String,
         keyInHeader: Boolean = false,
         tlsPin: String? = null,
-    ) : this(baseUrl, ServerAuth.ApiKey(apiKey), keyInHeader, tlsPin)
+        allowCleartext: Boolean = false,
+    ) : this(baseUrl, ServerAuth.ApiKey(apiKey), keyInHeader, tlsPin, allowCleartext)
 
     init {
-        require(baseUrl.isAllowedServer()) { "Server must use https, or http on a private network address" }
+        require(baseUrl.isAllowedServer(allowCleartext)) {
+            "Server must use https, or http on a private network address with http allowed"
+        }
         require(tlsPin == null || (baseUrl.isHttps && isPrivateNetworkHost(baseUrl.host))) {
             "A certificate pin is only used for https on a private network"
         }
@@ -72,12 +80,17 @@ class ServerSettings(
     val apiKey: String? get() = (auth as? ServerAuth.ApiKey)?.key
 
     /** The same server and auth, with the key sent in [header] or in the query. */
-    fun withKeyInHeader(header: Boolean): ServerSettings = ServerSettings(baseUrl, auth, header, tlsPin)
+    fun withKeyInHeader(header: Boolean): ServerSettings =
+        ServerSettings(baseUrl, auth, header, tlsPin, allowCleartext)
 
     /** The same server and auth, with [pin] as the certificate pin. */
-    fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, auth, keyInHeader, pin)
+    fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, auth, keyInHeader, pin, allowCleartext)
 
-    override fun toString(): String = "ServerSettings(baseUrl=$baseUrl, auth=$auth, keyInHeader=$keyInHeader)"
+    /** True when requests to this server travel unencrypted. */
+    val isCleartext: Boolean get() = !baseUrl.isHttps
+
+    override fun toString(): String =
+        "ServerSettings(baseUrl=$baseUrl, auth=$auth, keyInHeader=$keyInHeader, allowCleartext=$allowCleartext)"
 }
 
 /**
@@ -85,7 +98,7 @@ class ServerSettings(
  * [ApiKeyInterceptor] adds it when the request is sent, so the URL itself is not a secret.
  */
 fun ServerSettings.streamUrl(songId: String): HttpUrl =
-    baseUrl.resolve("rest/stream.view")!!
+    baseUrl.endpoint(STREAM_PATH)
         .newBuilder()
         .addQueryParameter("id", songId)
         .build()
@@ -98,17 +111,28 @@ fun ServerSettings.coverArtUrl(
     albumId: String,
     size: Int,
 ): HttpUrl =
-    baseUrl.resolve("rest/getCoverArt.view")!!
+    baseUrl.endpoint(COVER_ART_PATH)
         .newBuilder()
         .addQueryParameter("id", albumId)
         .addQueryParameter("size", size.toString())
         .build()
 
+private const val STREAM_PATH = "rest/stream.view"
+private const val COVER_ART_PATH = "rest/getCoverArt.view"
+
 /**
- * Whether a server at this URL may be used. `https://` always may. `http://` is allowed only to a private network
- * address, so a home or LAN server works without a certificate; the key then travels unencrypted on that network.
+ * The fixed Subsonic endpoint [path] under this base URL. A failed resolution is an [IllegalStateException] that
+ * names the path only, never the server address, so it is safe to log or show.
  */
-internal fun HttpUrl.isAllowedServer(): Boolean = isHttps || (scheme == "http" && isPrivateNetworkHost(host))
+internal fun HttpUrl.endpoint(path: String): HttpUrl =
+    resolve(path) ?: error("Could not build the server address for $path")
+
+/**
+ * Whether a server at this URL may be used. `https://` always may. `http://` only when the user allowed it
+ * ([allowCleartext]) and only to a private network address; the key then travels unencrypted on that network.
+ */
+internal fun HttpUrl.isAllowedServer(allowCleartext: Boolean): Boolean =
+    isHttps || (allowCleartext && scheme == "http" && isPrivateNetworkHost(host))
 
 /**
  * Whether [host] is this device or a private network address: loopback (`localhost`, `127.x.x.x`, `::1`), RFC 1918
@@ -146,12 +170,19 @@ private const val CLASS_B_PRIVATE_SECOND_MIN = 16
 private const val CLASS_B_PRIVATE_SECOND_MAX = 31
 
 /**
- * Parses user input into a server URL. `https://` is accepted, and `http://` only to a private network address (see
- * [isAllowedServer]). The address must be a plain base URL: user
+ * Parses user input into a server URL. `https://` is accepted, and `http://` only to a private network address and
+ * only when the user allowed it (see [isAllowedServer]). The address must be a plain base URL: user
  * information, a query and a fragment are rejected, so no credential can be stored or sent as part of it. The error
  * messages never repeat the address.
  */
 object ServerUrl {
+    /** Why an http address on the public internet is refused, opt-in or not. */
+    const val HTTP_NOT_PRIVATE =
+        "The server address must start with https://. Plain http:// is possible only for a private network address."
+
+    /** Why an http address on a private network is refused while the opt-in is off. */
+    const val HTTP_NOT_ALLOWED = "Plain http:// is off. Use https://, or allow http for a local server first."
+
     /** Like [parse], but https only. For services that are not on a private network, such as DanceBrainz. */
     fun parseHttps(input: String): HttpUrl {
         require(input.trim().startsWith("https://", ignoreCase = true)) {
@@ -160,14 +191,17 @@ object ServerUrl {
         return parse(input)
     }
 
-    fun parse(input: String): HttpUrl {
+    /** @param allowCleartext whether the user allowed plain http to a private network server. */
+    fun parse(
+        input: String,
+        allowCleartext: Boolean = false,
+    ): HttpUrl {
         val trimmed = input.trim()
         // Without a scheme the address is taken as https, so a bare host name or IP never means plain http.
         val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
         val url = withScheme.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid server address")
-        require(url.isAllowedServer()) {
-            "The server address must start with https://, or http:// for a private network address"
-        }
+        require(url.isHttps || isPrivateNetworkHost(url.host)) { HTTP_NOT_PRIVATE }
+        require(url.isAllowedServer(allowCleartext)) { HTTP_NOT_ALLOWED }
         require(url.encodedUsername.isEmpty() && url.encodedPassword.isEmpty()) {
             "The server address must not contain a username or password. Enter the address only."
         }
@@ -306,18 +340,16 @@ internal object SubsonicHttp {
     private const val PREFER_MINIMAL = "tinysonic-minimal"
 
     fun okHttpClient(settingsProvider: () -> ServerSettings?): OkHttpClient =
-        OkHttpClient.Builder()
+        // The transport rules come first, so a refused http request is stopped before any key is added to it.
+        CleartextPolicy.configure(OkHttpClient.Builder())
             .addInterceptor(ApiKeyInterceptor(settingsProvider))
             .addInterceptor(DeviceProofInterceptor(settingsProvider))
             // Asks folksonic for minimal responses (RFC 7240). Other servers ignore the Prefer header.
             .addInterceptor { chain ->
                 chain.proceed(chain.request().newBuilder().header("Prefer", PREFER_MINIMAL).build())
             }
-            // A redirect from https to http would send the key in the clear, so it is not followed.
-            .followSslRedirects(false)
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
-            .let { LanTls.configure(it) }
             .build()
 
     fun service(

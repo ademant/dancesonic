@@ -15,6 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.dancesonic.player.account.PairingDecision
 
+/** Shown under the code, so the owner knows where to look for the other half. */
+internal const val COMPARE_HINT = "Compare with the code on the folksonic account page."
+
 /**
  * The verification code of a pairing (folksonic #103) with the two answers. Nothing is shown when [code] is null.
  * The code is shown large so that it can be compared with the account page at a glance.
@@ -32,6 +35,7 @@ internal fun PairingVerification(
     ) {
         Text("Verification code", style = MaterialTheme.typography.titleSmall)
         Text(code, style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
+        Text(COMPARE_HINT, style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onDecision(PairingDecision.MATCH) }) { Text("Code matches") }
             OutlinedButton(onClick = { onDecision(PairingDecision.CANCEL) }) { Text("Cancel") }

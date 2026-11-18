@@ -1,8 +1,11 @@
 package org.dancesonic.player.security
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
 import app.cash.turbine.test
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.dancesonic.player.subsonic.ServerAuth
@@ -11,6 +14,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,8 +27,8 @@ import java.util.UUID
 class ServerSettingsStoreTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     private val file = File(context.cacheDir, "settings-test-${UUID.randomUUID()}.preferences_pb")
-    private val store =
-        ServerSettingsStore(PreferenceDataStoreFactory.create(produceFile = { file }), ReversingCipher())
+    private val dataStore = PreferenceDataStoreFactory.create(produceFile = { file })
+    private val store = ServerSettingsStore(dataStore, ReversingCipher())
 
     @After
     fun tearDown() {
@@ -44,6 +48,34 @@ class ServerSettingsStoreTest {
                 cancelAndIgnoreRemainingEvents()
             }
             assertFalse(file.readText().contains("key-plain-123456"))
+        }
+
+    @Test
+    fun `an http connection keeps its opt-in (#84)`() =
+        runBlocking {
+            store.save(ServerSettings("http://192.168.1.20:4533/".toHttpUrl(), "key-1", allowCleartext = true))
+
+            val read = store.settings.first()
+            assertEquals("http://192.168.1.20:4533/", read?.baseUrl.toString())
+            assertTrue(read?.allowCleartext == true)
+        }
+
+    @Test
+    fun `an http connection stored without the opt-in reads as not connected (#84)`() =
+        runBlocking {
+            store.save(ServerSettings("http://192.168.1.20:4533/".toHttpUrl(), "key-1", allowCleartext = true))
+            // As saved before the opt-in existed: the address is http and no opt-in is stored.
+            dataStore.edit { it.remove(booleanPreferencesKey("server_allow_cleartext")) }
+
+            assertNull(store.settings.first())
+        }
+
+    @Test
+    fun `an https connection is stored without the opt-in by default`() =
+        runBlocking {
+            store.save(ServerSettings("https://music.example.com/".toHttpUrl(), "key-1"))
+
+            assertFalse(store.settings.first()?.allowCleartext ?: true)
         }
 
     @Test

@@ -64,6 +64,7 @@ fun ConfigScreen(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val danceUrl by danceVm.baseUrl.collectAsStateWithLifecycle()
+    val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Not saved: the QR code leaves the screen with the screen, so a rotation or restore hides it again.
@@ -89,6 +90,13 @@ fun ConfigScreen(
             Text("Not connected to a server.")
         } else {
             Text("Server: ${current.baseUrl}")
+            if (current.isCleartext) {
+                Text(
+                    "This connection uses plain http and is not encrypted. Switch the server to https when you can.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             SubsonicKeySection(current, danceUrl)
             Text("Library", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -138,6 +146,7 @@ fun ConfigScreen(
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Connect with this key") }
+        CleartextOptIn(allowCleartext, vm::setAllowCleartext)
 
         state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -220,12 +229,12 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
             }
         }
         Text(
-            "Refresh checks dance types and tempo that are more than a day old. Full rebuild checks every recording. " +
+            "Refresh checks dance data that is more than a day old. Full rebuild checks every recording. " +
                 "Old data stays until DanceBrainz answers.",
             style = MaterialTheme.typography.bodySmall,
         )
         Text(
-            "Dance types and tempo are looked up anonymously. No key is sent to DanceBrainz. " +
+            "Dance types are looked up anonymously. No key is sent to DanceBrainz. " +
                 "Saving a different server replaces the dance data with the new server's.",
             style = MaterialTheme.typography.bodySmall,
         )

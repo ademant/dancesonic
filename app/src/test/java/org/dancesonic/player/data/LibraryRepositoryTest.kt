@@ -110,7 +110,7 @@ class LibraryRepositoryTest {
                     override suspend fun lookup(mbids: List<String>): Map<String, RecordingDance> =
                         if ("rec-mbid-1" in mbids) {
                             mapOf(
-                                "rec-mbid-1" to RecordingDance(listOf("Waltz"), null, null),
+                                "rec-mbid-1" to RecordingDance(listOf("Waltz")),
                             )
                         } else {
                             emptyMap()

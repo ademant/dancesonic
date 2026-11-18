@@ -138,6 +138,19 @@ class AccountClientTest {
             assertEquals(AccountClient.INVALID_PAIRING_CODE, error.message)
         }
 
+    private suspend fun awaitApproval(timeoutMillis: Long = 60_000) =
+        deviceAccount().awaitDeviceApproval(base, timeoutMillis = timeoutMillis, pollMillis = listOf(1L))
+
+    @Test
+    fun `the approval polls back off from 3 to 5 to 10 seconds, then stay at 10 (#68)`() {
+        val steps = AccountClient.POLL_BACKOFF_MILLIS
+
+        assertEquals(
+            listOf(3_000L, 5_000L, 10_000L, 10_000L, 10_000L),
+            (0..4).map { AccountClient.pollDelay(it, steps) },
+        )
+    }
+
     @Test
     fun `the wait ends when the owner approves the device`() =
         runBlocking<Unit> {
@@ -145,7 +158,7 @@ class AccountClientTest {
             fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
             fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
 
-            deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1)
+            awaitApproval()
 
             assertEquals(3, fake.server.requestCount)
         }
@@ -155,7 +168,7 @@ class AccountClientTest {
         runBlocking<Unit> {
             fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
 
-            deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1)
+            awaitApproval()
 
             val sent = fake.server.takeRequest()
             assertEquals("/api/device/me", sent.requestUrl!!.encodedPath)
@@ -170,7 +183,7 @@ class AccountClientTest {
 
             val error =
                 assertThrows(AccountException::class.java) {
-                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1) }
+                    runBlocking { awaitApproval() }
                 }
             assertTrue(error.message.orEmpty().contains("Pair it again"))
         }
@@ -182,9 +195,9 @@ class AccountClientTest {
 
             val error =
                 assertThrows(AccountException::class.java) {
-                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 0, pollMillis = 1) }
+                    runBlocking { awaitApproval(timeoutMillis = 0) }
                 }
-            assertTrue(error.message.orEmpty().contains("did not arrive in time"))
+            assertEquals(AccountClient.APPROVAL_EXPIRED, error.message)
         }
 
     @Test
@@ -292,7 +305,7 @@ class AccountClientTest {
 
             val error =
                 assertThrows(AccountException::class.java) {
-                    runBlocking { deviceAccount().awaitDeviceApproval(base, timeoutMillis = 60_000, pollMillis = 1) }
+                    runBlocking { awaitApproval() }
                 }
             assertEquals(AccountClient.PAIRING_REJECTED, error.message)
         }

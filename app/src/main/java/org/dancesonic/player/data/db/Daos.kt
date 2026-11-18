@@ -95,12 +95,11 @@ interface TrackDao {
     )
     fun observeDanceTypeCounts(): Flow<List<DanceTypeCount>>
 
-    /** The tracks of an album with their tempo. Folksonic's tempo wins; DanceBrainz's is the fallback. */
+    /** The tracks of an album with their tempo. The tempo is folksonic's only; DanceBrainz has none. */
     @Query(
         """
-        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        SELECT t.*, t.bpm AS tempoBpm
         FROM track t
-        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
         WHERE t.albumId = :albumId
         ORDER BY t.trackNumber, t.title COLLATE NOCASE
         """,
@@ -110,9 +109,8 @@ interface TrackDao {
     /** The given tracks with their tempo, for playing a playlist. */
     @Query(
         """
-        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        SELECT t.*, t.bpm AS tempoBpm
         FROM track t
-        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
         WHERE t.id IN (:ids)
         """,
     )
@@ -121,10 +119,9 @@ interface TrackDao {
     /** Tracks of one dance type with their tempo, as [observeByAlbumWithTempo]. */
     @Query(
         """
-        SELECT t.*, COALESCE(t.bpm, l.bpm) AS tempoBpm
+        SELECT t.*, t.bpm AS tempoBpm
         FROM track t
         INNER JOIN dance_metadata d ON d.mbid = t.mbid
-        LEFT JOIN dance_lookup l ON l.mbid = t.mbid
         WHERE d.danceType = :danceType
         ORDER BY t.artistName COLLATE NOCASE, t.title COLLATE NOCASE
         """,
@@ -254,10 +251,6 @@ interface DanceLookupDao {
     /** The chapters version of one recording from its last lookup, or null when unknown. */
     @Query("SELECT chaptersVersion FROM dance_lookup WHERE mbid = :mbid")
     suspend fun chaptersVersionFor(mbid: String): String?
-
-    /** The stored tempo of one recording, or null when none was reported or it was never looked up. */
-    @Query("SELECT bpm FROM dance_lookup WHERE mbid = :mbid")
-    suspend fun bpmFor(mbid: String): Int?
 
     @Query("DELETE FROM dance_lookup")
     suspend fun deleteAll()

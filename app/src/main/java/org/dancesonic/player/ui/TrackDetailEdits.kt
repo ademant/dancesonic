@@ -40,6 +40,17 @@ import org.dancesonic.player.data.db.EditKind
 import org.dancesonic.player.data.db.EditStatus
 
 private val QUALIFIERS = listOf("learn", "disco", "both")
+
+/** How each queue status shows on a row. */
+private val STATUS_CHANGE =
+    mapOf(
+        EditStatus.QUEUED to FieldChange.QUEUED,
+        EditStatus.PENDING_REVIEW to FieldChange.HELD,
+        EditStatus.CONFLICT to FieldChange.CONFLICT,
+    )
+
+/** Most urgent first: what the user must act on, then what is still to be sent, then what waits for a moderator. */
+private val FIELD_CHANGE_URGENCY = listOf(FieldChange.CONFLICT, FieldChange.QUEUED, FieldChange.HELD)
 private val DIALOG_MAX_HEIGHT = 480.dp
 private const val SHOE = "👟"
 
@@ -58,6 +69,7 @@ internal fun TrackDetailEditor(
     val shoes by libraryVm.shoes.collectAsStateWithLifecycle()
     val meters by libraryVm.meters.collectAsStateWithLifecycle()
     val signedIn by libraryVm.signedIn.collectAsStateWithLifecycle()
+    val queue by libraryVm.queue.collectAsStateWithLifecycle()
     val dances by remember(mbid) { libraryVm.danceNames(mbid) }.collectAsStateWithLifecycle(emptyList())
     val hasDescription by produceState(false, mbid) { value = libraryVm.hasDanceDescription(mbid) }
     var open by rememberSaveable { mutableStateOf<DetailDialog?>(null) }
@@ -69,6 +81,7 @@ internal fun TrackDetailEditor(
                 hasDescription = hasDescription,
                 shoes = shoes[mbid],
                 canEdit = signedIn,
+                changes = fieldChanges(queue, mbid),
             ),
         actions =
             TrackEntryActions(
@@ -93,7 +106,50 @@ internal class TrackEntries(
     val hasDescription: Boolean,
     val shoes: ShoesView?,
     val canEdit: Boolean,
+    /** Where each field's own unconfirmed change stands, shown on its row. */
+    val changes: FieldChanges = FieldChanges(),
 )
+
+/** Where a field's latest change stands while DanceBrainz has not confirmed it. */
+internal enum class FieldChange(val label: String) {
+    /** Waiting in the offline queue. */
+    QUEUED("not sent yet"),
+
+    /** Sent, and held for review on a moderated server. */
+    HELD("held for review"),
+
+    /** Not sent, because the track changed on DanceBrainz in the meantime. */
+    CONFLICT("changed on DanceBrainz, not sent"),
+}
+
+/** The state of the dance, meter and shoes changes of one track. Null for a field with no open change. */
+internal data class FieldChanges(
+    val dances: FieldChange? = null,
+    val meter: FieldChange? = null,
+    val shoes: FieldChange? = null,
+)
+
+/**
+ * Sorts the queued changes of [mbid] by field (#75). When one field has several, the one the user must act on wins: a
+ * conflict, then a change not yet sent, then one held for review.
+ */
+internal fun fieldChanges(
+    queue: List<EditEntity>,
+    mbid: String,
+): FieldChanges {
+    val mine = queue.filter { it.mbid == mbid }
+
+    fun of(vararg kinds: String): FieldChange? {
+        val found = mine.filter { it.kind in kinds }.mapNotNull { STATUS_CHANGE[it.status] }.toSet()
+        return FIELD_CHANGE_URGENCY.firstOrNull { it in found }
+    }
+
+    return FieldChanges(
+        dances = of(EditKind.DANCE_ADD, EditKind.DANCE_REMOVE),
+        meter = of(EditKind.METER),
+        shoes = of(EditKind.SHOES),
+    )
+}
 
 /** What a tap on an editable row does. */
 internal class TrackEntryActions(
@@ -113,22 +169,26 @@ internal fun TrackDetailRows(
     entries: TrackEntries,
     actions: TrackEntryActions,
 ) {
+    val changes = entries.changes
     val danceText = if (entries.dances.isEmpty()) "none assigned" else entries.dances.joinToString(", ")
-    val label = meterLabel(entries.meter?.meter, entries.meter?.subMeter)
-    val meterText =
-        when {
-            label == null -> "not set"
-            entries.meter?.pending == true -> "$label · not sent yet"
-            else -> label
-        }
+    val meterText = meterLabel(entries.meter?.meter, entries.meter?.subMeter) ?: "not set"
+    // A meter change not yet in the queue rows (the view marks it pending) still reads as not sent.
+    val meterChange = changes.meter ?: FieldChange.QUEUED.takeIf { entries.meter?.pending == true }
+    val shoesChange = changes.shoes ?: FieldChange.QUEUED.takeIf { entries.shoes?.pending == true }
     Column(Modifier.fillMaxWidth()) {
-        EntryRow("Dance: $danceText", enabled = entries.canEdit, onClick = actions.onDances)
-        EntryRow("Meter: $meterText", enabled = entries.canEdit, onClick = actions.onMeter)
+        EntryRow(withChange("Dance: $danceText", changes.dances), enabled = entries.canEdit, onClick = actions.onDances)
+        EntryRow(withChange("Meter: $meterText", meterChange), enabled = entries.canEdit, onClick = actions.onMeter)
         if (entries.hasDescription) EntryRow("Dance description", enabled = true, onClick = actions.onDescription)
-        ShoesRow(entries.shoes, canEdit = entries.canEdit, onRate = actions.onRate)
+        ShoesRow(entries.shoes, shoesChange, canEdit = entries.canEdit, onRate = actions.onRate)
         shoesMedianText(entries.shoes)?.let { EntryRow(it, enabled = false, onClick = {}) }
     }
 }
+
+/** [text] with the state of its field's open change after it, such as `Dance: gavotte · held for review`. */
+internal fun withChange(
+    text: String,
+    change: FieldChange?,
+): String = if (change == null) text else "$text · ${change.label}"
 
 /** The public shoes median of a track, such as `Median 3.5 from 12 raters`, or null when nobody has rated it. */
 internal fun shoesMedianText(view: ShoesView?): String? {
@@ -155,11 +215,12 @@ private fun EntryRow(
 @Composable
 private fun ShoesRow(
     shoes: ShoesView?,
+    change: FieldChange?,
     canEdit: Boolean,
     onRate: (Int) -> Unit,
 ) {
     val mine = shoes?.mine ?: 0
-    val label = if (shoes?.pending == true) "Shoes (not sent yet):" else "Shoes:"
+    val label = if (change == null) "Shoes:" else "Shoes (${change.label}):"
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyLarge)
         for (value in 1..MAX_SHOES) {

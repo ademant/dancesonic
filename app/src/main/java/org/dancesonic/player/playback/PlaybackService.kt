@@ -1,5 +1,7 @@
 package org.dancesonic.player.playback
 
+import android.os.Process
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -8,6 +10,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommands
 import org.dancesonic.player.DanceSonicApp
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.playback.stretch.StreamTracker
@@ -44,7 +47,44 @@ class PlaybackService : MediaSessionService() {
                 .setHandleAudioBecomingNoisy(true)
                 .build()
         player.addListener(QueueFollower(tracker, onsets))
-        session = MediaSession.Builder(this, player).build()
+        session =
+            MediaSession.Builder(this, player)
+                .setCallback(ControllerGate(packageName, Process.myUid()))
+                .build()
+    }
+
+    /**
+     * Lets only this app, its notification and trusted system controllers connect; see [ControllerPolicy]. Media3 1.9
+     * has only the synchronous [MediaSession.Callback.onConnect]; the decision needs no I/O, so that is enough.
+     */
+    private class ControllerGate(
+        private val ownPackage: String,
+        private val ownUid: Int,
+    ) : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val caller =
+                ControllerIdentity(
+                    packageName = controller.packageName,
+                    uid = controller.uid,
+                    trusted = controller.isTrusted,
+                    mediaNotification = session.isMediaNotificationController(controller),
+                )
+            return when (ControllerPolicy.accessFor(caller, ownPackage, ownUid)) {
+                ControllerAccess.FULL -> MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+                ControllerAccess.TRANSPORT ->
+                    MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(SessionCommands.EMPTY)
+                        .setAvailablePlayerCommands(ControllerPolicy.TRANSPORT_COMMANDS)
+                        .build()
+                ControllerAccess.REJECT -> {
+                    Log.d(TAG, "Media controller rejected: ${controller.packageName}")
+                    MediaSession.ConnectionResult.reject()
+                }
+            }
+        }
     }
 
     /**
@@ -76,6 +116,10 @@ class PlaybackService : MediaSessionService() {
                     Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
                 )
         }
+    }
+
+    private companion object {
+        const val TAG = "PlaybackService"
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session

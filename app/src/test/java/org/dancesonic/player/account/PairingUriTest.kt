@@ -39,6 +39,14 @@ class PairingUriTest {
     }
 
     @Test
+    fun `a pairing code for a private http server needs the opt-in (#84)`() {
+        val code = "tinysonic://pair?server=http%3A%2F%2F10.0.0.5%3A4533%2F&token=tsp_abcdefgh12345"
+
+        assertThrows(IllegalArgumentException::class.java) { PairingUri.parse(code) }
+        assertEquals("http://10.0.0.5:4533/", PairingUri.parse(code, allowCleartext = true).server.toString())
+    }
+
+    @Test
     fun `missing server or token is rejected`() {
         assertThrows(IllegalArgumentException::class.java) {
             PairingUri.parse("tinysonic://pair?token=tsp_abcdefgh12345")

@@ -10,7 +10,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import org.dancesonic.player.subsonic.LanTls
+import org.dancesonic.player.subsonic.CleartextPolicy
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.http.Body
@@ -60,8 +60,6 @@ class DanceBrainzClient internal constructor(
             recording.mbid to
                 RecordingDance(
                     danceTypes = recording.tags.filter { it.type == DANCE_TAG_TYPE }.map { it.name },
-                    bpm = recording.bpm?.takeIf { it in BPM_RANGE },
-                    raters = recording.raters,
                     chapters = recording.chapters.map { it.toDomain() },
                     chaptersVersion = recording.chaptersVersion,
                     meter = meterOf(recording.tags),
@@ -82,9 +80,6 @@ class DanceBrainzClient internal constructor(
 
         /** The tag type that holds meters. A sub-meter is a child value of its meter. */
         const val METER_TAG_TYPE = "meter"
-
-        /** DanceBrainz accepts tempos from 1 to 400 bpm. */
-        private val BPM_RANGE = 1..400
 
         private const val CONNECT_TIMEOUT_SECONDS = 15L
         private const val READ_TIMEOUT_SECONDS = 30L
@@ -116,8 +111,7 @@ class DanceBrainzClient internal constructor(
         }
 
         internal fun defaultHttpClient(): OkHttpClient =
-            LanTls.configure(OkHttpClient.Builder())
-                .followSslRedirects(false)
+            CleartextPolicy.configure(OkHttpClient.Builder())
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
@@ -173,8 +167,6 @@ internal data class LookupResponseDto(
 internal data class RecordingDto(
     val mbid: String,
     val tags: List<TagDto> = emptyList(),
-    val bpm: Int? = null,
-    val raters: Int? = null,
     val chapters: List<ChapterDto> = emptyList(),
     @SerialName("chapters_version") val chaptersVersion: String? = null,
 )

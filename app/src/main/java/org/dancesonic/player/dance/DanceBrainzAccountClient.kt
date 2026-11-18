@@ -80,11 +80,8 @@ class DanceBrainzAccountClient internal constructor(
         DanceBrainzException(
             when (code) {
                 CODE_PAIRING_INVALID, CODE_PAIRING_EXPIRED -> INVALID_PAIRING_CODE
-                CODE_DEVICE_UNKNOWN -> "The device was removed on the account page. Pair it again."
-                CODE_PROOF_REPLAYED -> "DanceBrainz refused a repeated request. Try again."
-                CODE_PROOF_INVALID -> "This phone's key was refused. Pair the phone again."
                 CODE_DEVICE_EXISTS -> "This phone is already paired. Create a new pairing code on the account page."
-                else -> "DanceBrainz answered with HTTP $status"
+                else -> refusalMessage(code) ?: "DanceBrainz answered with HTTP $status"
             },
             httpCode = status,
         )
@@ -97,9 +94,6 @@ class DanceBrainzAccountClient internal constructor(
         private const val PAIRING_PENDING = "pairing_pending"
         private const val CODE_PAIRING_INVALID = "pairing_invalid"
         private const val CODE_PAIRING_EXPIRED = "pairing_expired"
-        private const val CODE_DEVICE_UNKNOWN = "device_unknown"
-        private const val CODE_PROOF_REPLAYED = "proof_replayed"
-        private const val CODE_PROOF_INVALID = "proof_invalid"
         private const val CODE_DEVICE_EXISTS = "device_exists"
         private const val INVALID_PAIRING_CODE =
             "This pairing code is invalid or expired. Create a new one on the account page."

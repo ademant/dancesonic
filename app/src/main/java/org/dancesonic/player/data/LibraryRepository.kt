@@ -719,8 +719,6 @@ class LibraryRepository(
                         DanceLookupEntity(
                             mbid,
                             checkedAt = now,
-                            bpm = answer?.bpm,
-                            raters = answer?.raters,
                             chaptersVersion = answer?.chaptersVersion,
                             meter = answer?.meter,
                             subMeter = answer?.subMeter,

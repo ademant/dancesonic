@@ -180,5 +180,28 @@ val MIGRATION_12_13 =
         }
     }
 
+/**
+ * Drops DanceBrainz's tempo (`bpm`) and its report count (`raters`) from `dance_lookup` (#82): folksonic is the only
+ * tempo source. SQLite on Android 10 has no DROP COLUMN, so the table is rebuilt and every other column is copied.
+ */
+val MIGRATION_13_14 =
+    object : Migration(FROM_13, TO_14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `dance_lookup_new` " +
+                    "(`mbid` TEXT NOT NULL, `checkedAt` INTEGER NOT NULL, `chaptersVersion` TEXT, " +
+                    "`meter` TEXT, `subMeter` TEXT, PRIMARY KEY(`mbid`))",
+            )
+            db.execSQL(
+                "INSERT INTO `dance_lookup_new` (`mbid`, `checkedAt`, `chaptersVersion`, `meter`, `subMeter`) " +
+                    "SELECT `mbid`, `checkedAt`, `chaptersVersion`, `meter`, `subMeter` FROM `dance_lookup`",
+            )
+            db.execSQL("DROP TABLE `dance_lookup`")
+            db.execSQL("ALTER TABLE `dance_lookup_new` RENAME TO `dance_lookup`")
+        }
+    }
+
 private const val FROM_12 = 12
 private const val TO_13 = 13
+private const val FROM_13 = 13
+private const val TO_14 = 14

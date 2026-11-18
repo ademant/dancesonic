@@ -4,8 +4,8 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import kotlinx.serialization.Serializable
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.DeviceProofInterceptor
-import org.dancesonic.player.subsonic.LanTls
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.subsonicJson
@@ -84,9 +84,8 @@ class AnalysisClient internal constructor(
         private const val READ_TIMEOUT_SECONDS = 30L
 
         private fun defaultClient(settings: ServerSettings): OkHttpClient =
-            LanTls.configure(OkHttpClient.Builder())
+            CleartextPolicy.configure(OkHttpClient.Builder())
                 .addInterceptor(DeviceProofInterceptor({ settings }))
-                .followSslRedirects(false)
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .build()
