@@ -31,7 +31,7 @@ class DanceBrainzClientTest {
     }
 
     @Test
-    fun `keeps only dance tags and reports tempo and raters`() {
+    fun `keeps only dance tags`() {
         TestSubsonicServer().use { server ->
             server.server.enqueue(json(ANSWER_WITH_TAGS))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
@@ -39,13 +39,11 @@ class DanceBrainzClientTest {
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
 
             assertEquals(listOf("7pas"), answer?.danceTypes)
-            assertEquals(118, answer?.bpm)
-            assertEquals(4, answer?.raters)
         }
     }
 
     @Test
-    fun `an untagged recording has no dance types and no tempo`() {
+    fun `an untagged recording has no dance types`() {
         TestSubsonicServer().use { server ->
             server.server.enqueue(json(EMPTY_ANSWER))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
@@ -53,20 +51,18 @@ class DanceBrainzClientTest {
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
 
             assertEquals(emptyList<String>(), answer?.danceTypes)
-            assertNull(answer?.bpm)
-            assertEquals(0, answer?.raters)
         }
     }
 
     @Test
-    fun `a tempo outside DanceBrainz's range is dropped`() {
+    fun `an answer without bpm and raters is read as before (#82)`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(ANSWER_WITH_BAD_TEMPO))
+            server.server.enqueue(json(ANSWER_WITHOUT_TEMPO))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
 
-            assertNull(answer?.bpm)
+            assertEquals(emptyList<String>(), answer?.danceTypes)
         }
     }
 
@@ -180,6 +176,6 @@ class DanceBrainzClientTest {
                 """{"tag_id":7,"type":"region","name":"Alsace","path":[{"id":7,"name":"Alsace"}]}""" +
                 """],"bpm":118,"raters":4}]}"""
 
-        const val ANSWER_WITH_BAD_TEMPO = """{"recordings":[{"mbid":"$MBID","tags":[],"bpm":900,"raters":1}]}"""
+        const val ANSWER_WITHOUT_TEMPO = """{"recordings":[{"mbid":"$MBID","tags":[]}]}"""
     }
 }

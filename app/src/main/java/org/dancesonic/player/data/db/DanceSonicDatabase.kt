@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WaveformEntity::class,
         OnsetsEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -66,6 +66,7 @@ abstract class DanceSonicDatabase : RoomDatabase() {
                     MIGRATION_10_11,
                     MIGRATION_11_12,
                     MIGRATION_12_13,
+                    MIGRATION_13_14,
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addCallback(

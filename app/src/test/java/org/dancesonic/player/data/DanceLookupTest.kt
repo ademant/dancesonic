@@ -11,7 +11,6 @@ import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.dancesonic.player.testsupport.newTestSyncStateStore
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -88,24 +87,23 @@ class DanceLookupTest {
         }
 
     @Test
-    fun `dance types and tempo from an answer are stored, and the tempo is kept with the lookup`() =
+    fun `dance types from an answer are stored`() =
         runBlocking(Dispatchers.IO) {
-            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte", "Gavotte"), bpm = 118, raters = 4))
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte", "Gavotte")))
             enqueueLibrary()
 
             repo.sync(server.client)
 
             assertEquals(listOf("Gavotte"), db.danceMetadataDao().danceTypesFor("rec-1"))
-            assertEquals(118, db.danceLookupDao().bpmFor("rec-1"))
         }
 
     @Test
     fun `a recording answered without dance tags loses its old dance types`() =
         runBlocking(Dispatchers.IO) {
-            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = null, raters = null))
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte")))
             enqueueLibrary()
             repo.sync(server.client)
-            source.answers = mapOf("rec-1" to RecordingDance(emptyList(), bpm = null, raters = null))
+            source.answers = mapOf("rec-1" to RecordingDance(emptyList()))
             enqueueLibrary()
             now = 1_000L + 30L * 24 * 60 * 60 * 1000 + 1
 
@@ -115,13 +113,13 @@ class DanceLookupTest {
         }
 
     @Test
-    fun `a recording the server does not answer for is recorded as checked with no tempo`() =
+    fun `a recording the server does not answer for is recorded as checked`() =
         runBlocking(Dispatchers.IO) {
             enqueueLibrary()
 
             repo.sync(server.client)
 
-            assertNull(db.danceLookupDao().bpmFor("rec-1"))
+            assertEquals(listOf("rec-1"), db.danceLookupDao().checkedSince(listOf("rec-1"), since = 0L))
             assertEquals(emptyList<String>(), db.danceMetadataDao().danceTypesFor("rec-1"))
             assertEquals(listOf("rec-1"), source.lookedUp)
         }
@@ -137,7 +135,7 @@ class DanceLookupTest {
                     clock = { now },
                     syncState = newTestSyncStateStore(ApplicationProvider.getApplicationContext()),
                 )
-            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = 120, raters = 2))
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte")))
             enqueueLibrary()
             withState.sync(server.client)
             source.key = "source-b"
@@ -149,7 +147,6 @@ class DanceLookupTest {
 
             assertEquals(listOf("rec-1", "rec-1"), source.lookedUp)
             assertEquals(emptyList<String>(), db.danceMetadataDao().danceTypesFor("rec-1"))
-            assertNull(db.danceLookupDao().bpmFor("rec-1"))
         }
 
     @Test
@@ -182,9 +179,9 @@ class DanceLookupTest {
         }
 
     @Test
-    fun `a failed refresh keeps the dance types and tempo the recording already had`() =
+    fun `a failed refresh keeps the dance types the recording already had`() =
         runBlocking(Dispatchers.IO) {
-            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte"), bpm = 118, raters = 3))
+            source.answers = mapOf("rec-1" to RecordingDance(listOf("Gavotte")))
             enqueueLibrary()
             repo.sync(server.client)
             source.failNext = 1
@@ -194,7 +191,6 @@ class DanceLookupTest {
 
             assertEquals(DanceRefresh(checked = 1, failed = 1), result)
             assertEquals(listOf("Gavotte"), db.danceMetadataDao().danceTypesFor("rec-1"))
-            assertEquals(118, db.danceLookupDao().bpmFor("rec-1"))
         }
 
     @Test

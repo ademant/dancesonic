@@ -84,15 +84,13 @@ data class DanceMetadataEntity(
 )
 
 /**
- * When each recording was last looked up in DanceBrainz, including lookups that found nothing, and the
- * public tempo that lookup returned. [bpm] is null when nobody has reported a tempo.
+ * When each recording was last looked up in DanceBrainz, including lookups that found nothing. Tempo is not kept here:
+ * folksonic is the only tempo source (see [TrackEntity.bpm]).
  */
 @Entity(tableName = "dance_lookup")
 data class DanceLookupEntity(
     @PrimaryKey val mbid: String,
     val checkedAt: Long,
-    val bpm: Int? = null,
-    val raters: Int? = null,
     /** The version of the recording's chapters when last looked up; a chapter write sends it as `If-Match`. */
     val chaptersVersion: String? = null,
     /** The meter of the recording, such as `8/4`, and its sub-meter, such as `3+3+2`. Both null when none is set. */
