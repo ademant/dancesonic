@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -251,6 +252,8 @@ class ConnectViewModel(
                 return
             }
         runConnect(request.server) {
+            // The code was just scanned, so it expires about one pairing window from now.
+            val expiresAt = System.currentTimeMillis() + AccountClient.PAIRING_WAIT_MILLIS
             val pin = LanTls.connectPin(request.server)
             require(request.pin == null || request.pin == pin) {
                 "The server certificate does not match the pin in this code. Create a new code on the account page."
@@ -260,10 +263,36 @@ class ConnectViewModel(
                 request,
                 pin,
                 verify = verifier::await,
-                onWaiting = { _state.value = _state.value.copy(status = WAITING_FOR_APPROVAL) },
+                awaitApproval = { device ->
+                    withCountdown(expiresAt) {
+                        val left = (expiresAt - System.currentTimeMillis()).coerceAtLeast(0)
+                        device.awaitDeviceApproval(request.server, timeoutMillis = left)
+                    }
+                },
             )
         }
     }
+
+    /** Runs [block] while the status counts down to [expiresAt], once a second (#68). */
+    private suspend fun <T> withCountdown(
+        expiresAt: Long,
+        block: suspend () -> T,
+    ): T =
+        coroutineScope {
+            val ticker =
+                launch {
+                    while (true) {
+                        val left = expiresAt - System.currentTimeMillis()
+                        _state.update { it.copy(status = waitingStatus(left)) }
+                        delay(COUNTDOWN_TICK_MILLIS)
+                    }
+                }
+            try {
+                block()
+            } finally {
+                ticker.cancel()
+            }
+        }
 
     /**
      * Brings the local catalog up to date. By default only what changed on the server is fetched.
@@ -344,9 +373,9 @@ class ConnectViewModel(
         viewModelScope.launch {
             try {
                 // An http server the user allowed may be reached while it is set up, before it is stored.
-                val settings = CleartextPolicy.whileConnecting(server) { verifyAndStore(obtain, danceBrainz) }
+                val connected = CleartextPolicy.whileConnecting(server) { verifyAndStore(obtain, danceBrainz) }
                 _state.value = ConnectUiState()
-                runSync(settings, incremental = false)
+                runSync(connected.settings, incremental = false, notice = connected.notice)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: AccountException) {
@@ -361,11 +390,14 @@ class ConnectViewModel(
         }
     }
 
-    /** The checks and the store of [runConnect]. Returns the settings it stored. */
+    /** What [verifyAndStore] stored, and anything the user should know about it. */
+    private class Connected(val settings: ServerSettings, val notice: String?)
+
+    /** The checks and the store of [runConnect]. */
     private suspend fun verifyAndStore(
         obtain: suspend () -> ServerSettings,
         danceBrainz: HttpUrl?,
-    ): ServerSettings {
+    ): Connected {
         val entered = obtain()
         val probe = SubsonicClient(entered)
         probe.checkConnection()
@@ -380,7 +412,8 @@ class ConnectViewModel(
             }
         container.adoptCatalogClient(verified)
         danceBrainz?.let { DanceBrainzClient(it).checkServer() }
-        if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
+        val previous = container.settingsStore.settings.first()
+        if (connectionChangesServer(previous, settings)) {
             container.library.clearCatalog()
             container.syncState.clear()
             container.audioCache.clear()
@@ -391,7 +424,28 @@ class ConnectViewModel(
         // The store's flow updates the policy too, but later: the first sync starts now.
         CleartextPolicy.remember(settings)
         danceBrainz?.let { container.danceBrainzSettings.save(it) }
-        return settings
+        return Connected(settings, revokeReplacedKey(previous, settings))
+    }
+
+    /**
+     * After a device pairing replaces an API key for the same server, revokes that key with itself (#68), so it does
+     * not stay valid until someone revokes it by hand. The new settings no longer hold it. Best effort: returns a
+     * notice when the server could not be asked.
+     */
+    private suspend fun revokeReplacedKey(
+        previous: ServerSettings?,
+        next: ServerSettings,
+    ): String? {
+        val oldKey = replacedKeyToRevoke(previous, next) ?: return null
+        val server = next.baseUrl
+        return try {
+            account.revokeOwnKey(server, oldKey)
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AccountException) {
+            "Paired. The old API key could not be revoked (${e.message}). Revoke it on the account page."
+        }
     }
 
     /**
@@ -418,6 +472,7 @@ class ConnectViewModel(
     private fun runSync(
         settings: ServerSettings,
         incremental: Boolean,
+        notice: String? = null,
     ) {
         _state.value = _state.value.copy(busy = true, error = null, syncProgress = null)
         viewModelScope.launch {
@@ -434,11 +489,11 @@ class ConnectViewModel(
                         }
                     }
                 container.edits.flush()
-                _state.value = ConnectUiState(lastSync = syncMessage(result))
+                _state.value = ConnectUiState(lastSync = syncMessage(result), status = notice)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
-                _state.value = ConnectUiState(error = "Sync failed: ${e.message}")
+                _state.value = ConnectUiState(error = "Sync failed: ${e.message}", status = notice)
             }
         }
     }
@@ -782,7 +837,29 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
-private const val WAITING_FOR_APPROVAL = "Waiting for approval on the account page. The code expires in 15 minutes."
+private const val COUNTDOWN_TICK_MILLIS = 1_000L
+private const val MILLIS_PER_SECOND = 1_000L
+private const val SECONDS_PER_MINUTE = 60L
+
+/** The status while a pairing waits for the owner, with the time left until the code expires, such as `14:05`. */
+internal fun waitingStatus(remainingMillis: Long): String {
+    if (remainingMillis <= 0) return "The code expired. Create a new code on the account page."
+    val seconds = (remainingMillis + MILLIS_PER_SECOND - 1) / MILLIS_PER_SECOND
+    val clock = "${seconds / SECONDS_PER_MINUTE}:${(seconds % SECONDS_PER_MINUTE).toString().padStart(2, '0')}"
+    return "Waiting for approval on the account page. The code expires in $clock."
+}
+
+/**
+ * The API key a new connection replaces, when it should be revoked: the old connection had a key and the new one is a
+ * device paired with the same server. Null otherwise; a key for another server is revoked by Disconnect only.
+ */
+internal fun replacedKeyToRevoke(
+    previous: ServerSettings?,
+    next: ServerSettings,
+): String? {
+    val oldKey = previous?.apiKey ?: return null
+    return oldKey.takeIf { next.auth is ServerAuth.Device && previous.baseUrl == next.baseUrl }
+}
 private const val VERIFY_STATUS =
     "Compare this code with the one on the account page. Confirm only if they are the same."
 private const val CANCELLED_ON_PHONE = "The pairing was cancelled on this phone."
@@ -798,7 +875,7 @@ private suspend fun pairThisDevice(
     request: PairingRequest,
     pin: String?,
     verify: suspend (String) -> PairingDecision,
-    onWaiting: () -> Unit,
+    awaitApproval: suspend (AccountClient) -> Unit,
 ): ServerSettings {
     val alias = DeviceKeys.create()
     // An http server got past PairingUri.parse only with the user's opt-in, so its settings keep that opt-in.
@@ -813,8 +890,7 @@ private suspend fun pairThisDevice(
             AccountClient.forDevice(settings).confirmDevicePairing(request.server, decision)
             if (decision == PairingDecision.CANCEL) throw AccountException(CANCELLED_ON_PHONE)
         }
-        onWaiting()
-        AccountClient.forDevice(settings).awaitDeviceApproval(request.server)
+        awaitApproval(AccountClient.forDevice(settings))
         paired = true
     } finally {
         if (!paired) DeviceKeys.delete(alias)

@@ -226,23 +226,25 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
 
     /**
      * Polls the device until the owner approves its pairing. Returns when the device is approved; throws when the
-     * approval is refused, the device was removed, or [timeoutMillis] runs out.
+     * approval is refused, the device was removed, or [timeoutMillis] runs out. The pauses between polls follow
+     * [pollMillis] and then stay at its last value: 3, 5, then every 10 seconds by default, since each refused poll is
+     * logged as a failed sign-in on the server.
      */
     suspend fun awaitDeviceApproval(
         server: HttpUrl,
         timeoutMillis: Long = PAIRING_WAIT_MILLIS,
-        pollMillis: Long = POLL_INTERVAL_MILLIS,
+        pollMillis: List<Long> = POLL_BACKOFF_MILLIS,
     ) {
+        require(pollMillis.isNotEmpty()) { "At least one poll interval is needed" }
         val deadline = System.nanoTime() + timeoutMillis * NANOS_PER_MILLI
+        var attempt = 0
         while (true) {
             val response = service(server).deviceMe()
             if (response.isSuccessful) return
             val code = refusalCode(response)
             if (code != CODE_PAIRING_PENDING) throw approvalRefusal(code, response.code())
-            if (System.nanoTime() >= deadline) {
-                throw AccountException("The approval did not arrive in time. Create a new code on the account page.")
-            }
-            delay(pollMillis)
+            if (System.nanoTime() >= deadline) throw AccountException(APPROVAL_EXPIRED)
+            delay(pollDelay(attempt++, pollMillis))
         }
     }
 
@@ -337,12 +339,21 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         private const val CODE_PAIRING_REJECTED = "pairing_rejected"
         private const val CODE_PAIRING_TOKEN_USED = "pairing_token_used"
         private const val CODE_PAIRING_BUSY = "pairing_busy"
-        private const val PAIRING_WAIT_MILLIS = 15L * 60_000L
-        private const val POLL_INTERVAL_MILLIS = 3_000L
+        /** How long a pairing code lasts on folksonic, and so how long the app waits for its approval at most. */
+        const val PAIRING_WAIT_MILLIS = 15L * 60_000L
+
+        /** The pauses between approval polls (#68): 3 s, then 5 s, then 10 s for the rest of the wait. */
+        val POLL_BACKOFF_MILLIS = listOf(3_000L, 5_000L, 10_000L)
         private const val NANOS_PER_MILLI = 1_000_000L
 
         /** A client for the device endpoints: every request carries the proof of [settings]' device key. */
         fun forDevice(settings: ServerSettings): AccountClient = AccountClient(SubsonicHttp.okHttpClient { settings })
+
+        /** The pause before poll number [attempt] + 1: the step at [attempt], or the last step once they run out. */
+        internal fun pollDelay(
+            attempt: Int,
+            steps: List<Long>,
+        ): Long = steps[attempt.coerceIn(0, steps.lastIndex)]
 
         /** The refusal code in a failed response's body, or null when the body has none. */
         internal fun refusalCode(response: Response<*>): String? = refusalCodeOf(response.errorBody()?.string())
@@ -360,6 +371,8 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
             "This pairing code is invalid or expired. Create a new one on the account page."
         const val PAIRING_REJECTED =
             "The pairing was rejected on the account page. Create a new code there to try again."
+        const val APPROVAL_EXPIRED =
+            "The code expired before the owner approved it. Create a new code on the account page."
         const val PAIRING_BUSY = "Too many devices are waiting on this QR code. Create a new code on the account page."
         const val TOKEN_ALREADY_USED =
             "This QR code has already been used by another device. Create a new code on the account page."
