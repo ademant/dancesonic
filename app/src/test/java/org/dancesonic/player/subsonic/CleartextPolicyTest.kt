@@ -14,6 +14,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.InetAddress
 
 /** Plain http goes only to the server the user opted in for (#84). */
 class CleartextPolicyTest {
@@ -23,8 +24,9 @@ class CleartextPolicyTest {
 
     @Before
     fun setUp() {
-        server.start()
-        other.start()
+        // Bound to the loopback address, and addressed by it, so the host is a private address on every machine.
+        server.start(InetAddress.getByName(LOOPBACK), 0)
+        other.start(InetAddress.getByName(LOOPBACK), 0)
     }
 
     @After
@@ -34,13 +36,15 @@ class CleartextPolicyTest {
         other.shutdown()
     }
 
+    private fun MockWebServer.at(path: String): HttpUrl = "http://$LOOPBACK:$port$path".toHttpUrl()
+
     private fun optedIn(url: HttpUrl) = ServerSettings(url, "key-123", allowCleartext = true)
 
     private fun get(url: HttpUrl): Int = client.newCall(Request.Builder().url(url).build()).execute().use { it.code }
 
     @Test
     fun `http is refused by default, before anything reaches the server`() {
-        assertThrows(CleartextRefusedException::class.java) { get(server.url("/rest/ping.view")) }
+        assertThrows(CleartextRefusedException::class.java) { get(server.at("/rest/ping.view")) }
 
         assertEquals(0, server.requestCount)
     }
@@ -48,16 +52,16 @@ class CleartextPolicyTest {
     @Test
     fun `the opted-in server is reached over http`() {
         server.enqueue(MockResponse().setBody("ok"))
-        CleartextPolicy.remember(optedIn(server.url("/")))
+        CleartextPolicy.remember(optedIn(server.at("/")))
 
-        assertEquals(200, get(server.url("/rest/ping.view")))
+        assertEquals(200, get(server.at("/rest/ping.view")))
     }
 
     @Test
     fun `the opt-in covers only its own server, not another port or host`() {
-        CleartextPolicy.remember(optedIn(server.url("/")))
+        CleartextPolicy.remember(optedIn(server.at("/")))
 
-        assertThrows(CleartextRefusedException::class.java) { get(other.url("/")) }
+        assertThrows(CleartextRefusedException::class.java) { get(other.at("/")) }
         assertFalse(CleartextPolicy.permits("http://192.168.1.99/".toHttpUrl()))
         assertEquals(0, other.requestCount)
     }
@@ -66,7 +70,7 @@ class CleartextPolicyTest {
     fun `stored settings without the opt-in allow no http`() {
         CleartextPolicy.remember(ServerSettings("https://music.example.com/".toHttpUrl(), "key-123"))
 
-        assertFalse(CleartextPolicy.permits(server.url("/")))
+        assertFalse(CleartextPolicy.permits(server.at("/")))
     }
 
     @Test
@@ -79,10 +83,10 @@ class CleartextPolicyTest {
     fun `a server being connected is reachable during setup only`() {
         server.enqueue(MockResponse().setBody("ok"))
 
-        val code = runBlocking { CleartextPolicy.whileConnecting(server.url("/")) { get(server.url("/api/login")) } }
+        val code = runBlocking { CleartextPolicy.whileConnecting(server.at("/")) { get(server.at("/api/login")) } }
 
         assertEquals(200, code)
-        assertThrows(CleartextRefusedException::class.java) { get(server.url("/api/login")) }
+        assertThrows(CleartextRefusedException::class.java) { get(server.at("/api/login")) }
     }
 
     @Test
@@ -94,16 +98,16 @@ class CleartextPolicyTest {
 
     @Test
     fun `a redirect from the opted-in server to another http server is not followed`() {
-        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", other.url("/elsewhere")))
-        CleartextPolicy.remember(optedIn(server.url("/")))
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", other.at("/elsewhere")))
+        CleartextPolicy.remember(optedIn(server.at("/")))
 
-        assertThrows(CleartextRefusedException::class.java) { get(server.url("/rest/stream.view")) }
+        assertThrows(CleartextRefusedException::class.java) { get(server.at("/rest/stream.view")) }
         assertEquals(0, other.requestCount)
     }
 
     @Test
-    fun `the Subsonic client refuses an http server that is not opted in, and its key never leaves`() {
-        val settings = optedIn(server.url("/"))
+    fun `the Subsonic client sends nothing, and so no key, to an http server the policy has not been given`() {
+        val settings = optedIn(server.at("/"))
         val http = SubsonicHttp.okHttpClient { settings }
 
         assertThrows(CleartextRefusedException::class.java) {
@@ -117,6 +121,10 @@ class CleartextPolicyTest {
         val message = CleartextRefusedException().message.orEmpty()
 
         assertFalse(message.contains("localhost"))
-        assertFalse(message.contains("127.0.0.1"))
+        assertFalse(message.contains(LOOPBACK))
+    }
+
+    private companion object {
+        const val LOOPBACK = "127.0.0.1"
     }
 }

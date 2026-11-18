@@ -860,6 +860,7 @@ internal fun replacedKeyToRevoke(
     val oldKey = previous?.apiKey ?: return null
     return oldKey.takeIf { next.auth is ServerAuth.Device && previous.baseUrl == next.baseUrl }
 }
+
 private const val VERIFY_STATUS =
     "Compare this code with the one on the account page. Confirm only if they are the same."
 private const val CANCELLED_ON_PHONE = "The pairing was cancelled on this phone."
