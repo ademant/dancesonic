@@ -185,6 +185,7 @@ private enum class ConnectMethod(val label: String) {
 @Composable
 fun ConnectScreen(vm: ConnectViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var method by rememberSaveable { mutableStateOf(ConnectMethod.Qr) }
@@ -259,7 +260,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
 
             ConnectMethod.ApiKey -> {
                 Text(
-                    "Paste an API key created on the server. Only https:// addresses are accepted.",
+                    "Paste an API key created on the server. Use an https:// address.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 ServerAddressField(address) { address = it }
@@ -282,6 +283,8 @@ fun ConnectScreen(vm: ConnectViewModel) {
                 ) { Text("Connect") }
             }
         }
+
+        CleartextOptIn(allowCleartext, vm::setAllowCleartext)
 
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 

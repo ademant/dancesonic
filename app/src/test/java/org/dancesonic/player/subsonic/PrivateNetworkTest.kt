@@ -33,24 +33,40 @@ class PrivateNetworkTest {
     }
 
     @Test
-    fun `http is accepted for a private address`() {
-        assertEquals("http://192.168.1.20/navidrome/", ServerUrl.parse("http://192.168.1.20/navidrome").toString())
+    fun `http is rejected by default, even for a private address (#84)`() {
+        assertThrows(IllegalArgumentException::class.java) { ServerUrl.parse("http://192.168.1.20/navidrome") }
+        assertFalse("http://192.168.1.20/".toHttpUrl().isAllowedServer(allowCleartext = false))
     }
 
     @Test
-    fun `http is rejected for a public address`() {
-        assertThrows(IllegalArgumentException::class.java) { ServerUrl.parse("http://cloud.ademant.de/") }
-        assertThrows(IllegalArgumentException::class.java) { ServerUrl.parse("http://8.8.8.8/") }
+    fun `http is accepted for a private address once allowed`() {
+        assertEquals(
+            "http://192.168.1.20/navidrome/",
+            ServerUrl.parse("http://192.168.1.20/navidrome", allowCleartext = true).toString(),
+        )
     }
 
     @Test
-    fun `https is accepted for any address`() {
-        assertTrue("https://8.8.8.8/".toHttpUrl().isAllowedServer())
+    fun `http is rejected for a public address, allowed or not`() {
+        listOf(false, true).forEach { allowed ->
+            assertThrows(IllegalArgumentException::class.java) { ServerUrl.parse("http://cloud.ademant.de/", allowed) }
+            assertThrows(IllegalArgumentException::class.java) { ServerUrl.parse("http://8.8.8.8/", allowed) }
+        }
     }
 
     @Test
-    fun `settings accept an http private server and reject a public one`() {
-        ServerSettings("http://10.0.2.2:4533/".toHttpUrl(), "key")
-        assertThrows(IllegalArgumentException::class.java) { ServerSettings("http://example.com/".toHttpUrl(), "key") }
+    fun `https is accepted for any address and needs no opt-in`() {
+        assertTrue("https://8.8.8.8/".toHttpUrl().isAllowedServer(allowCleartext = false))
+        assertEquals("https://192.168.1.20/", ServerUrl.parse("192.168.1.20").toString())
+    }
+
+    @Test
+    fun `settings accept an http private server only with the opt-in, and never a public one`() {
+        val emulatorHost = "http://10.0.2.2:4533/".toHttpUrl()
+        assertThrows(IllegalArgumentException::class.java) { ServerSettings(emulatorHost, "key") }
+        ServerSettings(emulatorHost, "key", allowCleartext = true)
+        assertThrows(IllegalArgumentException::class.java) {
+            ServerSettings("http://example.com/".toHttpUrl(), "key", allowCleartext = true)
+        }
     }
 }

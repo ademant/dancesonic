@@ -52,6 +52,7 @@ import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.LanPins
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
@@ -303,6 +304,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             .onEach {
                 currentSettings = it
                 LanPins.remember(it)
+                CleartextPolicy.remember(it)
                 offline.kick()
             }
             .launchIn(appScope)

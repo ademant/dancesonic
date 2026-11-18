@@ -180,7 +180,7 @@ class SubsonicClientTest {
     }
 
     @Test
-    fun `server URL must be https`() {
+    fun `server URL must be https unless http is allowed`() {
         assertThrows(IllegalArgumentException::class.java) {
             ServerUrl.parse("http://navidrome.local/")
         }

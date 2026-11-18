@@ -98,6 +98,7 @@ class ServerSettingsStore internal constructor(
         dataStore.edit { prefs ->
             prefs[BASE_URL] = settings.baseUrl.toString()
             prefs[KEY_IN_HEADER] = settings.keyInHeader
+            prefs[ALLOW_CLEARTEXT] = settings.allowCleartext
             if (settings.tlsPin != null) prefs[TLS_PIN] = settings.tlsPin else prefs.remove(TLS_PIN)
             when (val auth = settings.auth) {
                 is ServerAuth.ApiKey -> {
@@ -123,21 +124,33 @@ class ServerSettingsStore internal constructor(
             prefs.remove(API_KEY_IV)
             prefs.remove(API_KEY_CIPHERTEXT)
             prefs.remove(KEY_IN_HEADER)
+            prefs.remove(ALLOW_CLEARTEXT)
             prefs.remove(TLS_PIN)
             prefs.remove(AUTH_KIND)
             prefs.remove(DEVICE_ALIAS)
         }
     }
 
+    /**
+     * The stored settings, or null when there are none or they are no longer allowed. An http connection saved before
+     * the http opt-in existed (#84) has no opt-in, so it reads as not connected and the user connects again.
+     */
+    @Suppress("SwallowedException")
     private fun read(prefs: Preferences): ServerSettings? {
         val url = prefs[BASE_URL]?.toHttpUrlOrNull() ?: return null
         val auth = readAuth(prefs) ?: return null
-        return ServerSettings(
-            baseUrl = url,
-            auth = auth,
-            keyInHeader = prefs[KEY_IN_HEADER] == true,
-            tlsPin = prefs[TLS_PIN],
-        )
+        return try {
+            ServerSettings(
+                baseUrl = url,
+                auth = auth,
+                keyInHeader = prefs[KEY_IN_HEADER] == true,
+                tlsPin = prefs[TLS_PIN],
+                allowCleartext = prefs[ALLOW_CLEARTEXT] == true,
+            )
+        } catch (e: IllegalArgumentException) {
+            // Expected for such an old http connection: reported as "not connected", never thrown into the flow.
+            null
+        }
     }
 
     /** The stored credential, or null when it is missing or the API key can no longer be decrypted. */
@@ -174,6 +187,7 @@ class ServerSettingsStore internal constructor(
         val API_KEY_IV = stringPreferencesKey("server_api_key_iv")
         val API_KEY_CIPHERTEXT = stringPreferencesKey("server_api_key_ciphertext")
         val KEY_IN_HEADER = booleanPreferencesKey("server_key_in_header")
+        val ALLOW_CLEARTEXT = booleanPreferencesKey("server_allow_cleartext")
         val TLS_PIN = stringPreferencesKey("server_tls_pin")
         val AUTH_KIND = stringPreferencesKey("server_auth_kind")
         val DEVICE_ALIAS = stringPreferencesKey("server_device_alias")

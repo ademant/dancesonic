@@ -47,6 +47,7 @@ import org.dancesonic.player.data.db.ChapterEntity
 import org.dancesonic.player.data.db.EditEntity
 import org.dancesonic.player.data.db.PlaylistItemRow
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.DeviceKeys
 import org.dancesonic.player.subsonic.KeystoreDeviceSigner
 import org.dancesonic.player.subsonic.LanTls
@@ -134,6 +135,25 @@ class ConnectViewModel(
     private val _state = MutableStateFlow(ConnectUiState())
     val state: StateFlow<ConnectUiState> = _state.asStateFlow()
 
+    private val _allowCleartext = MutableStateFlow(false)
+
+    /**
+     * Whether the next connection may use plain http to a private network server (#84). Off until the user turns it on
+     * and acknowledges the warning; it starts as the stored connection has it.
+     */
+    val allowCleartext: StateFlow<Boolean> = _allowCleartext.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            container.settingsStore.settings.first()?.let { _allowCleartext.value = it.allowCleartext }
+        }
+    }
+
+    /** Sets the http opt-in for the next connection. The UI turns it on only after the warning is acknowledged. */
+    fun setAllowCleartext(allowed: Boolean) {
+        _allowCleartext.value = allowed
+    }
+
     /**
      * Shows the pairing's verification code on this screen. The user's answer goes to [PairingVerifier.answer]:
      * [PairingDecision.MATCH] when the code equals the one on the account page.
@@ -162,7 +182,10 @@ class ConnectViewModel(
             _state.value = ConnectUiState(error = "Enter an API key.")
             return
         }
-        withAddress(address) { url -> ServerSettings(url, key).withTlsPin(LanTls.connectPin(url)) }
+        val allowCleartext = _allowCleartext.value
+        withAddress(address) { url ->
+            ServerSettings(url, key, allowCleartext = allowCleartext).withTlsPin(LanTls.connectPin(url))
+        }
     }
 
     /** Signs in with a username and password, then keeps only the API key the server issues. */
@@ -176,7 +199,8 @@ class ConnectViewModel(
             return
         }
         val url = parseAddress(address) ?: return
-        runConnect {
+        val allowCleartext = _allowCleartext.value
+        runConnect(url) {
             // The certificate is read before the password is sent, so a self-signed server is pinned first.
             val pin = LanTls.connectPin(url)
             val session = account.login(url, username.trim(), password)
@@ -187,7 +211,7 @@ class ConnectViewModel(
                     // The session is only needed to mint the key. Revoke it either way, best effort.
                     endSessionQuietly(url, session)
                 }
-            ServerSettings(url, key).withTlsPin(pin)
+            ServerSettings(url, key, allowCleartext = allowCleartext).withTlsPin(pin)
         }
     }
 
@@ -203,12 +227,13 @@ class ConnectViewModel(
         // A connection code from another device carries the server addresses and key itself.
         val shared =
             try {
-                ConnectionUri.parse(rawCode)
+                ConnectionUri.parse(rawCode, _allowCleartext.value)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message)
                 return
             }
         runConnect(
+            shared.server.baseUrl,
             danceBrainz = shared.danceBrainz,
         ) { shared.server.withTlsPin(LanTls.connectPin(shared.server.baseUrl)) }
     }
@@ -220,12 +245,12 @@ class ConnectViewModel(
     fun pairWithCode(rawCode: String) {
         val request =
             try {
-                PairingUri.parse(rawCode)
+                PairingUri.parse(rawCode, _allowCleartext.value)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message)
                 return
             }
-        runConnect {
+        runConnect(request.server) {
             val pin = LanTls.connectPin(request.server)
             require(request.pin == null || request.pin == pin) {
                 "The server certificate does not match the pin in this code. Create a new code on the account page."
@@ -293,12 +318,12 @@ class ConnectViewModel(
         build: suspend (HttpUrl) -> ServerSettings,
     ) {
         val url = parseAddress(address) ?: return
-        runConnect { build(url) }
+        runConnect(url) { build(url) }
     }
 
     private fun parseAddress(address: String): HttpUrl? =
         try {
-            ServerUrl.parse(address)
+            ServerUrl.parse(address, _allowCleartext.value)
         } catch (e: IllegalArgumentException) {
             _state.value = ConnectUiState(error = e.message)
             null
@@ -311,35 +336,15 @@ class ConnectViewModel(
      * check passes, so a failed attempt leaves the current connection untouched.
      */
     private fun runConnect(
+        server: HttpUrl,
         danceBrainz: HttpUrl? = null,
         obtain: suspend () -> ServerSettings,
     ) {
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
-                val entered = obtain()
-                val probe = SubsonicClient(entered)
-                probe.checkConnection()
-                val settings = settingsAfterProbe(entered, probe.advertisesTinysonic())
-                val verified =
-                    if (settings.keyInHeader) {
-                        SubsonicClient(
-                            settings,
-                        ).also { it.checkConnection() }
-                    } else {
-                        probe
-                    }
-                container.adoptCatalogClient(verified)
-                danceBrainz?.let { DanceBrainzClient(it).checkServer() }
-                if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
-                    container.library.clearCatalog()
-                    container.syncState.clear()
-                    container.audioCache.clear()
-                    container.waveforms.clear()
-                    container.keptCollections.forgetAll()
-                }
-                container.settingsStore.save(settings)
-                danceBrainz?.let { container.danceBrainzSettings.save(it) }
+                // An http server the user allowed may be reached while it is set up, before it is stored.
+                val settings = CleartextPolicy.whileConnecting(server) { verifyAndStore(obtain, danceBrainz) }
                 _state.value = ConnectUiState()
                 runSync(settings, incremental = false)
             } catch (e: CancellationException) {
@@ -354,6 +359,39 @@ class ConnectViewModel(
                 _state.value = ConnectUiState(error = e.message ?: "Invalid settings")
             }
         }
+    }
+
+    /** The checks and the store of [runConnect]. Returns the settings it stored. */
+    private suspend fun verifyAndStore(
+        obtain: suspend () -> ServerSettings,
+        danceBrainz: HttpUrl?,
+    ): ServerSettings {
+        val entered = obtain()
+        val probe = SubsonicClient(entered)
+        probe.checkConnection()
+        val settings = settingsAfterProbe(entered, probe.advertisesTinysonic())
+        val verified =
+            if (settings.keyInHeader) {
+                SubsonicClient(
+                    settings,
+                ).also { it.checkConnection() }
+            } else {
+                probe
+            }
+        container.adoptCatalogClient(verified)
+        danceBrainz?.let { DanceBrainzClient(it).checkServer() }
+        if (connectionChangesServer(container.settingsStore.settings.first(), settings)) {
+            container.library.clearCatalog()
+            container.syncState.clear()
+            container.audioCache.clear()
+            container.waveforms.clear()
+            container.keptCollections.forgetAll()
+        }
+        container.settingsStore.save(settings)
+        // The store's flow updates the policy too, but later: the first sync starts now.
+        CleartextPolicy.remember(settings)
+        danceBrainz?.let { container.danceBrainzSettings.save(it) }
+        return settings
     }
 
     /**
@@ -763,7 +801,9 @@ private suspend fun pairThisDevice(
     onWaiting: () -> Unit,
 ): ServerSettings {
     val alias = DeviceKeys.create()
-    val settings = ServerSettings(request.server, ServerAuth.Device(alias), tlsPin = pin)
+    // An http server got past PairingUri.parse only with the user's opt-in, so its settings keep that opt-in.
+    val settings =
+        ServerSettings(request.server, ServerAuth.Device(alias), tlsPin = pin, allowCleartext = !request.server.isHttps)
     var paired = false
     try {
         val jwk = KeystoreDeviceSigner(alias).publicJwk()

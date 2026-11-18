@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
+    <!--
+        Plain http (#84). Android cannot scope cleartext to a server the user
+        picks at runtime, so the platform permits it and the app enforces the
+        rule: CleartextPolicy, built into every HTTP client the app uses,
+        refuses any http request except to the one private-network server the
+        user allowed after a warning. Without that opt-in nothing goes out over
+        http. HTTPS needs no opt-in.
+    -->
+    <base-config cleartextTrafficPermitted="true" />
     <!--
         Pins the certificate chain of the folksonic server (cloud.ademant.de).
         A pin matches any certificate in the verified chain, so the leaf can

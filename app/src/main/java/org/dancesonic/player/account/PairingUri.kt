@@ -17,7 +17,8 @@ class PairingRequest(
 
 /**
  * Parses `tinysonic://pair?server=<base_url>&token=<token>`, the payload folksonic shows as a QR
- * code. Everything is validated before use: the scheme and host, an https server, and a token of
+ * code. Everything is validated before use: the scheme and host, the server address (https, or http
+ * to a private network when allowed), and a token of
  * safe characters and plausible length.
  */
 object PairingUri {
@@ -26,8 +27,14 @@ object PairingUri {
     private val TOKEN_PATTERN = Regex("[A-Za-z0-9_-]{8,256}")
     private val PIN_PATTERN = Regex("sha256/[A-Za-z0-9+/]{43}=")
 
-    /** @throws IllegalArgumentException if the text is not a valid pairing code. */
-    fun parse(raw: String): PairingRequest {
+    /**
+     * @param allowCleartext whether the user allowed plain http to a private network server (#84).
+     * @throws IllegalArgumentException if the text is not a valid pairing code.
+     */
+    fun parse(
+        raw: String,
+        allowCleartext: Boolean = false,
+    ): PairingRequest {
         val uri =
             try {
                 URI(raw.trim())
@@ -46,7 +53,7 @@ object PairingUri {
                 require(PIN_PATTERN.matches(it)) { "The pairing code's certificate pin is malformed." }
             }
 
-        return PairingRequest(server = ServerUrl.parse(server), token = token, pin = pin)
+        return PairingRequest(server = ServerUrl.parse(server, allowCleartext), token = token, pin = pin)
     }
 
     /** Splits and percent-decodes a query string. Shared with [ConnectionUri]. */

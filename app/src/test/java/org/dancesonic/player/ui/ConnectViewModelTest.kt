@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.dancesonic.player.AppContainer
+import org.dancesonic.player.subsonic.ServerUrl
 import org.dancesonic.player.testsupport.TestViewModelHost
 import org.dancesonic.player.testsupport.newTestContainer
 import org.dancesonic.player.testsupport.resetDatabase
@@ -71,10 +72,7 @@ class ConnectViewModelTest {
 
         vm.connectFromScan("dancesonic://connect?server=http%3A%2F%2Fmusic.example.com%2F&key=key-123")
 
-        assertEquals(
-            "The server address must start with https://, or http:// for a private network address",
-            vm.state.value.error,
-        )
+        assertEquals(ServerUrl.HTTP_NOT_PRIVATE, vm.state.value.error)
         assertFalse(vm.state.value.busy)
     }
 

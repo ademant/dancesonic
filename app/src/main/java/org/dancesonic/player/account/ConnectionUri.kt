@@ -37,12 +37,16 @@ object ConnectionUri {
     fun isConnectionCode(raw: String): Boolean = raw.trim().startsWith("$SCHEME://", ignoreCase = true)
 
     /**
-     * Parses a connection code. Both server addresses go through the same https check as typed input, and the key
-     * must not be blank.
+     * Parses a connection code. Both server addresses go through the same checks as typed input, and the key must not
+     * be blank. The DanceBrainz address must be https.
      *
+     * @param allowCleartext whether the user allowed plain http to a private network server (#84).
      * @throws IllegalArgumentException if the text is not a valid connection code.
      */
-    fun parse(raw: String): SharedConnection {
+    fun parse(
+        raw: String,
+        allowCleartext: Boolean = false,
+    ): SharedConnection {
         val uri =
             try {
                 URI(raw.trim())
@@ -56,7 +60,8 @@ object ConnectionUri {
         val key = params["key"]?.trim().orEmpty()
         require(key.isNotEmpty()) { "The connection code has no API key." }
         val dance = params["dancebrainz"]?.let { ServerUrl.parseHttps(it) }
-        return SharedConnection(ServerSettings(ServerUrl.parse(server), key), dance)
+        val url = ServerUrl.parse(server, allowCleartext)
+        return SharedConnection(ServerSettings(url, key, allowCleartext = allowCleartext), dance)
     }
 
     private fun encode(text: String): String = URLEncoder.encode(text, "UTF-8")

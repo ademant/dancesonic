@@ -32,9 +32,11 @@ Sign-in is done with one of three methods:
   never stored or logged.
 - **API key** typed in.
 
-Connections use HTTPS. Plain `http://` is accepted only for private network addresses (localhost,
-RFC 1918 ranges, IPv6 unique-local and link-local), so a home server works without a certificate.
-Be aware that on such a connection the API key travels unencrypted.
+Connections use HTTPS. Plain `http://` is off by default. For a home server without a certificate,
+turn on "Allow plain http for a server on my local network" on the connect screen and acknowledge the
+warning. Even then, http is accepted only for private network addresses (localhost, RFC 1918
+ranges, IPv6 unique-local and link-local), and only to that one server. On such a connection the API
+key and everything else travel unencrypted.
 
 DanceBrainz is signed in separately, by pairing the phone as a device on the DanceBrainz account
 page. The phone keeps a device key in the Android Keystore and proves possession of it with DPoP
