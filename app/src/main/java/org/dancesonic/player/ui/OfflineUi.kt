@@ -85,7 +85,6 @@ internal fun OfflineSection(offlineVm: OfflineViewModel) {
     val status by offlineVm.status.collectAsStateWithLifecycle()
     val settings by offlineVm.settings.collectAsStateWithLifecycle()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Offline", style = MaterialTheme.typography.titleMedium)
         Text(
             "Albums and playlists marked Keep offline are downloaded to the phone and stay there until unmarked.",
             style = MaterialTheme.typography.bodySmall,

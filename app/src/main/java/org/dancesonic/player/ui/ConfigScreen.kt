@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +66,7 @@ fun ConfigScreen(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val danceUrl by danceVm.baseUrl.collectAsStateWithLifecycle()
+    val danceState by danceVm.state.collectAsStateWithLifecycle()
     val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -81,86 +84,122 @@ fun ConfigScreen(
             Text("Config", style = MaterialTheme.typography.headlineSmall)
         }
 
-        Text("App", style = MaterialTheme.typography.titleMedium)
-        Text("DanceSonic ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+        ConfigSection("App", attention = false) {
+            Text("DanceSonic ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+        }
 
-        Text("Subsonic connection", style = MaterialTheme.typography.titleMedium)
-        val current = settings
-        if (current == null) {
-            Text("Not connected to a server.")
-        } else {
-            Text("Server: ${current.baseUrl}")
-            if (current.isCleartext) {
-                Text(
-                    "This connection uses plain http and is not encrypted. Switch the server to https when you can.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        ConfigSection(
+            "Subsonic connection",
+            attention = state.busy || state.error != null || state.verificationCode != null,
+        ) {
+            val current = settings
+            if (current == null) {
+                Text("Not connected to a server.")
+            } else {
+                Text("Server: ${current.baseUrl}")
+                if (current.isCleartext) {
+                    Text(
+                        "This connection uses plain http and is not encrypted. " +
+                            "Switch the server to https when you can.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                SubsonicKeySection(current, danceUrl)
+                Text("Library", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { vm.sync() }, enabled = !state.busy) { Text("Refresh") }
+                    OutlinedButton(onClick = { vm.sync(full = true) }, enabled = !state.busy) { Text("Full rebuild") }
+                }
+                TextButton(onClick = { vm.disconnect() }) { Text("Disconnect") }
+                if (state.busy) {
+                    val progress = state.syncProgress
+                    Text(
+                        if (progress == null || progress.total == 0) {
+                            "Syncing…"
+                        } else {
+                            "Syncing ${progress.done} of ${progress.total} albums…"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
-            SubsonicKeySection(current, danceUrl)
-            Text("Library", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.sync() }, enabled = !state.busy) { Text("Refresh") }
-                OutlinedButton(onClick = { vm.sync(full = true) }, enabled = !state.busy) { Text("Full rebuild") }
-            }
-            TextButton(onClick = { vm.disconnect() }) { Text("Disconnect") }
+
+            Text("Re-enter connection", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "The server is checked before the new connection replaces the stored one. " +
+                    "A different server address clears the synced library; playlists stay.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(
+                onClick = { scope.launch { vm.scanAndConnect(context) } },
+                enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Scan code") }
+            ServerAddressField(address) { address = it }
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text("API key") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(
+                onClick = {
+                    vm.connectWithApiKey(address, apiKey)
+                    apiKey = ""
+                },
+                enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Connect with this key") }
+            CleartextOptIn(allowCleartext, vm::setAllowCleartext)
+
+            state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            PairingVerification(state.verificationCode, vm.verifier::answer)
             if (state.busy) {
-                val progress = state.syncProgress
-                Text(
-                    if (progress == null || progress.total == 0) {
-                        "Syncing…"
-                    } else {
-                        "Syncing ${progress.done} of ${progress.total} albums…"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
             }
         }
 
-        Text("Re-enter connection", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "The server is checked before the new connection replaces the stored one. " +
-                "A different server address clears the synced library; playlists stay.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Button(
-            onClick = { scope.launch { vm.scanAndConnect(context) } },
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Scan code") }
-        ServerAddressField(address) { address = it }
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("API key") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedButton(
-            onClick = {
-                vm.connectWithApiKey(address, apiKey)
-                apiKey = ""
-            },
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Connect with this key") }
-        CleartextOptIn(allowCleartext, vm::setAllowCleartext)
+        ConfigSection("Playback", attention = false) { PlaybackSection(playbackVm) }
 
-        state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        PairingVerification(state.verificationCode, vm.verifier::answer)
-        if (state.busy) {
-            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        ConfigSection("Offline", attention = false) { OfflineSection(offlineVm) }
+
+        ConfigSection("DanceBrainz", attention = danceState.busy || danceState.error != null) {
+            DanceBrainzSection(danceVm)
         }
+    }
+}
 
-        PlaybackSection(playbackVm)
-
-        OfflineSection(offlineVm)
-
-        DanceBrainzSection(danceVm)
+/**
+ * A group of settings under a tappable title. It starts collapsed; [attention] opens it, for example while a
+ * connection or sign-in is running or has failed, so its status is never hidden.
+ */
+@Composable
+internal fun ConfigSection(
+    title: String,
+    attention: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(attention) {
+        if (attention) expanded = true
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(if (expanded) "▾" else "▸", style = MaterialTheme.typography.titleMedium)
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+        }
     }
 }
 
@@ -169,7 +208,6 @@ fun ConfigScreen(
 private fun PlaybackSection(playbackVm: PlaybackSettingsViewModel) {
     val settings by playbackVm.settings.collectAsStateWithLifecycle()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Playback", style = MaterialTheme.typography.titleMedium)
         Row(
             Modifier.fillMaxWidth().clickable { playbackVm.setReplayGain(!settings.replayGain) },
             verticalAlignment = Alignment.CenterVertically,
@@ -220,7 +258,6 @@ private fun DanceBrainzSection(danceVm: DanceBrainzViewModel) {
     val scope = rememberCoroutineScope()
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("DanceBrainz", style = MaterialTheme.typography.titleMedium)
         Text("Server: $url")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { danceVm.refreshDance(full = false) }, enabled = !state.busy) { Text("Refresh") }

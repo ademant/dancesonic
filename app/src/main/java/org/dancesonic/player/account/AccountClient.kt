@@ -339,6 +339,7 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         private const val CODE_PAIRING_REJECTED = "pairing_rejected"
         private const val CODE_PAIRING_TOKEN_USED = "pairing_token_used"
         private const val CODE_PAIRING_BUSY = "pairing_busy"
+
         /** How long a pairing code lasts on folksonic, and so how long the app waits for its approval at most. */
         const val PAIRING_WAIT_MILLIS = 15L * 60_000L
 

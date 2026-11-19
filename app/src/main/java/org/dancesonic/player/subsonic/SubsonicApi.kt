@@ -80,8 +80,7 @@ class ServerSettings(
     val apiKey: String? get() = (auth as? ServerAuth.ApiKey)?.key
 
     /** The same server and auth, with the key sent in [header] or in the query. */
-    fun withKeyInHeader(header: Boolean): ServerSettings =
-        ServerSettings(baseUrl, auth, header, tlsPin, allowCleartext)
+    fun withKeyInHeader(header: Boolean): ServerSettings = ServerSettings(baseUrl, auth, header, tlsPin, allowCleartext)
 
     /** The same server and auth, with [pin] as the certificate pin. */
     fun withTlsPin(pin: String?): ServerSettings = ServerSettings(baseUrl, auth, keyInHeader, pin, allowCleartext)
