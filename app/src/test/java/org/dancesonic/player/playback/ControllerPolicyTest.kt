@@ -25,7 +25,10 @@ class ControllerPolicyTest {
 
     @Test
     fun `the app's media notification gets full access`() {
-        assertEquals(ControllerAccess.FULL, access("android.media.session.MediaController", ownUid, notification = true))
+        assertEquals(
+            ControllerAccess.FULL,
+            access("android.media.session.MediaController", ownUid, notification = true),
+        )
     }
 
     @Test
