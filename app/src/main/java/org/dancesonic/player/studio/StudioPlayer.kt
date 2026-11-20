@@ -24,10 +24,10 @@ import kotlinx.coroutines.launch
  * Its state is read on the thread of [looper], which must be the main thread. Studio's answers arrive on other threads
  * and are passed to the player through [Dispatchers.Main].
  */
-@Suppress("UnsafeOptInUsageError")
+@Suppress("UnsafeOptInUsageError", "TooManyFunctions")
 class StudioPlayer(
     looper: Looper,
-    private val session: StudioSession,
+    session: StudioSession,
     private val scope: CoroutineScope,
     private val clock: () -> Long,
     private val onRefused: (String) -> Unit,
@@ -36,20 +36,33 @@ class StudioPlayer(
     private val items = HashMap<String, MediaItem>()
     private var lastState: StudioPlayState? = null
     private var reportedAtMs = 0L
-    private val watch: Job
+    private var session: StudioSession = session
+    private var collector: Job? = null
 
     init {
-        watch =
-            scope.launch(Dispatchers.Main) {
-                session.state.collect { state ->
-                    if (state != null) {
-                        lastState = state
-                        reportedAtMs = clock()
-                    }
-                    invalidateState()
-                }
-            }
+        collector = follow(session)
     }
+
+    /**
+     * Moves the player to [next]: the same Studio on another link, with the counter carried on. Playback on Studio
+     * is not interrupted. Call [refresh] afterwards to read Studio's current state.
+     */
+    fun switchSession(next: StudioSession) {
+        collector?.cancel()
+        session = next
+        collector = follow(next)
+    }
+
+    private fun follow(current: StudioSession): Job =
+        scope.launch(Dispatchers.Main) {
+            current.state.collect { state ->
+                if (state != null) {
+                    lastState = state
+                    reportedAtMs = clock()
+                }
+                invalidateState()
+            }
+        }
 
     /** Asks Studio for its current playback, so the player shows it at once. */
     fun refresh() = send(StudioCommand.GetState)
@@ -132,7 +145,7 @@ class StudioPlayer(
     }
 
     override fun handleRelease(): ListenableFuture<*> {
-        watch.cancel()
+        collector?.cancel()
         return Futures.immediateVoidFuture()
     }
 

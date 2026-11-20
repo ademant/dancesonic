@@ -64,6 +64,7 @@ private class NoiseCapture {
  * and permitted; the network is the fallback. Either way the fingerprint is checked before anything is sent. A pairing
  * is stored only after Studio has accepted the phone.
  */
+@Suppress("TooManyFunctions")
 class StudioRemote
     @Suppress("LongParameterList")
     constructor(
@@ -220,9 +221,23 @@ class StudioRemote
                 else -> StudioUnavailable(StudioUnavailable.Reason.FAILED, this)
             }
 
-        /** Connects to a paired Studio and says hello. Throws [StudioUnavailable] when it cannot be reached. */
+        /** Connects to a paired Studio, over Bluetooth when possible, and says hello. */
+        suspend fun connect(record: StudioPairing): OpenStudio = connectOn(record, StudioTransports.initial())
+
+        /**
+         * Opens a new session with [record] after its link on [dropped] was lost, over the other transport. The counter
+         * carries on from the stored one, so Studio sees no replay. Throws [StudioUnavailable] when that one fails too.
+         */
+        suspend fun reconnect(
+            record: StudioPairing,
+            dropped: String,
+        ): OpenStudio = connectOn(record, StudioTransports.after(dropped))
+
         @Suppress("ThrowsCount", "TooGenericExceptionCaught")
-        suspend fun connect(record: StudioPairing): OpenStudio {
+        private suspend fun connectOn(
+            record: StudioPairing,
+            order: List<String>,
+        ): OpenStudio {
             val fingerprint =
                 StudioWire.decodeBase64Url(record.fingerprint, FINGERPRINT_BYTES)
                     ?: throw StudioUnavailable(StudioUnavailable.Reason.FAILED)
@@ -232,7 +247,7 @@ class StudioRemote
             val signer = KeystoreStudioSigner(record.keyAlias)
             var link: StudioLink? = null
             try {
-                link = openForConnect(record, fingerprint, noiseKey)
+                link = openFor(record, fingerprint, noiseKey, order)
                 val session = sessionOn(link, record, signer)
                 val welcome = session.hello()
                 return OpenStudio(record, session, welcome.transport)
@@ -254,30 +269,50 @@ class StudioRemote
             }
         }
 
-        /** Bluetooth when the pairing has its Noise key and Studio is in range, otherwise the network. */
+        /**
+         * Tries each transport in [order]; the first link that opens is used. When none does, the last failure is
+         * thrown.
+         */
         @Suppress("TooGenericExceptionCaught")
-        private suspend fun openForConnect(
+        private suspend fun openFor(
             record: StudioPairing,
             fingerprint: ByteArray,
             noiseKey: ByteArray,
+            order: List<String>,
         ): StudioLink {
-            val gateway = ble
-            val phoneKeys = runCatching { noiseKeys.open(record) }.getOrNull()
-            val uuid = runCatching { UUID.fromString(record.bleService) }.getOrNull()
-            if (gateway != null && phoneKeys != null && uuid != null) {
+            var failure = StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
+            for (transport in order) {
                 try {
-                    val link =
-                        gateway.open(uuid, phoneKeys) { spki, noise ->
-                            StudioWire.fingerprint(spki, noise).contentEquals(fingerprint) &&
-                                noise.contentEquals(noiseKey)
-                        }
-                    if (link != null) return link
-                } catch (e: BleStudioException) {
-                    Log.i(TAG, "Bluetooth not used: ${e.message}")
+                    return when (transport) {
+                        StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey) ?: continue
+                        else -> openChecked(locate(fingerprint), noiseKey, fingerprint)
+                    }
+                } catch (e: StudioUnavailable) {
+                    failure = e
                 }
             }
-            val address = locate(fingerprint)
-            return openChecked(address, noiseKey, fingerprint)
+            throw failure
+        }
+
+        /** The Bluetooth link to [record], or null when Bluetooth is off, not permitted, or Studio is not in range. */
+        @Suppress("ReturnCount")
+        private suspend fun openBluetoothForConnect(
+            record: StudioPairing,
+            fingerprint: ByteArray,
+            noiseKey: ByteArray,
+        ): StudioLink? {
+            val gateway = ble ?: return null
+            val phoneKeys = runCatching { noiseKeys.open(record) }.getOrNull() ?: return null
+            val uuid = runCatching { UUID.fromString(record.bleService) }.getOrNull() ?: return null
+            return try {
+                gateway.open(uuid, phoneKeys) { spki, noise ->
+                    StudioWire.fingerprint(spki, noise).contentEquals(fingerprint) &&
+                        noise.contentEquals(noiseKey)
+                }
+            } catch (e: BleStudioException) {
+                Log.i(TAG, "Bluetooth not used: ${e.message}")
+                null
+            }
         }
 
         /** Forgets a pairing: its record and its device key. Studio lists the phone until it is revoked there. */

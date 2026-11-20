@@ -196,7 +196,11 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
     val studioPairings = StudioPairingStore(dataStore)
 
     /** Decides whether playback runs on this phone or on a paired Studio (#88). */
-    val playOn = PlayOnTarget(appScope)
+    val playOn =
+        PlayOnTarget(
+            scope = appScope,
+            reconnect = { record, dropped -> studioRemote.reconnect(record, dropped) },
+        )
 
     /** Pairs with and reconnects to Studios over the local network. */
     val studioRemote: StudioRemote by lazy {
