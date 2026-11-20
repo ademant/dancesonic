@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The green behind the launcher icon's dancers; matches the artwork's background. -->
+    <color name="ic_launcher_background">#FF1C472B</color>
+</resources>

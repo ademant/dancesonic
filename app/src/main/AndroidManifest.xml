@@ -10,6 +10,7 @@
     <application
         android:name=".DanceSonicApp"
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="DanceSonic"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
