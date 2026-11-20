@@ -147,6 +147,11 @@ class PlayerController(
             built
         }
 
+    /** Connects to the playback service now, starting it if needed. Used before playback is handed to a Studio. */
+    suspend fun ensureConnected() {
+        connected()
+    }
+
     /** The length of the track at [index] in the queue, in milliseconds; 0 when the server did not give one. */
     private fun lengthMs(index: Int): Long =
         queue.getOrNull(index)?.track?.durationSec?.let { it * MILLIS_PER_SECOND } ?: 0L

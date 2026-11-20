@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.dancesonic.player.AppContainer
+import org.dancesonic.player.studio.PlayOnTarget
 import org.dancesonic.player.studio.StudioPairing
 import org.dancesonic.player.studio.StudioUnavailable
 
@@ -47,6 +48,40 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
                 _state.value = StudioUiState(error = describe(e.reason))
             }
         }
+    }
+
+    /** Where playback runs now: this phone, or one Studio. */
+    val target: StateFlow<PlayOnTarget.Target> = container.playOn.target
+
+    /**
+     * Connects to [record] and puts playback on it. Playback on the phone stops; the Studio's session stays open until
+     * the user switches back or another Studio is chosen.
+     */
+    fun playOn(record: StudioPairing) {
+        if (_state.value.busy) return
+        _state.value = StudioUiState(busy = true, message = "Connecting to ${record.name}…")
+        viewModelScope.launch {
+            try {
+                container.player.ensureConnected()
+                val opened = container.studioRemote.connect(record)
+                if (container.playOn.playOnStudio(opened)) {
+                    _state.value = StudioUiState(message = "Playing on ${record.name}.")
+                } else {
+                    opened.session.close()
+                    _state.value = StudioUiState(error = "Playback is not running. Try again.")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: StudioUnavailable) {
+                _state.value = StudioUiState(error = describe(e.reason))
+            }
+        }
+    }
+
+    /** Puts playback back on this phone. The Studio keeps playing. */
+    fun playOnPhone() {
+        container.playOn.playOnPhone()
+        _state.value = StudioUiState(message = "Playing on this phone.")
     }
 
     /** Removes a pairing and its device key on this phone. Studio keeps the phone listed until it is revoked there. */
