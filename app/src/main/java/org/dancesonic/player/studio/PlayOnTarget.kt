@@ -32,7 +32,8 @@ class PlayOnTarget(
     sealed interface Target {
         data object Phone : Target
 
-        data class Studio(val pairingId: String, val name: String) : Target
+        /** [transport] is `ble` or `network`, as Studio names the link it runs on. */
+        data class Studio(val pairingId: String, val name: String, val transport: String) : Target
     }
 
     private val _target = MutableStateFlow<Target>(Target.Phone)
@@ -74,7 +75,7 @@ class PlayOnTarget(
             }
         mediaSession.player = player
         active = Active(opened.record.id, opened.session, player, watch)
-        _target.value = Target.Studio(opened.record.id, opened.record.name)
+        _target.value = Target.Studio(opened.record.id, opened.record.name, opened.transport)
         player.refresh()
         return true
     }

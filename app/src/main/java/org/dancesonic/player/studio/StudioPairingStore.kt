@@ -33,6 +33,10 @@ data class StudioPairing(
     /** The phone's Noise public key, as registered with Studio. */
     val phoneNoiseKey: String,
     val counter: Long = 0,
+    /** IV of the phone's Noise private key, Base64. Null for pairings made before Bluetooth. */
+    val phoneNoiseIv: String? = null,
+    /** The phone's Noise private key, encrypted with the Keystore key, Base64. Null for old pairings. */
+    val phoneNoiseSealed: String? = null,
 )
 
 /**
