@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import org.dancesonic.player.studio.ble.BleGateway
 import org.dancesonic.player.studio.ble.BleStudioException
@@ -285,7 +286,7 @@ class StudioRemote
                 try {
                     return when (transport) {
                         StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey) ?: continue
-                        else -> openChecked(locate(fingerprint), noiseKey, fingerprint)
+                        else -> openNetwork(record, fingerprint, noiseKey)
                     }
                 } catch (e: StudioUnavailable) {
                     failure = e
@@ -321,9 +322,33 @@ class StudioRemote
             DeviceKeys.delete(record.keyAlias)
         }
 
+        /** The address mDNS finds for [fingerprint]. Pairing has no hint yet, so only mDNS is used there. */
         private suspend fun locate(fingerprint: ByteArray): HttpUrl =
             discovery.find(StudioWire.mdnsTag(fingerprint))
                 ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
+
+        /**
+         * The network link to [record]: the address mDNS finds first, then the addresses Studio reported over
+         * Bluetooth. Each one must pass the fingerprint and key check, so a wrong address fails and the next is tried.
+         */
+        private suspend fun openNetwork(
+            record: StudioPairing,
+            fingerprint: ByteArray,
+            noiseKey: ByteArray,
+        ): StudioLink {
+            val found = discovery.find(StudioWire.mdnsTag(fingerprint))
+            // The record passed in may be older than the hint: a Bluetooth session saves its hint as it arrives.
+            val current = store.find(record.id) ?: record
+            var failure = StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
+            for (address in StudioHint.candidates(found, current.hintAddresses, current.hintPort)) {
+                try {
+                    return openChecked(address, noiseKey, fingerprint)
+                } catch (e: StudioUnavailable) {
+                    failure = e
+                }
+            }
+            throw failure
+        }
 
         @Suppress("TooGenericExceptionCaught")
         private suspend fun info(address: HttpUrl): StudioInfo =
@@ -358,6 +383,9 @@ class StudioRemote
                 link = link,
                 deviceId = record.deviceId,
                 signer = signer,
+                onHint = { hint ->
+                    scope.launch { store.saveHint(record.id, hint.addresses, hint.port) }
+                },
                 counter =
                     object : StudioCounter {
                         override suspend fun advance(): Long =

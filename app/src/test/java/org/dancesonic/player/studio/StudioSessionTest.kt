@@ -233,6 +233,32 @@ class StudioSessionTest {
             session.close()
         }
 
+    @Test
+    fun `a network hint is handed to the phone, which keeps it for the network`() =
+        runBlocking {
+            val link = FakeLink()
+            var hint: StudioMessage.NetworkHint? = null
+            val session =
+                StudioSession(
+                    link,
+                    "dev-1",
+                    SoftwareSigner(),
+                    RecordingCounter(mutableListOf()),
+                    this,
+                    onHint = { hint = it },
+                )
+            val hello = async { session.hello() }
+            link.nextSent()
+            link.incoming.send(welcome)
+            hello.await()
+
+            link.incoming.send("""{"type":"network_hint","addresses":["192.168.1.20"],"port":47800}""")
+            waitUntil { hint != null }
+
+            assertEquals(StudioMessage.NetworkHint(listOf("192.168.1.20"), 47800), hint)
+            session.close()
+        }
+
     private suspend fun waitUntil(condition: () -> Boolean) {
         repeat(200) {
             if (condition()) return
