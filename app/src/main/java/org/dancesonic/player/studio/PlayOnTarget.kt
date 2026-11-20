@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.Player
 import androidx.media3.session.MediaSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,13 +20,16 @@ import kotlinx.coroutines.launch
  * the player behind it changes, so the notification, lock screen and the app's own controls follow the choice.
  *
  * Only one Studio is active at a time. Switching back to the phone leaves the Studio playing: the phone stops
- * controlling it and drops the connection. If Studio drops the connection, playback returns to the phone.
+ * controlling it and drops the connection. When the link to Studio drops, the phone opens the other transport and
+ * carries on with the same Studio; if that fails too, playback returns to the phone.
  *
  * Every method runs on the main thread.
  */
 @Suppress("UnsafeOptInUsageError")
 class PlayOnTarget(
     private val scope: CoroutineScope,
+    /** Opens a new session with a paired Studio over the other transport, after [dropped] was lost. */
+    private val reconnect: suspend (record: StudioPairing, dropped: String) -> OpenStudio,
     private val clock: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
     /** Where playback runs. Not stored: after an app restart playback is on the phone until the user chooses again. */
@@ -44,9 +48,10 @@ class PlayOnTarget(
     private var active: Active? = null
 
     private class Active(
-        val pairingId: String,
+        val record: StudioPairing,
         val connection: StudioSession,
         val player: StudioPlayer,
+        val transport: String,
         val watch: Job,
     )
 
@@ -68,13 +73,8 @@ class PlayOnTarget(
         phone?.pause()
         if (active != null) playOnPhone()
         val player = StudioPlayer(Looper.getMainLooper(), opened.session, scope, clock, ::logRefused)
-        val watch =
-            scope.launch(Dispatchers.Main) {
-                opened.session.ended.first { it != null }
-                if (active?.connection === opened.session) playOnPhone()
-            }
         mediaSession.player = player
-        active = Active(opened.record.id, opened.session, player, watch)
+        active = Active(opened.record, opened.session, player, opened.transport, watch(opened))
         _target.value = Target.Studio(opened.record.id, opened.record.name, opened.transport)
         player.refresh()
         return true
@@ -96,6 +96,49 @@ class PlayOnTarget(
         playOnPhone()
         session = null
         phone = null
+    }
+
+    private fun watch(opened: OpenStudio): Job =
+        scope.launch(Dispatchers.Main) {
+            val reason = opened.session.ended.first { it != null }
+            if (active?.connection !== opened.session) return@launch
+            if (reason == StudioSession.LINK_LOST) {
+                moveToOtherLink(opened)
+            } else {
+                playOnPhone()
+            }
+        }
+
+    /**
+     * Carries playback on Studio over to the other transport after the link on [lost] dropped. Studio's playback does
+     * not depend on the link, so nothing is restarted. If the other transport cannot be reached, playback returns to
+     * the phone.
+     */
+    private suspend fun moveToOtherLink(lost: OpenStudio) {
+        val current = active ?: return
+        val next =
+            try {
+                reconnect(current.record, lost.transport)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: StudioUnavailable) {
+                Log.i(TAG, "Studio not reachable over the other transport: ${e.reason}")
+                null
+            }
+        // The user may have chosen another target while the reconnect ran.
+        if (active?.connection !== lost.session) {
+            next?.session?.close()
+            return
+        }
+        if (next == null) {
+            playOnPhone()
+            return
+        }
+        lost.session.close()
+        current.player.switchSession(next.session)
+        active = Active(current.record, next.session, current.player, next.transport, watch(next))
+        _target.value = Target.Studio(current.record.id, current.record.name, next.transport)
+        current.player.refresh()
     }
 
     private fun endActive() {

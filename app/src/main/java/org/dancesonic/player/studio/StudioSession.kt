@@ -101,12 +101,12 @@ class StudioSession(
             for (text in link.incoming) {
                 dispatch(StudioMessage.parse(text) ?: continue)
             }
-            end("closed")
+            end(LINK_LOST)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // Any failure of the link ends the session; the reason is kept for the UI, not rethrown.
-            end(e.message ?: "closed")
+            end(LINK_LOST)
         }
     }
 
@@ -143,5 +143,11 @@ class StudioSession(
     companion object {
         /** How long Studio may take to answer a command or a hello. */
         const val REPLY_TIMEOUT_MILLIS = 10_000L
+
+        /**
+         * Why [ended] holds this value: the link dropped. The phone may open the other transport and carry on. Other
+         * reasons (`closed` by the phone, or Studio's `bye`, such as `revoked`) do not allow that.
+         */
+        const val LINK_LOST = "link_lost"
     }
 }

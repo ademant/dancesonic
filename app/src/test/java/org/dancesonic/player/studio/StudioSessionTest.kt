@@ -216,6 +216,23 @@ class StudioSessionTest {
             session.close()
         }
 
+    @Test
+    fun `a dropped link ends the session as a lost link, so the phone may switch transport`() =
+        runBlocking {
+            val link = FakeLink()
+            val session = StudioSession(link, "dev-1", SoftwareSigner(), RecordingCounter(mutableListOf()), this)
+            val hello = async { session.hello() }
+            link.nextSent()
+            link.incoming.send(welcome)
+            hello.await()
+
+            link.incoming.close()
+            waitUntil { session.ended.value != null }
+
+            assertEquals(StudioSession.LINK_LOST, session.ended.value)
+            session.close()
+        }
+
     private suspend fun waitUntil(condition: () -> Boolean) {
         repeat(200) {
             if (condition()) return
