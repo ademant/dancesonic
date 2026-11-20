@@ -54,6 +54,7 @@ import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.studio.PlayOnTarget
 import org.dancesonic.player.studio.StudioConnector
 import org.dancesonic.player.studio.StudioDiscovery
 import org.dancesonic.player.studio.StudioPairingStore
@@ -192,6 +193,9 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
 
     /** Paired DanceSonic Studios (#88). Their device keys live in the Keystore; the list lives in the settings. */
     val studioPairings = StudioPairingStore(dataStore)
+
+    /** Decides whether playback runs on this phone or on a paired Studio (#88). */
+    val playOn = PlayOnTarget(appScope)
 
     /** Pairs with and reconnects to Studios over the local network. */
     val studioRemote: StudioRemote by lazy {

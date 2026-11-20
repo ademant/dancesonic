@@ -47,10 +47,12 @@ class PlaybackService : MediaSessionService() {
                 .setHandleAudioBecomingNoisy(true)
                 .build()
         player.addListener(QueueFollower(tracker, onsets))
-        session =
+        val mediaSession =
             MediaSession.Builder(this, player)
                 .setCallback(ControllerGate(packageName, Process.myUid()))
                 .build()
+        session = mediaSession
+        container.playOn.attach(mediaSession, player)
     }
 
     /**
@@ -125,6 +127,7 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onDestroy() {
+        (application as DanceSonicApp).container.playOn.detach()
         session?.let { mediaSession ->
             mediaSession.player.release()
             mediaSession.release()
