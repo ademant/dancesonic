@@ -37,6 +37,10 @@ data class StudioPairing(
     val phoneNoiseIv: String? = null,
     /** The phone's Noise private key, encrypted with the Keystore key, Base64. Null for old pairings. */
     val phoneNoiseSealed: String? = null,
+    /** The addresses Studio last reported over Bluetooth, tried when mDNS finds nothing. Empty until then. */
+    val hintAddresses: List<String> = emptyList(),
+    /** The HTTPS port Studio last reported with [hintAddresses]. */
+    val hintPort: Int? = null,
 )
 
 /**
@@ -61,6 +65,22 @@ class StudioPairingStore(private val dataStore: DataStore<Preferences>) {
     ) {
         dataStore.edit { prefs ->
             prefs[KEY] = encode(decode(prefs[KEY]).map { if (it.id == id) it.copy(name = name) else it })
+        }
+    }
+
+    /** Keeps the addresses Studio reported for [id]. A pairing that is gone is left alone. */
+    suspend fun saveHint(
+        id: String,
+        addresses: List<String>,
+        port: Int,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[KEY] =
+                encode(
+                    decode(prefs[KEY]).map {
+                        if (it.id == id) it.copy(hintAddresses = addresses, hintPort = port) else it
+                    },
+                )
         }
     }
 
