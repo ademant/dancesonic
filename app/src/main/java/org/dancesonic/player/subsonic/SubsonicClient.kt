@@ -214,7 +214,7 @@ private suspend fun <T> readAllPages(
 }
 
 /** Throws for a `status: failed` envelope; returns the response otherwise. */
-private fun unwrap(response: SubsonicResponse): SubsonicResponse {
+internal fun unwrap(response: SubsonicResponse): SubsonicResponse {
     if (response.status != "ok") {
         val error = response.error
         throw SubsonicException(error?.code, error?.message ?: "Server reported an error")

@@ -33,6 +33,7 @@ import org.dancesonic.player.data.KeptCollections
 import org.dancesonic.player.data.LibraryRepository
 import org.dancesonic.player.data.LogcatSyncTimings
 import org.dancesonic.player.data.PlaylistRepository
+import org.dancesonic.player.data.Scrobbles
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
 import org.dancesonic.player.data.db.DanceSonicDatabase
@@ -44,6 +45,7 @@ import org.dancesonic.player.playback.DownloadNetwork
 import org.dancesonic.player.playback.DownloadSettings
 import org.dancesonic.player.playback.DownloadSettingsStore
 import org.dancesonic.player.playback.OfflineDownloads
+import org.dancesonic.player.playback.PlaybackEvents
 import org.dancesonic.player.playback.PlaybackSettings
 import org.dancesonic.player.playback.PlaybackSettingsSource
 import org.dancesonic.player.playback.PlaybackSettingsStore
@@ -54,6 +56,7 @@ import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.LanPins
+import org.dancesonic.player.subsonic.PlayReporter
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
@@ -169,6 +172,10 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
 
     val keptCollections = KeptCollections(database)
 
+    /** Plays waiting to be reported to the server (#89). */
+    val scrobbles =
+        Scrobbles(database, currentServer = { currentSettings }, reporterFor = { PlayReporter(it, httpClient) })
+
     /** Sync points (change-feed position, last check). Not secret; cleared on disconnect. */
     val syncState = SyncStateStore(dataStore)
 
@@ -218,15 +225,31 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
                         appScope.launch { playbackSettingsStore.save(settings) }
                     }
                 },
-            onTrackStarted = { songId ->
-                refreshPlayingTrack(songId)
-                prefetchStarted(songId)
-                appScope.launch {
-                    waveforms.loadFromServer(songId)
-                    onsetCache.refresh(songId)
-                }
-            },
-            onQueued = ::onQueued,
+            events =
+                object : PlaybackEvents {
+                    override fun trackStarted(songId: String) {
+                        refreshPlayingTrack(songId)
+                        prefetchStarted(songId)
+                        appScope.launch { scrobbles.flush() }
+                        appScope.launch {
+                            waveforms.loadFromServer(songId)
+                            onsetCache.refresh(songId)
+                        }
+                    }
+
+                    override fun queued(
+                        queue: List<TrackEntity>,
+                        startIndex: Int,
+                        settings: ServerSettings,
+                    ) = onQueued(queue, startIndex, settings)
+
+                    override fun playCounted(
+                        songId: String,
+                        startedAtMs: Long,
+                    ) {
+                        appScope.launch { scrobbles.record(songId, startedAtMs) }
+                    }
+                },
         )
 
     /**
