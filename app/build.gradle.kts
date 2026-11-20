@@ -108,6 +108,8 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.okhttp)
+    // The TLS channel binding of the Studio network transport (#88) needs Conscrypt's keying-material exporter.
+    implementation(libs.conscrypt.android)
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization.converter)
     implementation(libs.androidx.datastore.preferences)

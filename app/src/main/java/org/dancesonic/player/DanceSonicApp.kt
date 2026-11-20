@@ -54,6 +54,10 @@ import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
+import org.dancesonic.player.studio.StudioConnector
+import org.dancesonic.player.studio.StudioDiscovery
+import org.dancesonic.player.studio.StudioPairingStore
+import org.dancesonic.player.studio.StudioRemote
 import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.LanPins
 import org.dancesonic.player.subsonic.PlayReporter
@@ -185,6 +189,19 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
         private set
 
     val danceBrainzSettings = DanceBrainzSettingsStore(dataStore)
+
+    /** Paired DanceSonic Studios (#88). Their device keys live in the Keystore; the list lives in the settings. */
+    val studioPairings = StudioPairingStore(dataStore)
+
+    /** Pairs with and reconnects to Studios over the local network. */
+    val studioRemote: StudioRemote by lazy {
+        StudioRemote(
+            store = studioPairings,
+            discovery = StudioDiscovery(context.applicationContext),
+            connector = StudioConnector(timeoutSeconds = 10),
+            scope = appScope,
+        )
+    }
 
     /** The DanceBrainz sign-in token, encrypted. Empty until the user signs in. */
     val danceBrainzTokens = DanceBrainzTokenStore(dataStore)
