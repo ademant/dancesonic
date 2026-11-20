@@ -337,6 +337,7 @@ class ConnectViewModel(
             container.audioCache.clear()
             container.waveforms.clear()
             container.keptCollections.forgetAll()
+            container.scrobbles.forgetAll()
             container.settingsStore.clear()
             _state.value = ConnectUiState(error = warning)
         }
@@ -419,6 +420,7 @@ class ConnectViewModel(
             container.audioCache.clear()
             container.waveforms.clear()
             container.keptCollections.forgetAll()
+            container.scrobbles.forgetAll()
         }
         container.settingsStore.save(settings)
         // The store's flow updates the policy too, but later: the first sync starts now.

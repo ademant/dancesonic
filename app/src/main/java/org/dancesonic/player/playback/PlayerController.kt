@@ -84,17 +84,8 @@ class PlayerController(
     private val settingsProvider: () -> ServerSettings?,
     /** The playback choices: read when a track starts, and saved when a new track resets the tempo. */
     private val settings: PlaybackSettingsSource,
-    /** Called on the main thread when a track starts; the argument is its song id. */
-    private val onTrackStarted: (songId: String) -> Unit = {},
-    /**
-     * Called with each new queue, before it starts: the tracks, the index that starts, and the server settings.
-     * Records the sizes that bound the stream, and may start a download of the track that begins.
-     */
-    private val onQueued: (
-        queue: List<TrackEntity>,
-        startIndex: Int,
-        settings: ServerSettings,
-    ) -> Unit = { _, _, _ -> },
+    /** What playback reports to the app: a track starting, a new queue, and a counted play (#89). */
+    private val events: PlaybackEvents = PlaybackEvents.None,
 ) {
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
@@ -110,6 +101,9 @@ class PlayerController(
 
     /** The queue as it was loaded, so a track's tempo and gain can be looked up by its index. */
     private var queue: List<TrackWithTempo> = emptyList()
+
+    private val playCounter =
+        PlayCounter(System::currentTimeMillis) { songId, startedAtMs -> events.playCounted(songId, startedAtMs) }
 
     /** Connects once; concurrent first calls wait for the same connection. */
     private suspend fun connected(): MediaController =
@@ -127,7 +121,13 @@ class PlayerController(
                     ) {
                         applyCurrentTrack(built, fromStart = true)
                         publish(built)
-                        mediaItem?.mediaId?.let(onTrackStarted)
+                        val songId = mediaItem?.mediaId
+                        if (songId == null) {
+                            playCounter.stopped()
+                        } else {
+                            playCounter.trackStarted(songId, lengthMs(built.currentMediaItemIndex))
+                            events.trackStarted(songId)
+                        }
                     }
 
                     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
@@ -140,11 +140,16 @@ class PlayerController(
                 scope.launch(Dispatchers.Main) {
                     while (true) {
                         publishProgress(built)
+                        playCounter.tick(built.isPlaying, built.playbackParameters.speed)
                         delay(PROGRESS_INTERVAL_MS)
                     }
                 }
             built
         }
+
+    /** The length of the track at [index] in the queue, in milliseconds; 0 when the server did not give one. */
+    private fun lengthMs(index: Int): Long =
+        queue.getOrNull(index)?.track?.durationSec?.let { it * MILLIS_PER_SECOND } ?: 0L
 
     private fun publishProgress(player: Player) {
         // Some streams never report a length; the server's length for the track is the fallback.
@@ -222,7 +227,7 @@ class PlayerController(
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
         queue = tracks
-        onQueued(tracks.map { it.track }, startIndex, settings)
+        events.queued(tracks.map { it.track }, startIndex, settings)
         scope.launch(Dispatchers.Main) {
             val player = connected()
             player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)

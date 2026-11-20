@@ -205,3 +205,21 @@ private const val FROM_12 = 12
 private const val TO_13 = 13
 private const val FROM_13 = 13
 private const val TO_14 = 14
+
+/** Adds the scrobble queue (#89): counted plays waiting to be reported to the server. Existing data is untouched. */
+val MIGRATION_14_15 =
+    object : Migration(FROM_14, TO_15) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `scrobble_queue` " +
+                    "(`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `serverUrl` TEXT NOT NULL, " +
+                    "`songId` TEXT NOT NULL, `playedAt` INTEGER NOT NULL)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_scrobble_queue_serverUrl` ON `scrobble_queue` (`serverUrl`)",
+            )
+        }
+    }
+
+private const val FROM_14 = 14
+private const val TO_15 = 15

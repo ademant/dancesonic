@@ -21,8 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ChapterEntity::class,
         WaveformEntity::class,
         OnsetsEntity::class,
+        ScrobbleQueueEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -50,6 +51,8 @@ abstract class DanceSonicDatabase : RoomDatabase() {
 
     abstract fun waveformDao(): WaveformDao
 
+    abstract fun scrobbleQueueDao(): ScrobbleQueueDao
+
     companion object {
         fun create(context: Context): DanceSonicDatabase =
             Room.databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
@@ -67,6 +70,7 @@ abstract class DanceSonicDatabase : RoomDatabase() {
                     MIGRATION_11_12,
                     MIGRATION_12_13,
                     MIGRATION_13_14,
+                    MIGRATION_14_15,
                 )
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
                 .addCallback(
