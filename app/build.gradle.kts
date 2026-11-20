@@ -110,6 +110,8 @@ dependencies {
     implementation(libs.okhttp)
     // The TLS channel binding of the Studio network transport (#88) needs Conscrypt's keying-material exporter.
     implementation(libs.conscrypt.android)
+    // Noise XX needs X25519, ChaCha20-Poly1305 and BLAKE2s; JCA has no BLAKE2s and no X25519 before API 33 (#88).
+    implementation(libs.bouncycastle.bcprov)
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization.converter)
     implementation(libs.androidx.datastore.preferences)

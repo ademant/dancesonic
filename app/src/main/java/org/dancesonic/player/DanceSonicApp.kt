@@ -59,6 +59,7 @@ import org.dancesonic.player.studio.StudioConnector
 import org.dancesonic.player.studio.StudioDiscovery
 import org.dancesonic.player.studio.StudioPairingStore
 import org.dancesonic.player.studio.StudioRemote
+import org.dancesonic.player.studio.ble.BleGateway
 import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.LanPins
 import org.dancesonic.player.subsonic.PlayReporter
@@ -204,6 +205,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             discovery = StudioDiscovery(context.applicationContext),
             connector = StudioConnector(timeoutSeconds = 10),
             scope = appScope,
+            ble = BleGateway(context.applicationContext, appScope),
         )
     }
 
