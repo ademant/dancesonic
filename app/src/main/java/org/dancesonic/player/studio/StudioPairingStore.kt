@@ -1,0 +1,98 @@
+package org.dancesonic.player.studio
+
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+
+/**
+ * One paired Studio, as the phone keeps it. Everything here is public or an id: the device key is in the Keystore,
+ * under [keyAlias]. [counter] is the last counter the phone used with this Studio; it only goes up.
+ */
+@Serializable
+data class StudioPairing(
+    /** A local id for the app's lists; not sent to Studio. */
+    val id: String,
+    val name: String,
+    /** Studio's fingerprint, base64url. */
+    val fingerprint: String,
+    /** Studio's Noise public key, base64url. Needed to check Studio on every connection. */
+    val studioNoiseKey: String,
+    /** Studio's BLE service UUID, kept for the Bluetooth transport. */
+    val bleService: String,
+    /** The device id Studio gave the phone. */
+    val deviceId: String,
+    /** The Keystore alias of the phone's device key for this Studio. */
+    val keyAlias: String,
+    /** The phone's Noise public key, as registered with Studio. */
+    val phoneNoiseKey: String,
+    val counter: Long = 0,
+)
+
+/**
+ * The paired Studios, kept in the settings DataStore as one JSON list. Not secret, so it is not encrypted; the keys
+ * stay in the Keystore.
+ */
+class StudioPairingStore(private val dataStore: DataStore<Preferences>) {
+    /** Every pairing, in the order they were added. */
+    val pairings: Flow<List<StudioPairing>> = dataStore.data.map { decode(it[KEY]) }
+
+    suspend fun list(): List<StudioPairing> = pairings.first()
+
+    suspend fun find(id: String): StudioPairing? = list().firstOrNull { it.id == id }
+
+    suspend fun add(pairing: StudioPairing) {
+        dataStore.edit { prefs -> prefs[KEY] = encode(decode(prefs[KEY]) + pairing) }
+    }
+
+    suspend fun rename(
+        id: String,
+        name: String,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[KEY] = encode(decode(prefs[KEY]).map { if (it.id == id) it.copy(name = name) else it })
+        }
+    }
+
+    /** Removes a pairing from the list. Its Keystore key is removed by the caller. */
+    suspend fun remove(id: String) {
+        dataStore.edit { prefs -> prefs[KEY] = encode(decode(prefs[KEY]).filterNot { it.id == id }) }
+    }
+
+    /**
+     * Stores the next counter for [id] and returns it. The value is written before the caller sends anything with it,
+     * so a restart never reuses a counter. Returns null when the pairing is gone.
+     */
+    suspend fun advanceCounter(id: String): Long? {
+        var next: Long? = null
+        dataStore.edit { prefs ->
+            val updated =
+                decode(prefs[KEY]).map {
+                    if (it.id == id) it.copy(counter = it.counter + 1).also { p -> next = p.counter } else it
+                }
+            prefs[KEY] = encode(updated)
+        }
+        return next
+    }
+
+    private fun decode(text: String?): List<StudioPairing> =
+        text?.let { runCatching { json.decodeFromString(ListSerializer(StudioPairing.serializer()), it) }.getOrNull() }
+            ?: emptyList()
+
+    private fun encode(list: List<StudioPairing>): String =
+        json.encodeToString(
+            ListSerializer(StudioPairing.serializer()),
+            list,
+        )
+
+    private companion object {
+        val KEY = stringPreferencesKey("studio_pairings")
+        val json = Json { ignoreUnknownKeys = true }
+    }
+}

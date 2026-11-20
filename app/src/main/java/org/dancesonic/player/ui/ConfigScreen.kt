@@ -55,11 +55,13 @@ private val QR_SIZE = 240.dp
  * before they replace the stored one. The QR code carries the DanceBrainz server as well.
  */
 @Composable
+@Suppress("LongParameterList") // one view model per section; the screen is the only caller
 fun ConfigScreen(
     vm: ConnectViewModel,
     danceVm: DanceBrainzViewModel,
     playbackVm: PlaybackSettingsViewModel,
     offlineVm: OfflineViewModel,
+    studioVm: StudioViewModel,
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -168,6 +170,8 @@ fun ConfigScreen(
         ConfigSection("Playback", attention = false) { PlaybackSection(playbackVm) }
 
         ConfigSection("Offline", attention = false) { OfflineSection(offlineVm) }
+
+        ConfigSection("Studio", attention = false) { StudioSection(studioVm) }
 
         ConfigSection("DanceBrainz", attention = danceState.busy || danceState.error != null) {
             DanceBrainzSection(danceVm)
