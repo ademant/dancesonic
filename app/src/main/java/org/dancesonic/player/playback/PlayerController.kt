@@ -217,7 +217,10 @@ class PlayerController(
 
     /** Called after a playback setting changed: the track now playing takes the new speed and volume. */
     fun settingsChanged() {
-        scope.launch(Dispatchers.Main) {
+        // Called from the settings collector on a background thread. Main.immediate still moves the work to the main
+        // thread there; it also runs on a test's Unconfined main dispatcher, which refuses dispatches from other
+        // threads and failed unrelated tests with UncaughtExceptionsBeforeTest.
+        scope.launch(Dispatchers.Main.immediate) {
             val player = controller ?: return@launch
             applyCurrentTrack(player)
             publish(player)
