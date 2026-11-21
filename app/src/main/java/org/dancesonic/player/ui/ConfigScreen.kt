@@ -70,6 +70,7 @@ fun ConfigScreen(
     val danceUrl by danceVm.baseUrl.collectAsStateWithLifecycle()
     val danceState by danceVm.state.collectAsStateWithLifecycle()
     val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
+    val summaries = configSummaries(vm, playbackVm, offlineVm, studioVm, danceVm)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Not saved: the QR code leaves the screen with the screen, so a rotation or restore hides it again.
@@ -86,13 +87,14 @@ fun ConfigScreen(
             Text("Config", style = MaterialTheme.typography.headlineSmall)
         }
 
-        ConfigSection("App", attention = false) {
+        ConfigSection("App", attention = false, summary = "Version ${BuildConfig.VERSION_NAME}") {
             Text("DanceSonic ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
         }
 
         ConfigSection(
             "Subsonic connection",
             attention = state.busy || state.error != null || state.verificationCode != null,
+            summary = summaries.connection,
         ) {
             val current = settings
             if (current == null) {
@@ -167,13 +169,17 @@ fun ConfigScreen(
             }
         }
 
-        ConfigSection("Playback", attention = false) { PlaybackSection(playbackVm) }
+        ConfigSection("Playback", attention = false, summary = summaries.playback) { PlaybackSection(playbackVm) }
 
-        ConfigSection("Offline", attention = false) { OfflineSection(offlineVm) }
+        ConfigSection("Offline", attention = false, summary = summaries.offline) { OfflineSection(offlineVm) }
 
-        ConfigSection("Studio", attention = false) { StudioSection(studioVm) }
+        ConfigSection("Studio", attention = false, summary = summaries.studio) { StudioSection(studioVm) }
 
-        ConfigSection("DanceBrainz", attention = danceState.busy || danceState.error != null) {
+        ConfigSection(
+            "DanceBrainz",
+            attention = danceState.busy || danceState.error != null,
+            summary = summaries.danceBrainz,
+        ) {
             DanceBrainzSection(danceVm)
         }
     }
@@ -187,6 +193,7 @@ fun ConfigScreen(
 internal fun ConfigSection(
     title: String,
     attention: Boolean,
+    summary: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -198,7 +205,17 @@ internal fun ConfigSection(
             Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                // The current state while collapsed (#108), so a section need not be opened just to read it.
+                if (!expanded && summary != null) {
+                    Text(
+                        summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Text(if (expanded) "▾" else "▸", style = MaterialTheme.typography.titleMedium)
         }
         if (expanded) {

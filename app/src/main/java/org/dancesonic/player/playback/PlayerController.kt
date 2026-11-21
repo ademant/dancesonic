@@ -6,6 +6,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -69,7 +70,14 @@ data class PlaybackUiState(
     val tempo: Float = 1f,
     /** The recording's own BPM, when the server has one. Null when unknown. */
     val trackBpm: Int? = null,
-)
+    /** How many tracks the queue holds; 0 when nothing has been queued. */
+    val queueLength: Int = 0,
+    val hasPrevious: Boolean = false,
+    val hasNext: Boolean = false,
+) {
+    /** Nothing queued, so the transport controls have nothing to act on (#105). */
+    val idle: Boolean get() = queueLength == 0
+}
 
 /**
  * UI-side handle to [PlaybackService]. Commands go through a [MediaController], so playback
@@ -131,6 +139,12 @@ class PlayerController(
                     }
 
                     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
+
+                    // A new or emptied queue changes what the transport controls can do.
+                    override fun onTimelineChanged(
+                        timeline: Timeline,
+                        reason: Int,
+                    ) = publish(built)
                 },
             )
             controller = built
@@ -185,6 +199,9 @@ class PlayerController(
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
                 trackBpm = queue.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
+                queueLength = player.mediaItemCount,
+                hasPrevious = player.hasPreviousMediaItem(),
+                hasNext = player.hasNextMediaItem(),
             )
     }
 

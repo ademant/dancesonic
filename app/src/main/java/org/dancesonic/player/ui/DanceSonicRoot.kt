@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -317,12 +318,15 @@ internal fun ServerAddressField(
 @Composable
 internal fun TransportRow(player: PlayerController) {
     val state by player.state.collectAsStateWithLifecycle()
+    // A button that cannot do anything, such as Next on the last track or anything with an empty queue, is disabled.
     Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = { player.previous() }) { Text("Prev") }
+        OutlinedButton(onClick = { player.previous() }, enabled = state.hasPrevious) { Text("Prev") }
         Spacer(Modifier.width(8.dp))
-        Button(onClick = { player.togglePlayPause() }) { Text(if (state.isPlaying) "Pause" else "Play") }
+        Button(onClick = { player.togglePlayPause() }, enabled = !state.idle) {
+            Text(if (state.isPlaying) "Pause" else "Play")
+        }
         Spacer(Modifier.width(8.dp))
-        OutlinedButton(onClick = { player.next() }) { Text("Next") }
+        OutlinedButton(onClick = { player.next() }, enabled = state.hasNext) { Text("Next") }
     }
 }
 
@@ -339,14 +343,24 @@ fun PlayerBar(
     val bpmMode = settings.tempoMode == TempoMode.Bpm
     var tempo by remember(settings.multiplier) { mutableFloatStateOf(settings.multiplier) }
     var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
+    // While nothing is queued the bar is one line (#105); the controls stay one tap away, for the tempo settings.
+    var showIdleControls by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.idle) { if (!state.idle) showIdleControls = false }
+    if (state.idle && !showIdleControls) {
+        IdlePlayerBar(onShowControls = { showIdleControls = true })
+        return
+    }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(
-            text = state.nowPlayingTitle ?: "Nothing playing",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.clickable(onClick = onExpand),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = state.nowPlayingTitle ?: NOTHING_PLAYING,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).clickable(onClick = onExpand),
+            )
+            if (state.idle) TextButton(onClick = { showIdleControls = false }) { Text(HIDE_CONTROLS) }
+        }
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SeekBar(player, libraryVm.nowPlayingWaveform)
         TransportRow(player)
@@ -412,6 +426,27 @@ fun PlayerBar(
             }
             ResetTempoButton(playbackVm, bpmMode, state.trackBpm)
         }
+    }
+}
+
+internal const val NOTHING_PLAYING = "Nothing playing"
+internal const val SHOW_CONTROLS = "Controls"
+internal const val HIDE_CONTROLS = "Hide"
+
+/** The player bar while nothing is queued: one line saying so, and a way to the controls. */
+@Composable
+private fun IdlePlayerBar(onShowControls: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "$NOTHING_PLAYING. Choose a track to start.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onShowControls) { Text(SHOW_CONTROLS) }
     }
 }
 

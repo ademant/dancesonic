@@ -25,7 +25,7 @@ class ConfigSectionTest {
 
     private fun show() {
         composeRule.setContent {
-            ConfigSection("Playback", attention = attention) {
+            ConfigSection("Playback", attention = attention, summary = "Tempo 1.00x, ReplayGain off") {
                 Text("ReplayGain option")
             }
         }
@@ -58,6 +58,17 @@ class ConfigSectionTest {
         attention = true
         composeRule.waitForIdle()
 
+        composeRule.onAllNodesWithText("ReplayGain option").assertCountEquals(1)
+    }
+
+    @Test
+    fun `a collapsed section shows its summary, and an open one shows the settings instead`() {
+        show()
+        composeRule.onAllNodesWithText("Tempo 1.00x, ReplayGain off").assertCountEquals(1)
+
+        composeRule.onNodeWithText("Playback").performClick()
+
+        composeRule.onAllNodesWithText("Tempo 1.00x, ReplayGain off").assertCountEquals(0)
         composeRule.onAllNodesWithText("ReplayGain option").assertCountEquals(1)
     }
 }

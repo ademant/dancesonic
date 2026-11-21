@@ -214,6 +214,22 @@ object StudioOutgoing {
             put("sig", StudioWire.base64Url(signature))
         }.toString()
 
+    /** Pairing through folksonic: like [pairRequest], but signed only, without a proof (#104). */
+    fun pairCodeRequest(
+        name: String,
+        devicePoint: ByteArray,
+        noiseKey: ByteArray,
+        signature: ByteArray,
+    ): String =
+        buildJsonObject {
+            put("type", "pair_code_request")
+            put("v", StudioWire.PROTOCOL_VERSION)
+            put("name", name)
+            put("device_key", StudioWire.base64Url(devicePoint))
+            put("noise_key", StudioWire.base64Url(noiseKey))
+            put("sig", StudioWire.base64Url(signature))
+        }.toString()
+
     fun hello(
         deviceId: String,
         counter: Long,

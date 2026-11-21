@@ -1,7 +1,6 @@
 package org.dancesonic.player.studio
 
 import kotlinx.coroutines.withTimeout
-import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -16,11 +15,10 @@ data class PairedDevice(val deviceId: String)
 class StudioPairer(
     private val signer: StudioSigner,
     /**
-     * The phone's Noise key, which Studio registers for the Bluetooth transport. Network pairing never uses it, but
-     * the request must carry a 32-byte key. Until Bluetooth is added this is random, so a Bluetooth pairing needs a
-     * real X25519 key and a new pairing.
+     * The public half of the phone's X25519 Noise key for this Studio, which Studio registers for Bluetooth and the
+     * relay. Always a real key (#104); the random placeholder of the first version could not open either.
      */
-    val noiseKey: ByteArray = randomNoiseKey(),
+    val noiseKey: ByteArray,
     private val decisionTimeoutMillis: Long = DECISION_TIMEOUT_MILLIS,
 ) {
     /** Sends the pairing request and waits for Studio's answer. */
@@ -40,32 +38,12 @@ class StudioPairer(
                 signature = signer.sign(transcript),
             ),
         )
-        return withTimeout(decisionTimeoutMillis) { awaitDecision(link) }
-    }
-
-    @Suppress("ThrowsCount") // each throw is a distinct outcome Studio can give: refusal, error, or a dead link
-    private suspend fun awaitDecision(link: StudioLink): PairedDevice {
-        for (text in link.incoming) {
-            when (val message = StudioMessage.parse(text) ?: continue) {
-                StudioMessage.PairPending -> Unit
-                is StudioMessage.PairAccepted -> return PairedDevice(message.device)
-                is StudioMessage.PairRejected -> throw StudioProtocolError("rejected")
-                is StudioMessage.Error -> throw StudioProtocolError(message.code)
-                is StudioMessage.Bye -> throw StudioProtocolError(message.reason)
-                else -> Unit
-            }
-        }
-        throw StudioProtocolError("closed")
+        return withTimeout(decisionTimeoutMillis) { awaitPairDecision(link) }
     }
 
     companion object {
         /** How long the user has to accept the phone in Studio. */
         const val DECISION_TIMEOUT_MILLIS = 3 * 60 * 1000L
-
-        private const val NOISE_KEY_BYTES = 32
-
-        /** A random 32-byte key; see [StudioPairer.noiseKey]. */
-        fun randomNoiseKey(): ByteArray = ByteArray(NOISE_KEY_BYTES).also { SecureRandom().nextBytes(it) }
 
         /** HMAC-SHA256 of [message] with [key]: the pairing proof. */
         internal fun hmac(
@@ -77,4 +55,46 @@ class StudioPairer(
                 doFinal(message)
             }
     }
+}
+
+/**
+ * Pairs through folksonic's relay by comparing codes (#104): there is no QR secret, so the request is only signed, and
+ * the user allows the phone in Studio when both screens show the same [RelayWire.comparisonCode] of the link. Studio
+ * refuses this request on any other transport.
+ */
+class StudioCodePairer(
+    private val signer: StudioSigner,
+    private val decisionTimeoutMillis: Long = StudioPairer.DECISION_TIMEOUT_MILLIS,
+) {
+    /**
+     * Sends `pair_code_request` to the Studio with [fingerprint] and waits for its answer. [noiseKey] must be the
+     * phone's Noise static key of this very session, which Studio checks.
+     */
+    suspend fun pair(
+        link: StudioLink,
+        fingerprint: ByteArray,
+        noiseKey: ByteArray,
+        phoneName: String,
+    ): PairedDevice {
+        val devicePoint = signer.devicePoint()
+        val transcript = RelayWire.pairCodeTranscript(fingerprint, devicePoint, noiseKey, link.binding)
+        link.send(StudioOutgoing.pairCodeRequest(phoneName, devicePoint, noiseKey, signer.sign(transcript)))
+        return withTimeout(decisionTimeoutMillis) { awaitPairDecision(link) }
+    }
+}
+
+/** Waits for Studio's decision on a pairing request: accepted, rejected, refused, or a dropped link. */
+@Suppress("ThrowsCount") // each throw is a distinct outcome Studio can give: refusal, error, or a dead link
+internal suspend fun awaitPairDecision(link: StudioLink): PairedDevice {
+    for (text in link.incoming) {
+        when (val message = StudioMessage.parse(text) ?: continue) {
+            StudioMessage.PairPending -> Unit
+            is StudioMessage.PairAccepted -> return PairedDevice(message.device)
+            is StudioMessage.PairRejected -> throw StudioProtocolError("rejected")
+            is StudioMessage.Error -> throw StudioProtocolError(message.code)
+            is StudioMessage.Bye -> throw StudioProtocolError(message.reason)
+            else -> Unit
+        }
+    }
+    throw StudioProtocolError("closed")
 }

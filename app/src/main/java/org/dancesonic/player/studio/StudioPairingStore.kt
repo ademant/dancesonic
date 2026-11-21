@@ -105,6 +105,18 @@ class StudioPairingStore(private val dataStore: DataStore<Preferences>) {
         return next
     }
 
+    /**
+     * The phone's device id on folksonic's relay (#104): made once, then kept, so Studio sees the same phone each
+     * time. Random, so it tells folksonic nothing about the phone.
+     */
+    suspend fun relayPhoneId(): String {
+        var id: String? = null
+        dataStore.edit { prefs ->
+            id = prefs[RELAY_ID] ?: RelayWire.newPhoneId().also { prefs[RELAY_ID] = it }
+        }
+        return checkNotNull(id)
+    }
+
     private fun decode(text: String?): List<StudioPairing> =
         text?.let { runCatching { json.decodeFromString(ListSerializer(StudioPairing.serializer()), it) }.getOrNull() }
             ?: emptyList()
@@ -117,6 +129,7 @@ class StudioPairingStore(private val dataStore: DataStore<Preferences>) {
 
     private companion object {
         val KEY = stringPreferencesKey("studio_pairings")
+        val RELAY_ID = stringPreferencesKey("studio_relay_phone_id")
         val json = Json { ignoreUnknownKeys = true }
     }
 }

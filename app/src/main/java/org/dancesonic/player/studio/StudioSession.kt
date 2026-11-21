@@ -4,6 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +39,11 @@ class StudioSession
         private val replyTimeoutMillis: Long = REPLY_TIMEOUT_MILLIS,
         /** Called when Studio reports the addresses it can be reached at on the network. */
         private val onHint: (StudioMessage.NetworkHint) -> Unit = {},
+        /**
+         * When above 0, a `get_state` goes to Studio this often while the session is open. The relay needs it: Studio
+         * ends a relay session that has been silent for 90 seconds (#104).
+         */
+        keepAliveMillis: Long = 0L,
     ) : AutoCloseable {
         private val _state = MutableStateFlow<StudioPlayState?>(null)
 
@@ -56,6 +63,8 @@ class StudioSession
 
         @Volatile private var pendingFailure: CompletableDeferred<StudioProtocolError>? = null
         private val reader: Job = scope.launch { readAll() }
+        private val keepAlive: Job? =
+            if (keepAliveMillis > 0) scope.launch { sendKeepAlives(keepAliveMillis) } else null
 
         /** Sends `hello` and returns Studio's welcome. Throws [StudioProtocolError] when Studio refuses the phone. */
         suspend fun hello(): StudioMessage.Welcome {
@@ -115,6 +124,22 @@ class StudioSession
             }
         }
 
+        @Suppress("SwallowedException", "TooGenericExceptionCaught")
+        private suspend fun sendKeepAlives(everyMillis: Long) {
+            while (_ended.value == null) {
+                delay(everyMillis)
+                try {
+                    send(StudioCommand.GetState)
+                } catch (e: TimeoutCancellationException) {
+                    // A missed keepalive is not an error of its own: a dead link ends the session through the reader.
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Likewise for a refusal or a closing link; the session's end is reported through [ended].
+                }
+            }
+        }
+
         private fun dispatch(message: StudioMessage) {
             when (message) {
                 is StudioMessage.State -> _state.value = message.state
@@ -141,6 +166,7 @@ class StudioSession
         }
 
         override fun close() {
+            keepAlive?.cancel()
             reader.cancel()
             link.close()
             end("closed")

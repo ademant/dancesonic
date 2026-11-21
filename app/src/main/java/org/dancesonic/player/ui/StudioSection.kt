@@ -22,10 +22,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.dancesonic.player.studio.PlayOnTarget
+import org.dancesonic.player.studio.RelayStudio
 import org.dancesonic.player.studio.StudioPairing
 import org.dancesonic.player.studio.ble.BlePermissions
 
@@ -67,7 +70,7 @@ internal fun StudioSection(vm: StudioViewModel) {
         )
         val studioTarget = target as? PlayOnTarget.Target.Studio
         val playingOn =
-            studioTarget?.let { "${it.name} (${transportName(it.transport)})" } ?: "this phone"
+            studioTarget?.let { "${it.name} (${transportLabel(it.transport)})" } ?: "this phone"
         Text("Playing on: $playingOn", style = MaterialTheme.typography.titleSmall)
         if (target !is PlayOnTarget.Target.Phone) {
             OutlinedButton(
@@ -102,6 +105,11 @@ internal fun StudioSection(vm: StudioViewModel) {
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Pair a Studio (scan code)") }
+        FolksonicPairing(
+            state = state,
+            onFind = { vm.findOnFolksonic() },
+            onPair = { studio -> vm.pairThroughFolksonic(studio, Build.MODEL ?: "Phone") },
+        )
         state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (state.busy) {
@@ -109,8 +117,6 @@ internal fun StudioSection(vm: StudioViewModel) {
         }
     }
 }
-
-private fun transportName(transport: String): String = if (transport == "ble") "Bluetooth" else "Wi-Fi"
 
 @Suppress("LongParameterList")
 @Composable
@@ -124,6 +130,12 @@ private fun StudioRow(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(if (active) "${record.name} (playing)" else record.name, style = MaterialTheme.typography.titleSmall)
+        if (record.phoneNoiseSealed == null) {
+            Text(
+                "Paired before Bluetooth and folksonic were supported: forget it and pair again to use them.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onPlayOn, enabled = !busy && !active) { Text("Play on") }
             OutlinedButton(onClick = onCheck, enabled = !busy) { Text("Check") }
@@ -131,3 +143,30 @@ private fun StudioRow(
         }
     }
 }
+
+/**
+ * Pairing through folksonic (#104): lists the account's Studios, and while one is pairing shows the code to compare
+ * with Studio's screen. A server in the middle would show a different code on each side.
+ */
+@Composable
+private fun FolksonicPairing(
+    state: StudioUiState,
+    onFind: () -> Unit,
+    onPair: (RelayStudio) -> Unit,
+) {
+    OutlinedButton(onClick = onFind, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+        Text("Pair through folksonic")
+    }
+    state.relayStudios?.forEach { studio ->
+        TextButton(onClick = { onPair(studio) }, enabled = !state.busy) { Text("Pair with ${studio.name}") }
+    }
+    state.comparisonCode?.let { code ->
+        Text(
+            code.chunked(CODE_GROUP).joinToString(" "),
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.semantics { contentDescription = "Comparison code $code" },
+        )
+    }
+}
+
+private const val CODE_GROUP = 3

@@ -62,4 +62,39 @@ class StudioPairerTest {
 
             assertEquals("secret_used", (paired.await().exceptionOrNull() as StudioProtocolError).code)
         }
+
+    @Test
+    fun `pairing through folksonic sends a signed code request without a proof`() =
+        runBlocking {
+            val link = FakeLink()
+            val signer = SoftwareSigner()
+            val noiseKey = ByteArray(32) { 6 }
+
+            val paired = async { StudioCodePairer(signer).pair(link, fingerprint, noiseKey, "Pixel") }
+            val request = link.nextSent()
+            link.incoming.send("""{"type":"pair_pending"}""")
+            link.incoming.send("""{"type":"pair_accepted","device":"dev-4"}""")
+
+            assertEquals("pair_code_request", request.text("type"))
+            assertEquals("Pixel", request.text("name"))
+            assertEquals(null, request["proof"])
+            assertEquals(StudioWire.base64Url(noiseKey), request.text("noise_key"))
+            val devicePoint = StudioWire.decodeBase64Url(request.text("device_key"), 65)!!
+            val transcript = RelayWire.pairCodeTranscript(fingerprint, devicePoint, noiseKey, link.binding)
+            assertTrue(signer.verify(transcript, StudioWire.decodeBase64Url(request.text("sig"), 100)!!))
+            assertEquals("dev-4", paired.await().deviceId)
+        }
+
+    @Test
+    fun `a phone the user rejects in Studio is not paired through folksonic`() =
+        runBlocking {
+            val link = FakeLink()
+
+            val pairer = StudioCodePairer(SoftwareSigner())
+            val paired = async { runCatching { pairer.pair(link, fingerprint, ByteArray(32), "P") } }
+            link.nextSent()
+            link.incoming.send("""{"type":"pair_rejected","reason":"rejected"}""")
+
+            assertEquals("rejected", (paired.await().exceptionOrNull() as StudioProtocolError).code)
+        }
 }
