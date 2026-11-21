@@ -39,7 +39,7 @@ jobs:
             "cmake;3.22.1" "ndk;$ndk" "platforms;android-37.2" > /dev/null
 
       - name: Unit tests, ktlint, detekt and debug build
-        run: ./gradlew --no-daemon testDebugUnitTest ktlintCheck detekt assembleDebug
+        run: ./gradlew --no-daemon --continue testDebugUnitTest ktlintCheck detekt assembleDebug
 
       - name: Upload reports
         if: failure()

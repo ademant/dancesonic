@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,8 +39,6 @@ import org.dancesonic.player.dance.DanceSuggestion
 import org.dancesonic.player.dance.MeterValue
 import org.dancesonic.player.data.MeterView
 import org.dancesonic.player.data.ShoesView
-import org.dancesonic.player.data.SyncMode
-import org.dancesonic.player.data.SyncResult
 import org.dancesonic.player.data.TrackDetail
 import org.dancesonic.player.data.db.AlbumEntity
 import org.dancesonic.player.data.db.ChapterEntity
@@ -199,9 +196,8 @@ class ConnectViewModel(
             _state.value = ConnectUiState(error = "Enter your username and password.")
             return
         }
-        val url = parseAddress(address) ?: return
         val allowCleartext = _allowCleartext.value
-        runConnect(url) {
+        withAddress(address) { url ->
             // The certificate is read before the password is sent, so a self-signed server is pinned first.
             val pin = LanTls.connectPin(url)
             val session = account.login(url, username.trim(), password)
@@ -210,7 +206,7 @@ class ConnectViewModel(
                     account.createApiKey(url, session)
                 } finally {
                     // The session is only needed to mint the key. Revoke it either way, best effort.
-                    endSessionQuietly(url, session)
+                    account.logoutQuietly(url, session)
                 }
             ServerSettings(url, key, allowCleartext = allowCleartext).withTlsPin(pin)
         }
@@ -264,7 +260,7 @@ class ConnectViewModel(
                 pin,
                 verify = verifier::await,
                 awaitApproval = { device ->
-                    withCountdown(expiresAt) {
+                    countingDown(expiresAt, show = { status -> _state.update { it.copy(status = status) } }) {
                         val left = (expiresAt - System.currentTimeMillis()).coerceAtLeast(0)
                         device.awaitDeviceApproval(request.server, timeoutMillis = left)
                     }
@@ -272,27 +268,6 @@ class ConnectViewModel(
             )
         }
     }
-
-    /** Runs [block] while the status counts down to [expiresAt], once a second (#68). */
-    private suspend fun <T> withCountdown(
-        expiresAt: Long,
-        block: suspend () -> T,
-    ): T =
-        coroutineScope {
-            val ticker =
-                launch {
-                    while (true) {
-                        val left = expiresAt - System.currentTimeMillis()
-                        _state.update { it.copy(status = waitingStatus(left)) }
-                        delay(COUNTDOWN_TICK_MILLIS)
-                    }
-                }
-            try {
-                block()
-            } finally {
-                ticker.cancel()
-            }
-        }
 
     /**
      * Brings the local catalog up to date. By default only what changed on the server is fetched.
@@ -347,17 +322,15 @@ class ConnectViewModel(
         address: String,
         build: suspend (HttpUrl) -> ServerSettings,
     ) {
-        val url = parseAddress(address) ?: return
+        val url =
+            try {
+                ServerUrl.parse(address, _allowCleartext.value)
+            } catch (e: IllegalArgumentException) {
+                _state.value = ConnectUiState(error = e.message)
+                return
+            }
         runConnect(url) { build(url) }
     }
-
-    private fun parseAddress(address: String): HttpUrl? =
-        try {
-            ServerUrl.parse(address, _allowCleartext.value)
-        } catch (e: IllegalArgumentException) {
-            _state.value = ConnectUiState(error = e.message)
-            null
-        }
 
     /**
      * Runs [obtain] to get settings, verifies them against the server, stores them and starts the
@@ -491,7 +464,7 @@ class ConnectViewModel(
                         }
                     }
                 container.edits.flush()
-                _state.value = ConnectUiState(lastSync = syncMessage(result), status = notice)
+                _state.value = ConnectUiState(lastSync = result.summary(), status = notice)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
@@ -500,30 +473,6 @@ class ConnectViewModel(
         }
     }
 
-    private fun syncMessage(result: SyncResult): String {
-        val danceNote =
-            if (result.danceLookupsFailed > 0) ", ${result.danceLookupsFailed} dance lookups failed" else ""
-        return when (result.mode) {
-            SyncMode.Unchanged -> "No changes on the server since the last sync."
-            SyncMode.Changes -> "Applied ${result.rowsWritten} changes$danceNote"
-            SyncMode.Full ->
-                "Synced ${result.artists} artists, ${result.albums} albums, ${result.tracks} tracks$danceNote"
-        }
-    }
-
-    @Suppress("SwallowedException")
-    private suspend fun endSessionQuietly(
-        url: HttpUrl,
-        session: String,
-    ) {
-        try {
-            account.logout(url, session)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: AccountException) {
-            // Deliberately ignored: the key is already issued and the session expires on its own.
-        }
-    }
 }
 
 /** Passes library flows to the UI. Room is the source of truth; the UI never waits on the network. */
@@ -839,7 +788,6 @@ class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
-private const val COUNTDOWN_TICK_MILLIS = 1_000L
 private const val MILLIS_PER_SECOND = 1_000L
 private const val SECONDS_PER_MINUTE = 60L
 

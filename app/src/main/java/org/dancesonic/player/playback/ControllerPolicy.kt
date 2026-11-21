@@ -7,9 +7,9 @@ internal data class ControllerIdentity(
     val packageName: String,
     val uid: Int,
     /**
-     * Media3's trust decision ([androidx.media3.session.MediaSession.ControllerInfo.isTrusted]): true for the system and
-     * for apps holding `MEDIA_CONTENT_CONTROL` or an enabled notification listener. It is checked by the platform with
-     * the caller's uid, not taken from a package name the caller reports.
+     * Media3's trust decision ([androidx.media3.session.MediaSession.ControllerInfo.isTrusted]): true for the system
+     * and for apps holding `MEDIA_CONTENT_CONTROL` or an enabled notification listener. It is checked by the platform
+     * with the caller's uid, not taken from a package name the caller reports.
      */
     val trusted: Boolean,
     /** True for the controller Media3 creates for this app's own media notification. */
