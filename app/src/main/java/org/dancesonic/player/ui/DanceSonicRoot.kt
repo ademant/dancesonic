@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -366,9 +367,32 @@ fun PlayerBar(
                     },
             )
             val markerFraction = bpmMarkerFraction(bpmMode, state.trackBpm)
+            val shown = if (bpmMode) targetBpm else tempo
+            // Only the SliderState overload takes a custom track (material3 1.5). The state is rebuilt when the mode
+            // changes its range, and follows the setting when it changes elsewhere, such as with the next track.
+            val sliderState =
+                remember(bpmMode) {
+                    if (bpmMode) {
+                        SliderState(
+                            value = shown,
+                            steps = PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1,
+                            trackRange = PlaybackMath.MIN_TARGET_BPM.toFloat()..PlaybackMath.MAX_TARGET_BPM.toFloat(),
+                        )
+                    } else {
+                        SliderState(
+                            value = shown,
+                            steps = TEMPO_STEPS,
+                            trackRange = PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO,
+                        )
+                    }
+                }
+            SideEffect { if (sliderState.value != shown) sliderState.value = shown }
             Slider(
-                value = if (bpmMode) targetBpm else tempo,
-                onValueChange = { if (bpmMode) targetBpm = it else tempo = it },
+                state = sliderState,
+                onValueChange = { value ->
+                    sliderState.value = value
+                    if (bpmMode) targetBpm = value else tempo = value
+                },
                 onValueChangeFinished = {
                     if (bpmMode) {
                         playbackVm.setTargetBpm(targetBpm.roundToInt())
@@ -376,14 +400,7 @@ fun PlayerBar(
                         playbackVm.setMultiplier(tempo)
                     }
                 },
-                valueRange =
-                    if (bpmMode) {
-                        PlaybackMath.MIN_TARGET_BPM.toFloat()..PlaybackMath.MAX_TARGET_BPM.toFloat()
-                    } else {
-                        PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO
-                    },
-                steps = if (bpmMode) PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1 else TEMPO_STEPS,
-                track = { sliderState -> TrackWithMarker(sliderState, markerFraction) },
+                track = { trackState -> TrackWithMarker(trackState, markerFraction) },
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {

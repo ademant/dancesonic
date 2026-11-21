@@ -37,6 +37,8 @@ ksp {
 android {
     namespace = "org.dancesonic.player"
     compileSdk = 37
+    // Compose 1.13 (BOM 2026.11.01) needs the 37.1 APIs or newer; 37.2 is the newest stable platform.
+    compileSdkMinor = 2
     ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
@@ -78,6 +80,13 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
+}
+
+// conscrypt-android carries only Android's native library. On the JVM of the unit tests it shadows Robolectric's
+// conscrypt-openjdk-uber (the same org.conscrypt classes, with the Linux library), and every Robolectric test failed
+// with "no conscrypt_jni in java.library.path". The tests use Robolectric's copy instead.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    exclude(group = "org.conscrypt", module = "conscrypt-android")
 }
 
 dependencies {
