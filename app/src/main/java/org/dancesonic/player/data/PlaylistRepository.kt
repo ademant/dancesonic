@@ -94,11 +94,12 @@ class PlaylistRepository(
     companion object {
         /** Pure grouping rule, separated for unit testing. */
         fun groupByDanceType(items: List<PlaylistItemRow>): List<PlaylistGroup> {
-            val (ungrouped, grouped) = items.partition { it.danceType == null }
             // Group case-insensitively so "Waltz" and "waltz" share one group; display the first spelling.
+            val byKey = items.groupBy { it.danceType?.lowercase() }
+            val ungrouped = byKey[null].orEmpty()
             val named =
-                grouped.groupBy { it.danceType!!.lowercase() }
-                    .toSortedMap()
+                byKey.mapNotNull { (key, list) -> key?.let { it to list } }
+                    .sortedBy { (key, _) -> key }
                     .map { (_, list) ->
                         val sorted = list.sortedBy { it.position }
                         PlaylistGroup(sorted.first().danceType, sorted)
