@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The version name and code come from git history (app/build.gradle.kts).
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # The native time-stretching code needs CMake 3.22.1 (AGP's default) and the pinned NDK, which the runner image
+      # does not have. The compile SDK has to match app/build.gradle.kts.
+      - name: Install Android SDK packages
+        run: |
+          ndk=$(sed -n 's/^ndk = "\(.*\)"/\1/p' gradle/libs.versions.toml)
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "cmake;3.22.1" "ndk;$ndk" "platforms;android-37.2" > /dev/null
+
+      - name: Unit tests, ktlint, detekt and debug build
+        run: ./gradlew --no-daemon testDebugUnitTest ktlintCheck detekt assembleDebug
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          retention-days: 7
