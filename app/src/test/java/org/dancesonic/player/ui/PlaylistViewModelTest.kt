@@ -54,6 +54,7 @@ class PlaylistViewModelTest {
             assertTrue(createdId.await() > 0)
             vm.playlists.test {
                 assertEquals(listOf("Waltz course"), awaitMatching { it.isNotEmpty() }.map { it.name })
+                cancelAndIgnoreRemainingEvents()
             }
         }
 
@@ -69,6 +70,8 @@ class PlaylistViewModelTest {
                 val groups = awaitMatching { it.isNotEmpty() }
                 assertEquals(listOf("Waltz"), groups.map { it.danceType })
                 assertEquals(listOf("s-1"), groups.single().items.map { it.trackId })
+                // Room may emit the same groups again, for example after the playlist's timestamp is updated.
+                cancelAndIgnoreRemainingEvents()
             }
         }
 
@@ -83,6 +86,7 @@ class PlaylistViewModelTest {
             // The VM's list starts empty, so check the stored rows: they only become empty once the delete ran.
             container.playlists.playlists().test {
                 assertEquals(emptyList<String>(), awaitMatching { it.isEmpty() }.map { it.name })
+                cancelAndIgnoreRemainingEvents()
             }
         }
 
