@@ -55,6 +55,8 @@ import org.dancesonic.player.playback.StreamLengths
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.studio.PlayOnTarget
+import org.dancesonic.player.studio.RelayClient
+import org.dancesonic.player.studio.RelayGateway
 import org.dancesonic.player.studio.StudioConnector
 import org.dancesonic.player.studio.StudioDiscovery
 import org.dancesonic.player.studio.StudioPairingStore
@@ -202,7 +204,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             reconnect = { record, dropped -> studioRemote.reconnect(record, dropped) },
         )
 
-    /** Pairs with and reconnects to Studios over the local network. */
+    /** Pairs with and reconnects to Studios over Bluetooth, folksonic's relay and the local network. */
     val studioRemote: StudioRemote by lazy {
         StudioRemote(
             store = studioPairings,
@@ -210,6 +212,15 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             connector = StudioConnector(timeoutSeconds = 10),
             scope = appScope,
             ble = BleGateway(context.applicationContext, appScope),
+            relay =
+                RelayGateway(
+                    endpoint = {
+                        currentSettings?.takeIf { RelayClient.usable(it) }?.let { RelayClient(httpClient, it) }
+                    },
+                    store = studioPairings,
+                    scope = appScope,
+                    phoneName = { android.os.Build.MODEL ?: "Phone" },
+                ),
         )
     }
 

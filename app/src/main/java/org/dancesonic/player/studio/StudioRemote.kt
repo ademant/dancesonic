@@ -21,8 +21,11 @@ class StudioUnavailable(val reason: Reason, cause: Throwable? = null) : Exceptio
         /** The code has expired. Open "Pair a phone" in Studio again. */
         EXPIRED,
 
-        /** No Studio with this fingerprint answers over Bluetooth or on the local network. */
+        /** No Studio with this fingerprint answers over Bluetooth, the relay or the local network. */
         NOT_FOUND,
+
+        /** The server has no relay, or the app is not connected to folksonic (#104). */
+        NOT_OFFERED,
 
         /** The Studio that answered is not the one paired (its fingerprint or key does not match). */
         NOT_THIS_STUDIO,
@@ -39,8 +42,8 @@ class StudioUnavailable(val reason: Reason, cause: Throwable? = null) : Exceptio
 }
 
 /**
- * An open session with a paired Studio, the record it belongs to, and the transport it runs on: `ble` or `network`,
- * as Studio names it in `welcome`.
+ * An open session with a paired Studio, the record it belongs to, and the transport it runs on: `ble`, `relay` or
+ * `network`, as Studio names it in `welcome`.
  */
 class OpenStudio(
     val record: StudioPairing,
@@ -61,9 +64,10 @@ private class NoiseCapture {
 }
 
 /**
- * Pairs with a Studio from its QR code, and reconnects to a paired one. Bluetooth is tried first when it is available
- * and permitted; the network is the fallback. Either way the fingerprint is checked before anything is sent. A pairing
- * is stored only after Studio has accepted the phone.
+ * Pairs with a Studio from its QR code or through folksonic, and reconnects to a paired one. The transports are tried
+ * in Studio's order: Bluetooth when it is available and permitted, folksonic's relay when the app is connected to
+ * folksonic, then the local network. Each time the fingerprint is checked before anything is sent. A pairing is
+ * stored only after Studio has accepted the phone.
  */
 @Suppress("TooManyFunctions")
 class StudioRemote
@@ -74,15 +78,15 @@ class StudioRemote
         private val connector: StudioConnector,
         private val scope: CoroutineScope,
         private val ble: BleGateway? = null,
+        private val relay: RelayGateway? = null,
         private val noiseKeys: PhoneNoiseKeys = PhoneNoiseKeys(),
         private val clock: () -> Long = { System.currentTimeMillis() / MILLIS_PER_SECOND },
         private val newId: () -> String = { UUID.randomUUID().toString() },
     ) {
         /**
-         * Pairs with the Studio that shows [code], as [phoneName], and leaves the session open. Throws [StudioUnavailable]
-         * with the reason. When pairing fails the new device key is removed again. A pairing that Studio accepted is
-         * kept
-         * even if the first connection then fails; it can be connected to later.
+         * Pairs with the Studio that shows [code], as [phoneName], and leaves the session open. Throws
+         * [StudioUnavailable] with the reason. When pairing fails the new device key is removed again. A pairing that
+         * Studio accepted is kept even if the first connection then fails; it can be connected to later.
          */
         @Suppress("ThrowsCount", "TooGenericExceptionCaught")
         suspend fun pair(
@@ -112,6 +116,62 @@ class StudioRemote
                     DeviceKeys.delete(alias)
                     throw e.asUnavailable()
                 }
+            return helloAfterPairing(link, record, signer)
+        }
+
+        /**
+         * Pairs with [studio], found on the account's relay, by comparing codes (#104): [onCode] gets the 6-digit code
+         * as soon as the link is open, for the user to compare with the one Studio shows, and allow the phone there.
+         * Throws [StudioUnavailable] with the reason; the new device key is removed again when pairing fails.
+         */
+        @Suppress("ThrowsCount", "TooGenericExceptionCaught")
+        suspend fun pairThroughFolksonic(
+            studio: RelayStudio,
+            phoneName: String,
+            onCode: (String) -> Unit,
+        ): OpenStudio {
+            val gateway = relay ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_OFFERED)
+            val claimed = studio.record
+            val fingerprint = claimed.fingerprint
+            // Studio's relay id comes from its fingerprint, so a record under another id is not Studio's own.
+            if (RelayWire.studioDeviceId(fingerprint) != studio.id) {
+                throw StudioUnavailable(StudioUnavailable.Reason.NOT_THIS_STUDIO)
+            }
+            val alias = DeviceKeys.create()
+            val signer = KeystoreStudioSigner(alias)
+            val phoneKeys = NoiseKeyPair.generate()
+            val (record, link) =
+                try {
+                    val opened =
+                        gateway.open(fingerprint, phoneKeys) { spki, noise ->
+                            StudioWire.fingerprint(spki, noise).contentEquals(fingerprint) &&
+                                noise.contentEquals(claimed.noisePublic)
+                        } ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_OFFERED)
+                    try {
+                        onCode(RelayWire.comparisonCode(opened.binding))
+                        val pairer = StudioCodePairer(signer)
+                        val device = pairer.pair(opened, fingerprint, phoneKeys.publicKey, phoneName)
+                        val found = PairingLink(opened, claimed.noisePublic, studio.name)
+                        val ble = claimed.bleService.toString()
+                        storeRecord(found, fingerprint, ble, device, alias, phoneKeys) to opened
+                    } catch (e: Exception) {
+                        opened.close()
+                        throw e
+                    }
+                } catch (e: Exception) {
+                    DeviceKeys.delete(alias)
+                    throw e.asUnavailable()
+                }
+            return helloAfterPairing(link, record, signer)
+        }
+
+        /** The first `hello` on the link a pairing was made on. The link is closed when it fails. */
+        @Suppress("TooGenericExceptionCaught")
+        private suspend fun helloAfterPairing(
+            link: StudioLink,
+            record: StudioPairing,
+            signer: StudioSigner,
+        ): OpenStudio {
             val session = sessionOn(link, record, signer)
             val welcome =
                 try {
@@ -141,27 +201,45 @@ class StudioRemote
             val found = openForPairing(offer, phoneKeys)
             try {
                 val device = pairer.pair(found.link, offer, phoneName)
-                val (iv, sealed) = noiseKeys.seal(phoneKeys)
-                val record =
-                    StudioPairing(
-                        id = newId(),
-                        name = found.name.ifBlank { offer.name }.ifBlank { "Studio" },
-                        fingerprint = StudioWire.base64Url(offer.fingerprint),
-                        studioNoiseKey = StudioWire.base64Url(found.noiseKey),
-                        bleService = offer.bleService,
-                        deviceId = device.deviceId,
-                        keyAlias = alias,
-                        phoneNoiseKey = StudioWire.base64Url(phoneKeys.publicKey),
-                        phoneNoiseIv = iv,
-                        phoneNoiseSealed = sealed,
-                    )
-                store.add(record)
-                return record to found.link
+                val named = PairingLink(found.link, found.noiseKey, found.name.ifBlank { offer.name })
+                return storeRecord(named, offer.fingerprint, offer.bleService, device, alias, phoneKeys) to found.link
             } catch (e: Exception) {
                 found.link.close()
                 throw e
             }
         }
+
+        /** Stores the pairing Studio accepted, with the phone's Noise key sealed by the Keystore. */
+        @Suppress("LongParameterList")
+        private suspend fun storeRecord(
+            found: PairingLink,
+            fingerprint: ByteArray,
+            bleService: String,
+            device: PairedDevice,
+            alias: String,
+            phoneKeys: NoiseKeyPair,
+        ): StudioPairing {
+            val (iv, sealed) = noiseKeys.seal(phoneKeys)
+            val record =
+                StudioPairing(
+                    id = newId(),
+                    name = found.name.ifBlank { "Studio" },
+                    fingerprint = StudioWire.base64Url(fingerprint),
+                    studioNoiseKey = StudioWire.base64Url(found.noiseKey),
+                    bleService = bleService,
+                    deviceId = device.deviceId,
+                    keyAlias = alias,
+                    phoneNoiseKey = StudioWire.base64Url(phoneKeys.publicKey),
+                    phoneNoiseIv = iv,
+                    phoneNoiseSealed = sealed,
+                )
+            store.add(record)
+            return record
+        }
+
+        /** The Studios on the account's relay, for pairing through folksonic. Throws [StudioUnavailable]. */
+        suspend fun relayStudios(): List<RelayStudio> =
+            relay?.studios() ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_OFFERED)
 
         /** A link for pairing: over Bluetooth when Studio is in range, otherwise over the network. */
         private suspend fun openForPairing(
@@ -286,6 +364,7 @@ class StudioRemote
                 try {
                     return when (transport) {
                         StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey) ?: continue
+                        StudioTransports.RELAY -> openRelayForConnect(record, fingerprint, noiseKey) ?: continue
                         else -> openNetwork(record, fingerprint, noiseKey)
                     }
                 } catch (e: StudioUnavailable) {
@@ -313,6 +392,23 @@ class StudioRemote
             } catch (e: BleStudioException) {
                 Log.i(TAG, "Bluetooth not used: ${e.message}")
                 null
+            }
+        }
+
+        /**
+         * The relay link to [record], or null when the app is not connected to folksonic, the server has no relay, or
+         * the pairing has no Noise key (made before Bluetooth and the relay existed; pair again to use them).
+         */
+        @Suppress("ReturnCount")
+        private suspend fun openRelayForConnect(
+            record: StudioPairing,
+            fingerprint: ByteArray,
+            noiseKey: ByteArray,
+        ): StudioLink? {
+            val gateway = relay ?: return null
+            val phoneKeys = runCatching { noiseKeys.open(record) }.getOrNull() ?: return null
+            return gateway.open(fingerprint, phoneKeys) { spki, noise ->
+                StudioWire.fingerprint(spki, noise).contentEquals(fingerprint) && noise.contentEquals(noiseKey)
             }
         }
 
@@ -392,11 +488,16 @@ class StudioRemote
                             store.advanceCounter(record.id) ?: throw StudioUnavailable(StudioUnavailable.Reason.FAILED)
                     },
                 scope = scope,
+                // Studio ends a relay session after 90 silent seconds; Bluetooth and the network need no keepalive.
+                keepAliveMillis = if (link is RelayStudioLink) RELAY_KEEPALIVE_MILLIS else 0L,
             )
 
         private companion object {
             const val TAG = "StudioRemote"
             const val FINGERPRINT_BYTES = 32
             const val MILLIS_PER_SECOND = 1_000L
+
+            /** A `get_state` this often keeps a relay session open: the protocol asks for one every 30 s at most. */
+            const val RELAY_KEEPALIVE_MILLIS = 25_000L
         }
     }

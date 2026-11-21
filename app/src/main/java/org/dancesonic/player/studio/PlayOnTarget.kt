@@ -20,8 +20,8 @@ import kotlinx.coroutines.launch
  * the player behind it changes, so the notification, lock screen and the app's own controls follow the choice.
  *
  * Only one Studio is active at a time. Switching back to the phone leaves the Studio playing: the phone stops
- * controlling it and drops the connection. When the link to Studio drops, the phone opens the other transport and
- * carries on with the same Studio; if that fails too, playback returns to the phone.
+ * controlling it and drops the connection. When the link to Studio drops, the phone opens the next transport and
+ * carries on with the same Studio; if none answers, playback returns to the phone.
  *
  * Every method runs on the main thread.
  */
@@ -36,7 +36,7 @@ class PlayOnTarget(
     sealed interface Target {
         data object Phone : Target
 
-        /** [transport] is `ble` or `network`, as Studio names the link it runs on. */
+        /** [transport] is `ble`, `relay` or `network`, as Studio names the link it runs on. */
         data class Studio(val pairingId: String, val name: String, val transport: String) : Target
     }
 

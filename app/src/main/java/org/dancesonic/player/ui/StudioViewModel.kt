@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.dancesonic.player.AppContainer
 import org.dancesonic.player.studio.PlayOnTarget
+import org.dancesonic.player.studio.RelayStudio
 import org.dancesonic.player.studio.StudioPairing
 import org.dancesonic.player.studio.StudioUnavailable
 
@@ -19,6 +20,10 @@ data class StudioUiState(
     val busy: Boolean = false,
     val message: String? = null,
     val error: String? = null,
+    /** The Studios on the folksonic account, once looked up for pairing through folksonic (#104). */
+    val relayStudios: List<RelayStudio>? = null,
+    /** The 6-digit code to compare with the one Studio shows, while pairing through folksonic waits for the user. */
+    val comparisonCode: String? = null,
 )
 
 /** Pairs, lists, renames and forgets Studios for the Config screen. */
@@ -40,6 +45,59 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 val opened = container.studioRemote.pair(code, phoneName)
+                opened.session.close()
+                _state.value = StudioUiState(message = "Paired with ${opened.record.name}.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: StudioUnavailable) {
+                _state.value = StudioUiState(error = describe(e.reason))
+            }
+        }
+    }
+
+    /** Looks up the Studios that allow remote control through folksonic on the connected account. */
+    fun findOnFolksonic() {
+        if (_state.value.busy) return
+        _state.value = StudioUiState(busy = true, message = "Looking for Studios on folksonic…")
+        viewModelScope.launch {
+            try {
+                val studios = container.studioRemote.relayStudios()
+                val note =
+                    if (studios.isEmpty()) {
+                        "No Studio on this account. Turn on \"Allow remote control through folksonic\" in Studio."
+                    } else {
+                        "Choose the Studio to pair with."
+                    }
+                _state.value = StudioUiState(message = note, relayStudios = studios)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: StudioUnavailable) {
+                _state.value = StudioUiState(error = describe(e.reason))
+            }
+        }
+    }
+
+    /**
+     * Pairs with [studio] through folksonic. The comparison code appears in the state as soon as the link is open; the
+     * user allows the phone in Studio only when Studio shows the same code.
+     */
+    fun pairThroughFolksonic(
+        studio: RelayStudio,
+        phoneName: String,
+    ) {
+        if (_state.value.busy) return
+        _state.value = StudioUiState(busy = true, message = "Connecting to ${studio.name} through folksonic…")
+        viewModelScope.launch {
+            try {
+                val opened =
+                    container.studioRemote.pairThroughFolksonic(studio, phoneName) { code ->
+                        _state.value =
+                            StudioUiState(
+                                busy = true,
+                                message = "Allow this phone in ${studio.name} only if it shows the same code.",
+                                comparisonCode = code,
+                            )
+                    }
                 opened.session.close()
                 _state.value = StudioUiState(message = "Paired with ${opened.record.name}.")
             } catch (e: CancellationException) {
@@ -111,7 +169,10 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
         when (reason) {
             StudioUnavailable.Reason.BAD_CODE -> "That code is not a DanceSonic Studio pairing code."
             StudioUnavailable.Reason.EXPIRED -> "The code has expired. Open \"Pair a phone\" in Studio again."
-            StudioUnavailable.Reason.NOT_FOUND -> "Studio is not on this network. Check that it is on the same Wi-Fi."
+            StudioUnavailable.Reason.NOT_FOUND ->
+                "Studio is not in reach: not over Bluetooth, not through folksonic, and not on this Wi-Fi."
+            StudioUnavailable.Reason.NOT_OFFERED ->
+                "Pairing through folksonic needs a connection to a folksonic server with the device relay."
             StudioUnavailable.Reason.NOT_THIS_STUDIO -> "The Studio that answered is not the one that showed the code."
             StudioUnavailable.Reason.REFUSED -> "Studio did not accept this phone."
             StudioUnavailable.Reason.TIMEOUT -> "Studio did not answer in time."

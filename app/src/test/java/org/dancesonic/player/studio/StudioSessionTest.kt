@@ -3,6 +3,7 @@ package org.dancesonic.player.studio
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -266,4 +267,30 @@ class StudioSessionTest {
         }
         fail("condition not reached")
     }
+
+    @Test
+    fun `a relay session sends a signed get_state as keepalive until it is closed`() =
+        runBlocking {
+            val link = FakeLink()
+            val session =
+                StudioSession(
+                    link,
+                    "dev-1",
+                    SoftwareSigner(),
+                    RecordingCounter(mutableListOf()),
+                    this,
+                    keepAliveMillis = 50,
+                )
+
+            val first = withTimeout(2_000) { link.nextSent() }
+            link.incoming.send("""{"type":"result","id":1,"ok":true}""")
+            val second = withTimeout(2_000) { link.nextSent() }
+            link.incoming.send("""{"type":"result","id":2,"ok":true}""")
+            session.close()
+
+            assertEquals("""{"cmd":"get_state"}""", first.text("body"))
+            assertEquals(1L, first.number("counter"))
+            assertEquals("""{"cmd":"get_state"}""", second.text("body"))
+            assertEquals(2L, second.number("counter"))
+        }
 }
