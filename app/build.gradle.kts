@@ -82,6 +82,13 @@ android {
     }
 }
 
+// conscrypt-android carries only Android's native library. On the JVM of the unit tests it shadows Robolectric's
+// conscrypt-openjdk-uber (the same org.conscrypt classes, with the Linux library), and every Robolectric test failed
+// with "no conscrypt_jni in java.library.path". The tests use Robolectric's copy instead.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    exclude(group = "org.conscrypt", module = "conscrypt-android")
+}
+
 dependencies {
     // Coil's OkHttp module asks for a newer Kotlin stdlib than this project's compiler reads. Keep the stdlib at the
     // project's Kotlin version; Coil's own classes are built against the same stdlib API.

@@ -5,8 +5,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
-/** Which media controllers may connect to the playback session, and with what (#85). */
+/**
+ * Which media controllers may connect to the playback session, and with what (#85). Robolectric, because Media3
+ * builds `Player.Commands` on `android.util.SparseBooleanArray`.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class ControllerPolicyTest {
     private val ownPackage = "org.dancesonic.player"
     private val ownUid = 10_123

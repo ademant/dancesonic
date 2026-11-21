@@ -472,7 +472,6 @@ class ConnectViewModel(
             }
         }
     }
-
 }
 
 /** Passes library flows to the UI. Room is the source of truth; the UI never waits on the network. */

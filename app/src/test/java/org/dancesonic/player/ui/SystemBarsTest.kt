@@ -14,9 +14,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SystemBarsTest {
-    private fun iconsAreDark(
-        dark: Boolean = APP_THEME_DARK,
-    ): Pair<Boolean, Boolean> {
+    private fun iconsAreDark(dark: Boolean = APP_THEME_DARK): Pair<Boolean, Boolean> {
         val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         activity.applySystemBars(dark)
         val bars = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
