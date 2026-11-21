@@ -37,6 +37,8 @@ ksp {
 android {
     namespace = "org.dancesonic.player"
     compileSdk = 37
+    // Compose 1.13 (BOM 2026.11.01) needs the 37.1 APIs or newer; 37.2 is the newest stable platform.
+    compileSdkMinor = 2
     ndkVersion = libs.versions.ndk.get()
 
     defaultConfig {
