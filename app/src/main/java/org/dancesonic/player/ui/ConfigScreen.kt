@@ -175,11 +175,7 @@ fun ConfigScreen(
 
         ConfigSection("Studio", attention = false, summary = summaries.studio) { StudioSection(studioVm) }
 
-        ConfigSection(
-            "DanceBrainz",
-            attention = danceState.busy || danceState.error != null,
-            summary = summaries.danceBrainz,
-        ) {
+        ConfigSection("DanceBrainz", danceState.busy || danceState.error != null, summaries.danceBrainz) {
             DanceBrainzSection(danceVm)
         }
     }

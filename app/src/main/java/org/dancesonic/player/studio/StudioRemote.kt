@@ -362,11 +362,14 @@ class StudioRemote
             var failure = StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
             for (transport in order) {
                 try {
-                    return when (transport) {
-                        StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey) ?: continue
-                        StudioTransports.RELAY -> openRelayForConnect(record, fingerprint, noiseKey) ?: continue
-                        else -> openNetwork(record, fingerprint, noiseKey)
-                    }
+                    // Bluetooth and the relay give null when they cannot be used at all; the next one is tried.
+                    val link =
+                        when (transport) {
+                            StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey)
+                            StudioTransports.RELAY -> openRelayForConnect(record, fingerprint, noiseKey)
+                            else -> openNetwork(record, fingerprint, noiseKey)
+                        }
+                    if (link != null) return link
                 } catch (e: StudioUnavailable) {
                     failure = e
                 }

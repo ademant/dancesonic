@@ -69,7 +69,7 @@ class RelayGatewayTest {
 
     @Test
     fun `without folksonic the relay is skipped`() =
-        runBlocking {
+        runBlocking<Unit> {
             assertNull(gateway(null).open(fingerprint, NoiseKeyPair.generate(), ::matches))
             val error = assertThrows(StudioUnavailable::class.java) { runBlocking { gateway(null).studios() } }
             assertEquals(StudioUnavailable.Reason.NOT_OFFERED, error.reason)
@@ -77,7 +77,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a server without the relay is skipped, so the next transport is tried`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { error("not opened") }
             endpoint.refuse = RelayNotOffered()
 
@@ -86,7 +86,7 @@ class RelayGatewayTest {
 
     @Test
     fun `the phone publishes its record and reaches Studio under the id from its fingerprint`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { FakeRelayStudio(studioKey, tlsSpki, fingerprint) }
             val gateway = gateway(endpoint)
 
@@ -104,7 +104,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a Studio that is not the paired one is refused`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { FakeRelayStudio(NoiseKeyPair.generate(), tlsSpki, fingerprint) }
 
             val error =
@@ -117,7 +117,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a relay that fails is reported, and listing Studios fails the same way`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { error("not opened") }
             endpoint.refuse = IOException("down")
 

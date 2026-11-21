@@ -58,7 +58,7 @@ class RelayClientTest {
 
     @Test
     fun `the account's Studios are listed, without phones or records this version cannot read`() =
-        runBlocking {
+        runBlocking<Unit> {
             server.enqueueJson(
                 """{"devices":[
                     {"id":"studio-abc","kind":"studio","name":"Hall laptop","publicKey":"${record()}"},
@@ -86,7 +86,7 @@ class RelayClientTest {
 
     @Test
     fun `the phone's record holds only the version byte`() =
-        runBlocking {
+        runBlocking<Unit> {
             server.enqueueJson("{}")
 
             relay.publishPhone("phone-xyz", "Pixel")
@@ -103,7 +103,7 @@ class RelayClientTest {
 
     @Test
     fun `the relay connection passes frames from Studio only, and ends when Studio is not connected`() =
-        runBlocking {
+        runBlocking<Unit> {
             val fromPhone = Channel<ByteArray>(Channel.UNLIMITED)
             val studioSide =
                 object : WebSocketListener() {
@@ -121,6 +121,15 @@ class RelayClientTest {
                     ) {
                         fromPhone.trySend(bytes.toByteArray())
                         webSocket.send("""{"type":"undelivered","to":"$studioId"}""")
+                    }
+
+                    override fun onClosing(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
+                        // Completes the close handshake, so the server can shut down after the test.
+                        webSocket.close(1000, null)
                     }
                 }
             server.server.enqueue(MockResponse().withWebSocketUpgrade(studioSide))
