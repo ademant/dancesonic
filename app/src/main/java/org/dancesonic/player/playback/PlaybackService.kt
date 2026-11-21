@@ -44,7 +44,7 @@ class PlaybackService : MediaSessionService() {
         val player =
             ExoPlayer.Builder(this, StretchRenderersFactory(this, tracker, onsets::onsetsFor))
                 .setMediaSourceFactory(mediaSourceFactory)
-                .setHandleAudioBecomingNoisy(true)
+                .withMusicAudio()
                 .build()
         player.addListener(QueueFollower(tracker, onsets))
         val mediaSession =
