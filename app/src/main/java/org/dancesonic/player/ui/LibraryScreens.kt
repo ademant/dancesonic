@@ -75,7 +75,8 @@ fun LibraryScreen(
     Column(Modifier.fillMaxSize()) {
         LibraryToolbar(connectVm, onOpenConfig)
         HorizontalDivider()
-        Breadcrumbs(crumbs)
+        // At the root the header already says "Library"; the path only helps once there is a level to go back to.
+        if (openArtist != null) Breadcrumbs(crumbs)
         when {
             openAlbum != null ->
                 key(openAlbum) {

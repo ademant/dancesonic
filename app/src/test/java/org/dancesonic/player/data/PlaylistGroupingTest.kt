@@ -51,4 +51,21 @@ class PlaylistGroupingTest {
         val groups = PlaylistRepository.groupByDanceType(listOf(row(1, "Tango", 0)))
         assertEquals(listOf<String?>("Tango"), groups.map { it.danceType })
     }
+
+    @Test
+    fun `the first spelling by position names a group, and only items without a dance type are ungrouped`() {
+        val groups =
+            PlaylistRepository.groupByDanceType(
+                listOf(row(1, "TANGO", 4), row(2, null, 1), row(3, "tango", 0), row(4, "Tango", 2), row(5, null, 3)),
+            )
+
+        assertEquals(listOf("tango", null), groups.map { it.danceType })
+        assertEquals(listOf(3L, 4L, 1L), groups[0].items.map { it.id })
+        assertEquals(listOf(2L, 5L), groups[1].items.map { it.id })
+    }
+
+    @Test
+    fun `an empty playlist has no groups`() {
+        assertEquals(emptyList<PlaylistGroup>(), PlaylistRepository.groupByDanceType(emptyList()))
+    }
 }

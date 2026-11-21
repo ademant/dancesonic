@@ -77,6 +77,29 @@ class LibraryScreensTest {
     }
 
     @Test
+    fun `the library root shows its title once, and deeper levels show a tappable path back`() {
+        val library = host.create { LibraryViewModel(container) }
+        val playlists = host.create { PlaylistViewModel(container) }
+        val connect = host.create { ConnectViewModel(container) }
+        composeRule.setContent {
+            MaterialTheme { LibraryScreen(library, container.player, playlists, connect) }
+        }
+
+        composeRule.waitUntilAtLeastOneExists(hasText("A · 1"))
+        composeRule.onAllNodesWithText("Library").assertCountEquals(1)
+
+        composeRule.onNodeWithText("A · 1").performClick()
+        composeRule.waitUntilAtLeastOneExists(hasText("Ada"))
+        composeRule.onNodeWithText("Ada").performClick()
+        composeRule.waitUntilAtLeastOneExists(hasText("Night"))
+        composeRule.onAllNodesWithText("Library").assertCountEquals(2)
+
+        composeRule.onAllNodesWithText("Library")[1].performClick()
+        composeRule.waitUntilAtLeastOneExists(hasText("A · 1"))
+        composeRule.onAllNodesWithText("Library").assertCountEquals(1)
+    }
+
+    @Test
     fun `dance screen lists dance types and their tracks`() {
         runBlocking {
             container.database.danceMetadataDao().replaceFor("rec-1", listOf("Waltz"), 1L)
