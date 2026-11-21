@@ -65,7 +65,7 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
                 container.player.ensureConnected()
                 val opened = container.studioRemote.connect(record)
                 if (container.playOn.playOnStudio(opened)) {
-                    val via = transportName(opened.transport)
+                    val via = transportLabel(opened.transport)
                     _state.value = StudioUiState(message = "Playing on ${record.name} ($via).")
                 } else {
                     opened.session.close()
@@ -106,8 +106,6 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
             }
         }
     }
-
-    private fun transportName(transport: String): String = if (transport == "ble") "Bluetooth" else "Wi-Fi"
 
     private fun describe(reason: StudioUnavailable.Reason): String =
         when (reason) {

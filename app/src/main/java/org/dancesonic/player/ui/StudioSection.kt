@@ -67,7 +67,7 @@ internal fun StudioSection(vm: StudioViewModel) {
         )
         val studioTarget = target as? PlayOnTarget.Target.Studio
         val playingOn =
-            studioTarget?.let { "${it.name} (${transportName(it.transport)})" } ?: "this phone"
+            studioTarget?.let { "${it.name} (${transportLabel(it.transport)})" } ?: "this phone"
         Text("Playing on: $playingOn", style = MaterialTheme.typography.titleSmall)
         if (target !is PlayOnTarget.Target.Phone) {
             OutlinedButton(
@@ -109,8 +109,6 @@ internal fun StudioSection(vm: StudioViewModel) {
         }
     }
 }
-
-private fun transportName(transport: String): String = if (transport == "ble") "Bluetooth" else "Wi-Fi"
 
 @Suppress("LongParameterList")
 @Composable
