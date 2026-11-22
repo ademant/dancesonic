@@ -175,7 +175,7 @@ fun DanceSonicRoot(container: AppContainer) {
         }
     }
     if (showNowPlaying) {
-        NowPlayingSheet(libraryVm, container.player) { showNowPlaying = false }
+        NowPlayingSheet(libraryVm, container.player, playbackVm) { showNowPlaying = false }
     }
 }
 
@@ -339,10 +339,6 @@ fun PlayerBar(
     onExpand: () -> Unit,
 ) {
     val state by player.state.collectAsStateWithLifecycle()
-    val settings by playbackVm.settings.collectAsStateWithLifecycle()
-    val bpmMode = settings.tempoMode == TempoMode.Bpm
-    var tempo by remember(settings.multiplier) { mutableFloatStateOf(settings.multiplier) }
-    var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
     // While nothing is queued the bar is one line (#105); the controls stay one tap away, for the tempo settings.
     var showIdleControls by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.idle) { if (!state.idle) showIdleControls = false }
@@ -364,68 +360,81 @@ fun PlayerBar(
         state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SeekBar(player, libraryVm.nowPlayingWaveform)
         TransportRow(player)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            val label =
-                if (bpmMode) {
-                    "Tempo ${targetBpm.roundToInt()} BPM"
-                } else {
-                    "Tempo ${"%.2f".format(tempo)}x"
-                }
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                // A tap on the label switches between BPM and multiplier.
-                modifier =
-                    Modifier.clickable {
-                        playbackVm.setTempoMode(if (bpmMode) TempoMode.Multiplier else TempoMode.Bpm)
-                    },
-            )
-            val markerFraction = bpmMarkerFraction(bpmMode, state.trackBpm)
-            val shown = if (bpmMode) targetBpm else tempo
-            // Only the SliderState overload takes a custom track (material3 1.5). The state is rebuilt when the mode
-            // changes its range, and follows the setting when it changes elsewhere, such as with the next track.
-            val sliderState =
-                remember(bpmMode) {
-                    if (bpmMode) {
-                        SliderState(
-                            value = shown,
-                            steps = PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1,
-                            trackRange = PlaybackMath.MIN_TARGET_BPM.toFloat()..PlaybackMath.MAX_TARGET_BPM.toFloat(),
-                        )
-                    } else {
-                        SliderState(
-                            value = shown,
-                            steps = TEMPO_STEPS,
-                            trackRange = PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO,
-                        )
-                    }
-                }
-            SideEffect { if (sliderState.value != shown) sliderState.value = shown }
-            Slider(
-                state = sliderState,
-                onValueChange = { value ->
-                    sliderState.value = value
-                    if (bpmMode) targetBpm = value else tempo = value
-                },
-                onValueChangeFinished = {
-                    if (bpmMode) {
-                        playbackVm.setTargetBpm(targetBpm.roundToInt())
-                    } else {
-                        playbackVm.setMultiplier(tempo)
-                    }
-                },
-                track = { trackState -> TrackWithMarker(trackState, markerFraction) },
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = settings.keepTempoForNextTrack,
-                    onCheckedChange = { playbackVm.setKeepTempoForNextTrack(it) },
-                )
-                Text("Keep", style = MaterialTheme.typography.labelSmall)
+        TempoRow(playbackVm, state.trackBpm)
+    }
+}
+
+/** The tempo line of the player: the label (tap to switch BPM and multiplier), the slider, Keep and Reset. */
+@Composable
+internal fun TempoRow(
+    playbackVm: PlaybackSettingsViewModel,
+    trackBpm: Int?,
+) {
+    val settings by playbackVm.settings.collectAsStateWithLifecycle()
+    val bpmMode = settings.tempoMode == TempoMode.Bpm
+    var tempo by remember(settings.multiplier) { mutableFloatStateOf(settings.multiplier) }
+    var targetBpm by remember(settings.targetBpm) { mutableFloatStateOf(settings.targetBpm.toFloat()) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        val label =
+            if (bpmMode) {
+                "Tempo ${targetBpm.roundToInt()} BPM"
+            } else {
+                "Tempo ${"%.2f".format(tempo)}x"
             }
-            ResetTempoButton(playbackVm, bpmMode, state.trackBpm)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            // A tap on the label switches between BPM and multiplier.
+            modifier =
+                Modifier.clickable {
+                    playbackVm.setTempoMode(if (bpmMode) TempoMode.Multiplier else TempoMode.Bpm)
+                },
+        )
+        val markerFraction = bpmMarkerFraction(bpmMode, trackBpm)
+        val shown = if (bpmMode) targetBpm else tempo
+        // Only the SliderState overload takes a custom track (material3 1.5). The state is rebuilt when the mode
+        // changes its range, and follows the setting when it changes elsewhere, such as with the next track.
+        val sliderState =
+            remember(bpmMode) {
+                if (bpmMode) {
+                    SliderState(
+                        value = shown,
+                        steps = PlaybackMath.MAX_TARGET_BPM - PlaybackMath.MIN_TARGET_BPM - 1,
+                        trackRange = PlaybackMath.MIN_TARGET_BPM.toFloat()..PlaybackMath.MAX_TARGET_BPM.toFloat(),
+                    )
+                } else {
+                    SliderState(
+                        value = shown,
+                        steps = TEMPO_STEPS,
+                        trackRange = PlaybackMath.MIN_TEMPO..PlaybackMath.MAX_TEMPO,
+                    )
+                }
+            }
+        SideEffect { if (sliderState.value != shown) sliderState.value = shown }
+        Slider(
+            state = sliderState,
+            onValueChange = { value ->
+                sliderState.value = value
+                if (bpmMode) targetBpm = value else tempo = value
+            },
+            onValueChangeFinished = {
+                if (bpmMode) {
+                    playbackVm.setTargetBpm(targetBpm.roundToInt())
+                } else {
+                    playbackVm.setMultiplier(tempo)
+                }
+            },
+            track = { trackState -> TrackWithMarker(trackState, markerFraction) },
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = settings.keepTempoForNextTrack,
+                onCheckedChange = { playbackVm.setKeepTempoForNextTrack(it) },
+            )
+            Text("Keep", style = MaterialTheme.typography.labelSmall)
         }
+        ResetTempoButton(playbackVm, bpmMode, trackBpm)
     }
 }
 
