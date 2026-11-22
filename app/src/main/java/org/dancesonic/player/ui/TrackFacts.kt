@@ -131,9 +131,11 @@ internal fun TrackPreviewDialog(
 internal fun NowPlayingSheet(
     libraryVm: LibraryViewModel,
     player: PlayerController,
+    playbackVm: PlaybackSettingsViewModel,
     onDismiss: () -> Unit,
 ) {
     val detail by libraryVm.nowPlaying.collectAsStateWithLifecycle()
+    val playback by player.state.collectAsStateWithLifecycle()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -151,6 +153,8 @@ internal fun NowPlayingSheet(
                 TrackEntries(current, libraryVm)
                 SeekBar(player, libraryVm.nowPlayingWaveform)
                 TransportRow(player)
+                // The same tempo control as the player bar, so the tempo is at hand while the track is open.
+                TempoRow(playbackVm, playback.trackBpm)
                 current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
             }
         }
