@@ -227,6 +227,7 @@ fun DanceScreen(
     var danceType by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = danceType != null) { danceType = null }
 
+    var trackSort by rememberSaveable { mutableStateOf(TrackSort.ARTIST_TITLE) }
     val selected = danceType
     val crumbs =
         buildList {
@@ -235,8 +236,13 @@ fun DanceScreen(
         }
     Column(Modifier.fillMaxSize()) {
         TabHeader("Dance", onOpenConfig)
-        // The header names the tab; the path only appears once a dance is open.
-        if (selected != null) Breadcrumbs(crumbs)
+        // The header names the tab; the path and the sort only appear once a dance is open.
+        if (selected != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { Breadcrumbs(crumbs) }
+                TrackSortButton(trackSort) { trackSort = it }
+            }
+        }
         if (selected == null) {
             if (danceTypes.isEmpty()) {
                 EmptyHint(
@@ -264,12 +270,38 @@ fun DanceScreen(
                 val tracks by remember(
                     selected,
                 ) { vm.tracksForDance(selected) }.collectAsStateWithLifecycle(emptyList())
+                val shown = remember(tracks, trackSort) { sortTracks(tracks, trackSort) }
                 TrackList(
-                    tracks = tracks,
-                    onPlay = { index -> player.play(tracks, index) },
+                    tracks = shown,
+                    onPlay = { index -> player.play(shown, index) },
                     playlistVm = playlistVm,
                     libraryVm = vm,
                     listState = keptListState(vm, "dance:$selected"),
+                )
+            }
+        }
+    }
+}
+
+/** The sort of a dance's tracks, as a button that opens the three orders. */
+@Composable
+private fun TrackSortButton(
+    sort: TrackSort,
+    onSort: (TrackSort) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) {
+            Text("Sort: ${sort.label}", style = MaterialTheme.typography.labelMedium)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            TrackSort.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    onClick = {
+                        open = false
+                        onSort(option)
+                    },
                 )
             }
         }
