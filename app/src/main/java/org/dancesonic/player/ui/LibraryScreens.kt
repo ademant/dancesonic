@@ -3,6 +3,7 @@ package org.dancesonic.player.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +15,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -31,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.data.db.AlbumEntity
@@ -288,12 +294,15 @@ internal fun keptListState(
     return state
 }
 
-/** What a track row does: a tap plays it; the buttons show its info, or add it to a playlist. */
+/** What a track row does: a tap plays it; its menu shows the info or adds it to a playlist. */
 private class TrackRowActions(
     val onPlay: () -> Unit,
     val onInfo: () -> Unit,
     val onAddToPlaylist: () -> Unit,
 )
+
+/** The three dots that open a track's menu. */
+private const val MORE_ACTIONS = "\u22EE"
 
 @Composable
 private fun TrackRow(
@@ -302,6 +311,7 @@ private fun TrackRow(
     actions: TrackRowActions,
 ) {
     val track = row.track
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clickable(onClick = actions.onPlay).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -314,8 +324,30 @@ private fun TrackRow(
             Text(track.artistName + tempo + length, style = MaterialTheme.typography.bodySmall)
             shoes.line?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
-        TextButton(onClick = actions.onInfo) { Text("Info") }
-        TextButton(onClick = actions.onAddToPlaylist) { Text("+ Playlist") }
+        Box {
+            IconButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.semantics { contentDescription = "More actions for ${track.title}" },
+            ) {
+                Text(MORE_ACTIONS, style = MaterialTheme.typography.titleMedium)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Info") },
+                    onClick = {
+                        menuOpen = false
+                        actions.onInfo()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to playlist") },
+                    onClick = {
+                        menuOpen = false
+                        actions.onAddToPlaylist()
+                    },
+                )
+            }
+        }
     }
     HorizontalDivider()
 }
