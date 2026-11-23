@@ -85,7 +85,7 @@ data class PlaybackUiState(
  * Media3 marks its session API as unstable. The lint check is suppressed here rather than with an
  * opt-in marker, which would spread to every caller.
  */
-@Suppress("UnsafeOptInUsageError")
+@Suppress("UnsafeOptInUsageError", "TooManyFunctions")
 class PlayerController(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -103,12 +103,17 @@ class PlayerController(
     /** Position and length of the track now playing, refreshed twice a second while connected. */
     val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
 
+    private val _queue = MutableStateFlow(PlayQueue())
+
+    /** The songs in playback order, including those already played and those still to come. */
+    val queue: StateFlow<PlayQueue> = _queue.asStateFlow()
+
     private var controller: MediaController? = null
     private var ticker: Job? = null
     private val connectLock = Mutex()
 
-    /** The queue as it was loaded, so a track's tempo and gain can be looked up by its index. */
-    private var queue: List<TrackWithTempo> = emptyList()
+    /** The tracks as they were loaded, so a track's tempo and gain can be looked up by its queue index. */
+    private var loadedTracks: List<TrackWithTempo> = emptyList()
 
     private val playCounter =
         PlayCounter(System::currentTimeMillis) { songId, startedAtMs -> events.playCounted(songId, startedAtMs) }
@@ -129,6 +134,7 @@ class PlayerController(
                     ) {
                         applyCurrentTrack(built, fromStart = true)
                         publish(built)
+                        publishQueue(built)
                         val songId = mediaItem?.mediaId
                         if (songId == null) {
                             playCounter.stopped()
@@ -144,11 +150,15 @@ class PlayerController(
                     override fun onTimelineChanged(
                         timeline: Timeline,
                         reason: Int,
-                    ) = publish(built)
+                    ) {
+                        publish(built)
+                        publishQueue(built)
+                    }
                 },
             )
             controller = built
             publish(built)
+            publishQueue(built)
             ticker?.cancel()
             ticker =
                 scope.launch(Dispatchers.Main) {
@@ -168,12 +178,12 @@ class PlayerController(
 
     /** The length of the track at [index] in the queue, in milliseconds; 0 when the server did not give one. */
     private fun lengthMs(index: Int): Long =
-        queue.getOrNull(index)?.track?.durationSec?.let { it * MILLIS_PER_SECOND } ?: 0L
+        loadedTracks.getOrNull(index)?.track?.durationSec?.let { it * MILLIS_PER_SECOND } ?: 0L
 
     private fun publishProgress(player: Player) {
         // Some streams never report a length; the server's length for the track is the fallback.
         val serverLengthMs =
-            queue.getOrNull(
+            loadedTracks.getOrNull(
                 player.currentMediaItemIndex,
             )?.track?.durationSec?.let { it * MILLIS_PER_SECOND }
         val duration = if (player.duration > 0) player.duration else serverLengthMs ?: player.duration
@@ -198,11 +208,20 @@ class PlayerController(
                 nowPlayingId = player.currentMediaItem?.mediaId,
                 isPlaying = player.isPlaying,
                 tempo = player.playbackParameters.speed,
-                trackBpm = queue.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
+                trackBpm = loadedTracks.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
                 queueLength = player.mediaItemCount,
                 hasPrevious = player.hasPreviousMediaItem(),
                 hasNext = player.hasNextMediaItem(),
             )
+    }
+
+    /** Publishes the media items of the session, so the player screen can list what played and what is next. */
+    private fun publishQueue(player: Player) {
+        val items =
+            buildList {
+                repeat(player.mediaItemCount) { add(player.getMediaItemAt(it)) }
+            }
+        _queue.value = playQueueOf(items, player.currentMediaItemIndex)
     }
 
     /**
@@ -213,7 +232,7 @@ class PlayerController(
         player: MediaController,
         fromStart: Boolean = false,
     ) {
-        val entry = queue.getOrNull(player.currentMediaItemIndex)
+        val entry = loadedTracks.getOrNull(player.currentMediaItemIndex)
         val current = settings.current()
         val settings =
             if (fromStart && !current.keepTempoForNextTrack) {
@@ -251,11 +270,12 @@ class PlayerController(
     ) {
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
-        queue = tracks
+        loadedTracks = tracks
         events.queued(tracks.map { it.track }, startIndex, settings)
         scope.launch(Dispatchers.Main) {
             val player = connected()
             player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)
+            publishQueue(player)
             player.prepare()
             applyCurrentTrack(player, fromStart = true)
             player.play()
@@ -277,11 +297,22 @@ class PlayerController(
         scope.launch(Dispatchers.Main) { connected().seekToPreviousMediaItem() }
     }
 
+    /** Starts the song at [index] in the current queue, leaving the other songs in place. */
+    fun playAt(index: Int) {
+        scope.launch(Dispatchers.Main) {
+            val player = controller ?: return@launch
+            if (index !in 0 until player.mediaItemCount) return@launch
+            player.seekTo(index, 0L)
+            publishQueue(player)
+        }
+    }
+
     fun release() {
         ticker?.cancel()
         ticker = null
         controller?.release()
         controller = null
+        _queue.value = PlayQueue()
     }
 
     companion object {

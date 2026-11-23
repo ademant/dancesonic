@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -136,6 +137,7 @@ internal fun NowPlayingSheet(
 ) {
     val detail by libraryVm.nowPlaying.collectAsStateWithLifecycle()
     val playback by player.state.collectAsStateWithLifecycle()
+    val queue by player.queue.collectAsStateWithLifecycle()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -157,6 +159,8 @@ internal fun NowPlayingSheet(
                 TempoRow(playbackVm, playback.trackBpm)
                 current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
             }
+            HorizontalDivider()
+            PlayQueueSection(queue, onPlayAt = player::playAt)
         }
     }
 }
