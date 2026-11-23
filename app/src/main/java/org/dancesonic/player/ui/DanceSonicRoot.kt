@@ -349,15 +349,18 @@ fun PlayerBar(
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = state.nowPlayingTitle ?: NOTHING_PLAYING,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f).clickable(onClick = onExpand),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = state.nowPlayingTitle ?: NOTHING_PLAYING,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable(onClick = onExpand),
+                )
+                state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
             if (state.idle) TextButton(onClick = { showIdleControls = false }) { Text(HIDE_CONTROLS) }
+            TextButton(onClick = onExpand) { Text("Queue") }
         }
-        state.nowPlayingArtist?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         SeekBar(player, libraryVm.nowPlayingWaveform)
         TransportRow(player)
         TempoRow(playbackVm, state.trackBpm)
