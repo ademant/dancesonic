@@ -58,7 +58,7 @@ class RelayClientTest {
 
     @Test
     fun `the account's Studios are listed, without phones or records this version cannot read`() =
-        runBlocking {
+        runBlocking<Unit> {
             server.enqueueJson(
                 """{"devices":[
                     {"id":"studio-abc","kind":"studio","name":"Hall laptop","publicKey":"${record()}"},
@@ -85,8 +85,29 @@ class RelayClientTest {
     }
 
     @Test
+    fun `a Studio is removed from the account by its device id`() =
+        runBlocking<Unit> {
+            server.enqueueJson("{}")
+
+            relay.removeStudio("studio-abc")
+            val request = server.server.takeRequest()
+
+            assertEquals("DELETE", request.method)
+            assertEquals("/api/relay/devices/studio-abc", request.path)
+            assertEquals("test-api-key", request.getHeader("X-Api-Key"))
+        }
+
+    @Test
+    fun `a Studio that is already gone counts as removed`() =
+        runBlocking<Unit> {
+            server.enqueueError(404)
+
+            relay.removeStudio("studio-abc")
+        }
+
+    @Test
     fun `the phone's record holds only the version byte`() =
-        runBlocking {
+        runBlocking<Unit> {
             server.enqueueJson("{}")
 
             relay.publishPhone("phone-xyz", "Pixel")
@@ -103,7 +124,7 @@ class RelayClientTest {
 
     @Test
     fun `the relay connection passes frames from Studio only, and ends when Studio is not connected`() =
-        runBlocking {
+        runBlocking<Unit> {
             val fromPhone = Channel<ByteArray>(Channel.UNLIMITED)
             val studioSide =
                 object : WebSocketListener() {
@@ -113,6 +134,15 @@ class RelayClientTest {
                     ) {
                         webSocket.send(RelayWire.encodeFrame(studioId, byteArrayOf(2, 9)).toByteString())
                         webSocket.send(RelayWire.encodeFrame("phone-other", byteArrayOf(2, 8)).toByteString())
+                    }
+
+                    override fun onClosing(
+                        webSocket: WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) {
+                        // Answer the phone's close, so the mock server can shut down.
+                        webSocket.close(code, reason)
                     }
 
                     override fun onMessage(

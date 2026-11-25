@@ -34,6 +34,22 @@ class RelayGateway(
     }
 
     /**
+     * Removes the Studio with [fingerprint] from the account's relay. Returns false when the relay cannot be used (the
+     * app is not connected to folksonic, or the request failed); the Studio then stays listed on the account. The
+     * failure is the result, not an error: forgetting the pairing on this phone must still happen.
+     */
+    @Suppress("SwallowedException")
+    suspend fun remove(fingerprint: ByteArray): Boolean {
+        val relay = endpoint() ?: return false
+        return try {
+            relay.removeStudio(RelayWire.studioDeviceId(fingerprint))
+            true
+        } catch (e: IOException) {
+            false
+        }
+    }
+
+    /**
      * Opens a link to the Studio with [fingerprint], or returns null when the relay cannot be used. Throws
      * [StudioUnavailable]: `NOT_THIS_STUDIO` when [isStudio] refuses the Studio that answered, `NOT_FOUND` when
      * Studio is not on the relay or does not answer.

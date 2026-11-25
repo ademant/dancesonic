@@ -88,7 +88,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `the link opens after the handshake and identity, and carries text both ways`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
 
@@ -104,7 +104,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a Studio whose keys do not match the record is refused before anything is sent`() =
-        runBlocking {
+        runBlocking<Unit> {
             // The record claims [fingerprint]; the Studio that answers holds other keys under the same prologue.
             val other = NoiseKeyPair.generate()
             val studio = FakeRelayStudio(other, tlsSpki, fingerprint)
@@ -118,7 +118,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a Studio that was not given this fingerprint fails the handshake`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, ByteArray(32) { 4 })
 
             val error = assertThrows(RelayStudioException::class.java) { runBlocking { open(studio) } }
@@ -129,7 +129,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a replayed frame ends the session, so nothing arrives twice`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
             val sealed = studio.seal("""{"type":"result","id":1,"ok":true}""")
@@ -143,7 +143,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a reordered frame ends the session`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
             val first = studio.seal("""{"n":1}""").single()
@@ -157,7 +157,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a changed frame ends the session`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
             val sealed = studio.seal("""{"type":"state"}""").single()
@@ -170,7 +170,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a large answer is rebuilt from its chunks`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
             val big = """{"type":"result","data":"${"x".repeat(200 * 1024)}"}"""
@@ -182,7 +182,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `the phone splits a long message into frames under the relay limit, and refuses one over 64 KiB`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
             val long = "y".repeat(40 * 1024)
@@ -199,7 +199,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `Studio leaving the relay ends the session`() =
-        runBlocking {
+        runBlocking<Unit> {
             val studio = FakeRelayStudio(studioKey, tlsSpki, fingerprint)
             val link = open(studio)
 
@@ -210,7 +210,7 @@ class RelayStudioLinkTest {
 
     @Test
     fun `a server in the middle gets a different comparison code on each side`() =
-        runBlocking {
+        runBlocking<Unit> {
             // The server swaps Studio's record for its own and answers the phone itself...
             val middleKey = NoiseKeyPair.generate()
             val middleSpki = ByteArray(91) { 7 }

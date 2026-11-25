@@ -412,10 +412,17 @@ class StudioRemote
             }
         }
 
-        /** Forgets a pairing: its record and its device key. Studio lists the phone until it is revoked there. */
-        suspend fun forget(record: StudioPairing) {
+        /**
+         * Forgets a pairing: its record and its device key. When folksonic is connected, the Studio's record is also
+         * removed from the account, which ends its relay connection. Returns whether the account was cleared too; when
+         * it was not, the Studio stays listed on the account until it is removed there.
+         */
+        suspend fun forget(record: StudioPairing): Boolean {
+            val fingerprint = StudioWire.decodeBase64Url(record.fingerprint, FINGERPRINT_BYTES)
+            val removedFromAccount = fingerprint != null && relay?.remove(fingerprint) == true
             store.remove(record.id)
             DeviceKeys.delete(record.keyAlias)
+            return removedFromAccount
         }
 
         /** The address mDNS finds for [fingerprint]. Pairing has no hint yet, so only mDNS is used there. */

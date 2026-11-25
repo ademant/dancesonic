@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import org.dancesonic.player.studio.noise.NoiseKeyPair
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -32,6 +33,7 @@ class RelayGatewayTest {
         val opened = mutableListOf<Pair<String, String>>()
         var refuse: Exception? = null
         var studios: List<RelayStudio> = emptyList()
+        val removed = mutableListOf<String>()
 
         override suspend fun studios(): List<RelayStudio> {
             refuse?.let { throw it }
@@ -53,6 +55,11 @@ class RelayGatewayTest {
             opened += phoneId to studioId
             return pipe()
         }
+
+        override suspend fun removeStudio(studioId: String) {
+            refuse?.let { throw it }
+            removed += studioId
+        }
     }
 
     private val store by lazy {
@@ -69,7 +76,7 @@ class RelayGatewayTest {
 
     @Test
     fun `without folksonic the relay is skipped`() =
-        runBlocking {
+        runBlocking<Unit> {
             assertNull(gateway(null).open(fingerprint, NoiseKeyPair.generate(), ::matches))
             val error = assertThrows(StudioUnavailable::class.java) { runBlocking { gateway(null).studios() } }
             assertEquals(StudioUnavailable.Reason.NOT_OFFERED, error.reason)
@@ -77,7 +84,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a server without the relay is skipped, so the next transport is tried`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { error("not opened") }
             endpoint.refuse = RelayNotOffered()
 
@@ -86,7 +93,7 @@ class RelayGatewayTest {
 
     @Test
     fun `the phone publishes its record and reaches Studio under the id from its fingerprint`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { FakeRelayStudio(studioKey, tlsSpki, fingerprint) }
             val gateway = gateway(endpoint)
 
@@ -104,7 +111,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a Studio that is not the paired one is refused`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { FakeRelayStudio(NoiseKeyPair.generate(), tlsSpki, fingerprint) }
 
             val error =
@@ -117,7 +124,7 @@ class RelayGatewayTest {
 
     @Test
     fun `a relay that fails is reported, and listing Studios fails the same way`() =
-        runBlocking {
+        runBlocking<Unit> {
             val endpoint = FakeEndpoint { error("not opened") }
             endpoint.refuse = IOException("down")
 
@@ -129,5 +136,18 @@ class RelayGatewayTest {
 
             assertEquals(StudioUnavailable.Reason.FAILED, opening.reason)
             assertEquals(StudioUnavailable.Reason.FAILED, listing.reason)
+        }
+
+    @Test
+    fun `removing a Studio asks the account's relay for its device id, and reports a relay that is not there`() =
+        runBlocking<Unit> {
+            val endpoint = FakeEndpoint { error("not opened") }
+
+            assertTrue(gateway(endpoint).remove(fingerprint))
+            assertEquals(listOf(RelayWire.studioDeviceId(fingerprint)), endpoint.removed)
+
+            endpoint.refuse = IOException("down")
+            assertFalse(gateway(endpoint).remove(fingerprint))
+            assertFalse(gateway(null).remove(fingerprint))
         }
 }
