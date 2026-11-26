@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -191,6 +194,25 @@ private enum class ConnectMethod(
 fun ConnectScreen(vm: ConnectViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
+
+    // The screen is shown before the Scaffold exists, so it brings its own surface: without it, text has no content
+    // color from the theme and is drawn black, unreadable on the dark background (#132). It also keeps clear of the
+    // status bar, the navigation bar and the keyboard, since the app draws edge to edge.
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        ConnectForm(
+            vm = vm,
+            state = state,
+            allowCleartext = allowCleartext,
+        )
+    }
+}
+
+@Composable
+private fun ConnectForm(
+    vm: ConnectViewModel,
+    state: ConnectUiState,
+    allowCleartext: Boolean,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localNetwork = rememberLocalNetworkRequest()
@@ -203,7 +225,11 @@ fun ConnectScreen(vm: ConnectViewModel) {
     var apiKey by remember { mutableStateOf("") }
 
     Column(
-        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Connect to your server", style = MaterialTheme.typography.headlineSmall)
