@@ -1,9 +1,15 @@
 package org.dancesonic.player.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.dancesonic.player.data.MeterView
@@ -123,6 +129,87 @@ class TrackDetailRowsTest {
         show()
 
         composeRule.onAllNodesWithText("👟").assertCountEquals(5)
+    }
+
+    /** Only the shoes matter here: the other rows are empty. */
+    private fun showShoes(
+        mine: Int?,
+        canEdit: Boolean = true,
+        actions: TrackEntryActions = TrackEntryActions(),
+    ) {
+        val shoes = ShoesView(mine = mine, median = null, raters = 0, pending = false, error = null)
+        val entries = TrackEntries(emptyList(), meter = null, hasDescription = false, shoes = shoes, canEdit = canEdit)
+        composeRule.setContent { TrackDetailRows(entries = entries, actions = actions) }
+    }
+
+    private fun shoe(value: Int) = composeRule.onNodeWithContentDescription("Rate $value of 5 shoes")
+
+    @Test
+    fun `the shoes up to the rating are lit and the rest are not (#145)`() {
+        showShoes(mine = 3)
+
+        (1..3).forEach { shoe(it).assertIsSelected() }
+        (4..5).forEach { shoe(it).assertIsNotSelected() }
+    }
+
+    @Test
+    fun `without a rating no shoe is lit`() {
+        showShoes(mine = null)
+
+        (1..5).forEach { shoe(it).assertIsNotSelected() }
+    }
+
+    @Test
+    fun `a lit shoe is drawn clearly stronger than an empty one, not only tinted`() {
+        assertTrue(shoeAlpha(lit = true) - shoeAlpha(lit = false) >= 0.5f)
+    }
+
+    @Test
+    fun `tapping a shoe sets the rating to that shoe`() {
+        val rated = mutableListOf<Int>()
+        showShoes(mine = 3, actions = TrackEntryActions(onRate = { rated += it }))
+
+        shoe(5).performClick()
+        shoe(1).performClick()
+
+        assertEquals(listOf(5, 1), rated)
+    }
+
+    @Test
+    fun `a rating change shows at once with its state after the tap`() {
+        var view by mutableStateOf(ShoesView(mine = 2, median = null, raters = 0, pending = false, error = null))
+        composeRule.setContent {
+            TrackDetailRows(
+                entries =
+                    TrackEntries(
+                        dances = emptyList(),
+                        meter = null,
+                        hasDescription = false,
+                        shoes = view,
+                        canEdit = true,
+                        changes = FieldChanges(shoes = if (view.pending) FieldChange.QUEUED else null),
+                    ),
+                // As the repository does: the queued value shows as the viewer's rating, marked pending.
+                actions = TrackEntryActions(onRate = { view = view.copy(mine = it, pending = true) }),
+            )
+        }
+
+        shoe(4).performClick()
+
+        shoe(4).assertIsSelected()
+        shoe(5).assertIsNotSelected()
+        composeRule.onNodeWithText("Shoes (not sent yet):").assertIsDisplayed()
+    }
+
+    @Test
+    fun `signed out, the shoes say why they cannot be tapped`() {
+        val rated = mutableListOf<Int>()
+        showShoes(mine = 3, canEdit = false, actions = TrackEntryActions(onRate = { rated += it }))
+
+        shoe(4).performClick()
+
+        assertTrue(rated.isEmpty())
+        composeRule.onNodeWithText("Sign in to DanceBrainz to rate").assertIsDisplayed()
     }
 }
 
