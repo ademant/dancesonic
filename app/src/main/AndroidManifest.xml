@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 17: private servers and Studio on the local network (#124). Asked for only when one is used. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- Lets offline downloads wait for an unmetered connection. Reads the network type only. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

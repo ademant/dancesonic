@@ -7,6 +7,7 @@ import okhttp3.mockwebserver.MockResponse
 import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -33,11 +34,13 @@ class LanTlsTest {
         server.close()
     }
 
+    private val url get() = server.server.url("/")
+
     @Test
-    fun `a private https server with its pinned certificate connects`() =
+    fun `a private https server with its verified pin connects`() =
         runBlocking {
-            val pin = LanTls.connectPin(server.server.url("/"))
-            assertEquals(pin, LanPins.pinFor("localhost"))
+            val pin = checkNotNull(LanTls.connectPin(url))
+            LanPins.trustForSetup(url, pin)
 
             server.server.enqueue(MockResponse().setBody("{}"))
             val settings = server.settings.withTlsPin(pin)
@@ -47,8 +50,52 @@ class LanTlsTest {
         }
 
     @Test
+    fun `reading a pin does not make it active (#126)`() =
+        runBlocking {
+            val pin = LanTls.connectPin(url)
+
+            assertNotNull(pin)
+            assertNull(LanPins.pinFor(url.host, url.port))
+            assertThrows(IOException::class.java) {
+                SubsonicHttp.okHttpClient { server.settings }.newCall(pingRequest()).execute()
+            }
+            assertEquals(0, server.server.requestCount)
+        }
+
+    @Test
+    fun `a setup pin is forgotten when the setup ends without storing it (#126)`() =
+        runBlocking {
+            val pin = checkNotNull(LanTls.connectPin(url))
+            LanPins.trustForSetup(url, pin)
+
+            LanPins.endSetup()
+
+            assertNull(LanPins.pinFor(url.host, url.port))
+        }
+
+    @Test
+    fun `a pin belongs to its origin, not to the whole host (#126)`() {
+        LanPins.remember(server.settings.withTlsPin("stored-pin"))
+
+        assertEquals("stored-pin", LanPins.pinFor("LOCALHOST", url.port))
+        assertNull(LanPins.pinFor("localhost", url.port + 1))
+    }
+
+    @Test
+    fun `disconnecting or switching servers drops the old pin (#126)`() {
+        LanPins.remember(server.settings.withTlsPin("stored-pin"))
+
+        LanPins.remember(ServerSettings("https://192.168.1.9/".toHttpUrl(), "key", tlsPin = "other-pin"))
+        assertNull(LanPins.pinFor(url.host, url.port))
+        assertEquals("other-pin", LanPins.pinFor("192.168.1.9", 443))
+
+        LanPins.remember(null)
+        assertNull(LanPins.pinFor("192.168.1.9", 443))
+    }
+
+    @Test
     fun `a certificate that does not match the pin is refused`() {
-        LanPins.put("localhost", "not-the-certificate")
+        LanPins.remember(server.settings.withTlsPin("not-the-certificate"))
         val settings = server.settings.withTlsPin("not-the-certificate")
 
         assertThrows(IOException::class.java) {
@@ -78,7 +125,8 @@ class LanTlsTest {
 
         LanPins.remember(pinned)
 
-        assertEquals("stored-pin", LanPins.pinFor("localhost"))
+        assertEquals("stored-pin", LanPins.pinFor(url.host, url.port))
+        assertEquals("stored-pin", LanPins.savedPinFor(url))
     }
 
     @Test

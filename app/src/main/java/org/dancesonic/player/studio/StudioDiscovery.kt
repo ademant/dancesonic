@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl
+import org.dancesonic.player.subsonic.LocalNetworkAccess
 import kotlin.coroutines.resume
 
 /**
@@ -22,14 +23,19 @@ import kotlin.coroutines.resume
 class StudioDiscovery(private val context: Context) {
     private val resolving = Mutex()
 
-    /** The HTTPS address of the Studio whose tag is [tag], or null when none answers within [timeoutMillis]. */
+    /**
+     * The HTTPS address of the Studio whose tag is [tag], or null when none answers within [timeoutMillis]. Throws
+     * [org.dancesonic.player.subsonic.LocalNetworkBlockedException] at once when Android 17 blocks the local network.
+     */
     suspend fun find(
         tag: String,
         timeoutMillis: Long = TIMEOUT_MILLIS,
-    ): HttpUrl? =
-        withTimeoutOrNull(timeoutMillis) {
+    ): HttpUrl? {
+        LocalNetworkAccess.requireAllowed()
+        return withTimeoutOrNull(timeoutMillis) {
             services().map { resolve(it) }.first { it.tag == tag && it.url != null }.url
         }
+    }
 
     private data class Found(val tag: String?, val url: HttpUrl?)
 

@@ -2,10 +2,12 @@ package org.dancesonic.player.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -40,5 +42,25 @@ internal fun PairingVerification(
             Button(onClick = { onDecision(PairingDecision.MATCH) }) { Text("Code matches") }
             OutlinedButton(onClick = { onDecision(PairingDecision.CANCEL) }) { Text("Cancel") }
         }
+    }
+}
+
+/**
+ * What a connect attempt shows under its form: the error, the local network prompt after a refusal (#124), the status,
+ * and the checks that wait for the user: the server certificate (#126) and the pairing code (folksonic #103).
+ */
+@Composable
+internal fun ColumnScope.ConnectFeedback(
+    state: ConnectUiState,
+    vm: ConnectViewModel,
+    localNetwork: LocalNetworkRequest,
+) {
+    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    LocalNetworkAllow(state.localNetworkBlocked, localNetwork)
+    state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    CertificateConfirmation(state.certificateFingerprint, vm.certificateCheck::answer)
+    PairingVerification(state.verificationCode, vm.verifier::answer)
+    if (state.busy) {
+        CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
     }
 }

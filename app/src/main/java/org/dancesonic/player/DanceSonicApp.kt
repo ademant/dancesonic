@@ -64,6 +64,7 @@ import org.dancesonic.player.studio.StudioRemote
 import org.dancesonic.player.studio.ble.BleGateway
 import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.LanPins
+import org.dancesonic.player.subsonic.LocalNetworkAccess
 import org.dancesonic.player.subsonic.PlayReporter
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicClient
@@ -81,6 +82,8 @@ class DanceSonicApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // Android 17 blocks the local network until the permission is granted; requests check it first (#124).
+        LocalNetworkAccess.install { LocalNetworkAccess.granted(this) }
         container = AppContainer(this, settingsDataStore)
     }
 
@@ -336,6 +339,22 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             return cached
         }
         return SubsonicClient(settings).also { cachedCatalogClient = it }
+    }
+
+    /**
+     * Forgets what belongs to the current server before the app disconnects or switches to another one: the synced
+     * catalog and sync point, cached audio and waveforms, kept collections, waiting plays, and the player's queue and
+     * state (#130). Playlists stay. The stored settings are left to the caller.
+     */
+    suspend fun forgetServerData() {
+        player.reset()
+        synchronized(this) { cachedCatalogClient = null }
+        library.clearCatalog()
+        syncState.clear()
+        audioCache.clear()
+        waveforms.clear()
+        keptCollections.forgetAll()
+        scrobbles.forgetAll()
     }
 
     /**

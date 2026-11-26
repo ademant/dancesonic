@@ -18,6 +18,7 @@ import okhttp3.TlsVersion
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.conscrypt.Conscrypt
+import org.dancesonic.player.subsonic.LocalNetworkAccess
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -160,6 +161,8 @@ class StudioConnector(
             .sslSocketFactory(tls.socketFactory, TRUST_ALL)
             // The certificate has a fixed name, and it is checked by fingerprint instead.
             .hostnameVerifier { _, _ -> true }
+            // Studio is on the local network: refused at once while Android 17's permission is missing (#124).
+            .dns(LocalNetworkAccess.dns)
             .connectionSpecs(
                 listOf(ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS).tlsVersions(TlsVersion.TLS_1_3).build()),
             )

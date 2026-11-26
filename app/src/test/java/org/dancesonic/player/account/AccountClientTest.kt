@@ -346,10 +346,25 @@ class AccountClientTest {
             assertTrue(revoked)
             val list = fake.server.takeRequest()
             assertEquals("/api/keys", list.requestUrl!!.encodedPath)
-            assertEquals("tsk_mine_full_secret", list.requestUrl!!.queryParameter("apiKey"))
             val delete = fake.server.takeRequest()
             assertEquals("DELETE", delete.method)
             assertEquals("/api/keys/42", delete.requestUrl!!.encodedPath)
+        }
+
+    @Test
+    fun `key management sends the key in the header, never in the URL (#125)`() =
+        runBlocking<Unit> {
+            fake.server.enqueue(json("""{"keys":[{"id":42,"prefix":"tsk_mine"}]}"""))
+            fake.server.enqueue(json("""{"status":"revoked"}"""))
+
+            account.revokeOwnKey(base, "tsk_mine_full_secret")
+
+            repeat(2) {
+                val sent = fake.server.takeRequest()
+                assertEquals("tsk_mine_full_secret", sent.getHeader("X-Api-Key"))
+                assertNull(sent.requestUrl!!.queryParameter("apiKey"))
+                assertFalse(sent.requestUrl.toString().contains("full_secret"))
+            }
         }
 
     @Test

@@ -71,12 +71,6 @@ fun ConfigScreen(
     val danceState by danceVm.state.collectAsStateWithLifecycle()
     val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
     val summaries = configSummaries(vm, playbackVm, offlineVm, studioVm, danceVm)
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // Not saved: the QR code leaves the screen with the screen, so a rotation or restore hides it again.
-    var address by rememberSaveable { mutableStateOf(vm.settings.value?.baseUrl?.toString() ?: "https://") }
-    // Not saved: the typed key never reaches the saved-instance state.
-    var apiKey by remember { mutableStateOf("") }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -93,7 +87,9 @@ fun ConfigScreen(
 
         ConfigSection(
             "Subsonic connection",
-            attention = state.busy || state.error != null || state.verificationCode != null,
+            attention =
+                state.busy || state.error != null || state.verificationCode != null ||
+                    state.certificateFingerprint != null,
             summary = summaries.connection,
         ) {
             val current = settings
@@ -129,44 +125,7 @@ fun ConfigScreen(
                 }
             }
 
-            Text("Re-enter connection", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "The server is checked before the new connection replaces the stored one. " +
-                    "A different server address clears the synced library; playlists stay.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(
-                onClick = { scope.launch { vm.scanAndConnect(context) } },
-                enabled = !state.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Scan code") }
-            ServerAddressField(address) { address = it }
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                label = { Text("API key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedButton(
-                onClick = {
-                    vm.connectWithApiKey(address, apiKey)
-                    apiKey = ""
-                },
-                enabled = !state.busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Connect with this key") }
-            CleartextOptIn(allowCleartext, vm::setAllowCleartext)
-
-            state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            PairingVerification(state.verificationCode, vm.verifier::answer)
-            if (state.busy) {
-                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-            }
+            ReenterConnection(vm, state, allowCleartext)
         }
 
         ConfigSection("Playback", attention = false, summary = summaries.playback) { PlaybackSection(playbackVm) }
@@ -183,6 +142,62 @@ fun ConfigScreen(
             DanceBrainzSection(danceVm)
         }
     }
+}
+
+/**
+ * Replaces the stored connection by a scanned code or a typed key. The server is checked first; a server on the local
+ * network asks for that permission, and a self-signed certificate is shown to be confirmed before the key is sent.
+ */
+@Composable
+private fun ColumnScope.ReenterConnection(
+    vm: ConnectViewModel,
+    state: ConnectUiState,
+    allowCleartext: Boolean,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val localNetwork = rememberLocalNetworkRequest()
+    var address by rememberSaveable { mutableStateOf(vm.settings.value?.baseUrl?.toString() ?: "https://") }
+    // Not saved: the typed key never reaches the saved-instance state.
+    var apiKey by remember { mutableStateOf("") }
+
+    Text("Re-enter connection", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "The server is checked before the new connection replaces the stored one. " +
+            "A different server address clears the synced library and the queue; playlists stay.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Button(
+        onClick = { scope.launch { vm.scanAndConnect(context, localNetwork) } },
+        enabled = !state.busy,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Scan code") }
+    ServerAddressField(address) { address = it }
+    OutlinedTextField(
+        value = apiKey,
+        onValueChange = { apiKey = it },
+        label = { Text("API key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedButton(
+        onClick = {
+            val typed = apiKey
+            apiKey = ""
+            scope.launch {
+                localNetwork.ensureFor(typedServer(address, allowCleartext))
+                vm.connectWithApiKey(address, typed)
+            }
+        },
+        enabled = !state.busy,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Connect with this key") }
+    CleartextOptIn(allowCleartext, vm::setAllowCleartext)
+
+    state.lastSync?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    ConnectFeedback(state, vm, localNetwork)
 }
 
 /**

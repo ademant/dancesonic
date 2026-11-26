@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient
 import org.dancesonic.player.subsonic.PublicJwk
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicHttp
+import org.dancesonic.player.subsonic.localNetworkBlock
 import retrofit2.HttpException
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -21,7 +22,6 @@ import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
-import retrofit2.http.Query
 import java.io.IOException
 
 /**
@@ -64,18 +64,24 @@ internal interface AccountService {
     @GET("api/device/me")
     suspend fun deviceMe(): Response<DeviceMe>
 
-    /** Keys can be listed and revoked with an API key, so the app needs no session for this. */
+    /**
+     * Keys are listed and revoked with the key itself, so the app needs no session for this. The key goes in the
+     * `X-Api-Key` header, which folksonic and tinysonic read before the query (#125), so it stays out of URLs and logs.
+     */
     @GET("api/keys")
     suspend fun listKeys(
-        @Query("apiKey") apiKey: String,
+        @Header(API_KEY_HEADER) apiKey: String,
     ): ListKeysResponse
 
     @DELETE("api/keys/{id}")
     suspend fun revokeKey(
         @Path("id") id: Long,
-        @Query("apiKey") apiKey: String,
+        @Header(API_KEY_HEADER) apiKey: String,
     ): Response<Unit>
 }
+
+/** The header that carries an API key on folksonic's `/api` endpoints. */
+internal const val API_KEY_HEADER = "X-Api-Key"
 
 @Serializable
 internal data class ListKeysResponse(
@@ -325,7 +331,7 @@ class AccountClient internal constructor(private val http: OkHttpClient) {
         } catch (e: SerializationException) {
             throw AccountException("The server sent an unexpected response.", e)
         } catch (e: IOException) {
-            throw AccountException("Could not reach the server.", e)
+            throw AccountException(e.localNetworkBlock()?.message ?: "Could not reach the server.", e)
         }
 
     companion object {
