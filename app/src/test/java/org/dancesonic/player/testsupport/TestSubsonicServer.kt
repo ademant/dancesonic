@@ -40,6 +40,9 @@ class TestSubsonicServer : AutoCloseable {
      */
     var advertised: List<String> = listOf(API_KEY_EXTENSION)
 
+    /** Versions answered for an extension in [advertised]; an extension not listed here has version 1 only. */
+    var versions: Map<String, List<Int>> = emptyMap()
+
     init {
         server.dispatcher = AdvertisingDispatcher()
         val held =
@@ -94,7 +97,10 @@ class TestSubsonicServer : AutoCloseable {
     }
 
     private fun extensionsResponse(): MockResponse {
-        val entries = advertised.joinToString(",") { """{"name":"$it","versions":[1]}""" }
+        val entries =
+            advertised.joinToString(",") { name ->
+                """{"name":"$name","versions":[${versions[name].orEmpty().ifEmpty { listOf(1) }.joinToString(",")}]}"""
+            }
         return MockResponse()
             .addHeader("Content-Type", "application/json")
             .setBody("""{"subsonic-response":{"status":"ok","openSubsonicExtensions":[$entries]}}""")

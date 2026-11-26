@@ -38,25 +38,35 @@ data class LibraryInfoDto(
 
 /**
  * One page of the change feed. `playlists` and `starred` are per account and are not part of the
- * catalog, so they are not read. Ids only: the client fetches changed items with the usual endpoints.
+ * catalog, so they are not read. Asked with `include=items` (version 2), each entry also carries its item;
+ * otherwise the client fetches changed items with the usual endpoints.
  */
 @Serializable
 data class LibraryChangesDto(
     val full: Boolean = false,
     /** Sync point for the next request, epoch milliseconds. Same on every page of one snapshot. */
     val serverTime: Long = 0,
-    val artists: List<ChangedIdDto> = emptyList(),
-    val albums: List<ChangedIdDto> = emptyList(),
-    val songs: List<ChangedIdDto> = emptyList(),
+    /** With items: each as getArtist returns it, without its albums. */
+    val artists: List<ChangedDto<ArtistDto>> = emptyList(),
+    /** With items: each as getAlbum returns it, without its songs. */
+    val albums: List<ChangedDto<AlbumDto>> = emptyList(),
+    /** With items: each as getSong returns it. */
+    val songs: List<ChangedDto<SongDto>> = emptyList(),
     val deleted: List<DeletedDto> = emptyList(),
     val nextCursor: String? = null,
 )
 
+/** One changed library item: its id, when it changed, and with `include=items` the item itself. */
 @Serializable
-data class ChangedIdDto(
+data class ChangedDto<T>(
     val id: String,
     /** Epoch milliseconds of the last change. */
     val updated: Long = 0,
+    /**
+     * The item, asked for with `include=items`. Absent without it, and when the item was deleted after the feed's
+     * snapshot was taken: the next sync then reports the deletion.
+     */
+    val item: T? = null,
 )
 
 @Serializable

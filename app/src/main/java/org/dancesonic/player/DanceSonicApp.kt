@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
+import org.dancesonic.player.analysis.AnalysisClient
 import org.dancesonic.player.analysis.WaveformStore
 import org.dancesonic.player.dance.DanceBrainzClient
 import org.dancesonic.player.dance.DanceBrainzSettingsStore
@@ -76,6 +77,8 @@ import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.SubsonicHttp
 import org.dancesonic.player.subsonic.streamUrl
+import org.dancesonic.player.subsonic.supports
+import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "DanceSonicApp"
 
@@ -167,7 +170,14 @@ class AppContainer(
      * Built after [database] and [audioCache] are created.
      */
     val waveforms: WaveformStore by lazy {
-        WaveformStore(database.waveformDao(), database.trackDao(), audioCache, { currentSettings })
+        WaveformStore(
+            database.waveformDao(),
+            database.trackDao(),
+            audioCache,
+            { currentSettings },
+            // The catalog client asks for the extension list once per server, not once per track (#154).
+            serverSupportsAnalysis = { catalogClient(it).supports(AnalysisClient.EXTENSION) },
+        )
     }
 
     /** Onsets of the songs playing now and next, in memory for the time-stretch on the audio thread. */
@@ -409,7 +419,10 @@ class AppContainer(
         val settings = currentSettings ?: return
         appScope.launch {
             try {
-                trackRefresh.run(songId) { library.refreshTrack(catalogClient(settings), songId) }
+                val client = catalogClient(settings)
+                // A server with a change feed keeps every stored track current through the sync (#154).
+                if (library.hasChangeFeed(client)) return@launch
+                trackRefresh.run(songId) { library.refreshTrack(client, songId) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
@@ -419,7 +432,32 @@ class AppContainer(
         }
     }
 
+    /** Analyses being fetched ahead, so a song asked for again while one runs is not fetched twice. */
+    private val analysisAhead = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Fetches the server's analysis of the song that plays next, so its start does not wait for the request (#154).
+     * Does nothing for a song already stored or already being fetched.
+     */
+    fun prepareUpcoming(songId: String) {
+        if (!analysisAhead.add(songId)) return
+        appScope.launch {
+            try {
+                waveforms.loadFromServer(songId)
+                onsetCache.refresh(songId)
+            } finally {
+                analysisAhead.remove(songId)
+            }
+        }
+    }
+
     init {
+        // Every stored track's size bounds its stream requests, however the track was started (#154).
+        database
+            .trackDao()
+            .observeSizes()
+            .onEach { rows -> streamLengths.replaceAll(rows.associate { it.id to it.sizeBytes }) }
+            .launchIn(appScope)
         settingsStore.settings
             .onEach {
                 currentSettings = it

@@ -65,16 +65,21 @@ class SubsonicClient internal constructor(
 
     /**
      * Every change since [since] (epoch milliseconds), or the whole library when [since] is null.
-     * Pages are read until the server reports no next cursor, so the result is one snapshot.
+     * Pages are read until the server reports no next cursor, so the result is one snapshot. With [withItems],
+     * each entry carries its item, so nothing has to be fetched one by one; ask for it only when the server
+     * advertises version [ITEMS_VERSION] of the change feed.
      */
-    suspend fun libraryChanges(since: Long?): LibraryChangesDto {
-        var page = fetchChangesPage(since = since, cursor = null)
+    suspend fun libraryChanges(
+        since: Long?,
+        withItems: Boolean = false,
+    ): LibraryChangesDto {
+        var page = fetchChangesPage(since = since, cursor = null, withItems = withItems)
         val artists = page.artists.toMutableList()
         val albums = page.albums.toMutableList()
         val songs = page.songs.toMutableList()
         val deleted = page.deleted.toMutableList()
         while (page.nextCursor != null) {
-            page = fetchChangesPage(since = null, cursor = page.nextCursor)
+            page = fetchChangesPage(since = null, cursor = page.nextCursor, withItems = withItems)
             artists += page.artists
             albums += page.albums
             songs += page.songs
@@ -94,14 +99,17 @@ class SubsonicClient internal constructor(
         since: Long?,
         cursor: String?,
         size: Int = CHANGES_PAGE_SIZE,
-    ): LibraryChangesDto =
-        call {
+        withItems: Boolean = false,
+    ): LibraryChangesDto {
+        val include = if (withItems) INCLUDE_ITEMS else null
+        return call {
             if (cursor == null) {
-                libraryChanges(since, size, null)
+                libraryChanges(since, size, null, include)
             } else {
-                libraryChanges(null, size, cursor)
+                libraryChanges(null, size, cursor, include)
             }
         }.libraryChanges ?: throw SubsonicException(null, "Change feed response was empty")
+    }
 
     /** One song, including its album id. */
     suspend fun song(id: String): SongDto =
@@ -205,6 +213,11 @@ class SubsonicClient internal constructor(
         /** Largest page the folksonic change feed accepts (`size`, 1–500). */
         const val CHANGES_PAGE_SIZE = 500
 
+        /** Version of `tinysonicLibraryChanges` that answers `include=items` with each changed item. */
+        const val ITEMS_VERSION = 2
+
+        private const val INCLUDE_ITEMS = "items"
+
         /** folksonic paging extension: `size` is capped at 500 and a short page is the last one. */
         const val PAGING_EXTENSION = "tinysonicPaging"
 
@@ -242,9 +255,11 @@ internal fun unwrap(response: SubsonicResponse): SubsonicResponse {
     return response
 }
 
-/** Whether the server advertises extension [name] at version 1. Asked once per client. */
-suspend fun SubsonicClient.supports(name: String): Boolean =
-    advertisedExtensions().any { it.name == name && it.versions.contains(1) }
+/** Whether the server advertises extension [name] at [version] (1 unless given). Asked once per client. */
+suspend fun SubsonicClient.supports(
+    name: String,
+    version: Int = 1,
+): Boolean = advertisedExtensions().any { it.name == name && it.versions.contains(version) }
 
 /**
  * Whether the server is folksonic or tinysonic, which take the API key in the `X-Api-Key` header. Both advertise their

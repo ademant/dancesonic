@@ -47,7 +47,7 @@ class PlaybackService : MediaSessionService() {
                 .setMediaSourceFactory(mediaSourceFactory)
                 .withMusicAudio()
                 .build()
-        player.addListener(QueueFollower(tracker, onsets))
+        player.addListener(QueueFollower(tracker, onsets, container::prepareUpcoming))
         val mediaSession =
             MediaSession
                 .Builder(this, player)
@@ -99,6 +99,8 @@ class PlaybackService : MediaSessionService() {
     private class QueueFollower(
         private val tracker: StreamTracker,
         private val onsets: OnsetCache,
+        /** Fetches what the next song needs before it starts, such as its analysis. */
+        private val prepareUpcoming: (String) -> Unit,
     ) : Player.Listener {
         override fun onEvents(
             player: Player,
@@ -110,6 +112,7 @@ class PlaybackService : MediaSessionService() {
             val next = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex).mediaId
             tracker.setQueue(current, next)
             onsets.prefetch(setOfNotNull(current, next))
+            next?.let(prepareUpcoming)
         }
 
         private companion object {
