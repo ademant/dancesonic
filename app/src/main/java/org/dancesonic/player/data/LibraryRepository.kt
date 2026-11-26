@@ -126,18 +126,45 @@ class LibraryRepository(
     /**
      * Full listing of the server catalog, then DanceBrainz refresh. Used by the Refresh action and
      * as the fallback when an incremental sync cannot be used. Rows not seen in this run are removed.
-     * The change-feed point is read before the listing starts, so a change made during it is picked
-     * up by the next sync.
+     *
+     * A folksonic server whose change feed carries items (version 2) lists the whole library in the feed's
+     * pages, items included, and the feed's own point is saved (#154). Otherwise the change-feed point is read
+     * before the listing starts, so a change made during it is picked up by the next sync.
      */
     suspend fun sync(
         client: SubsonicClient,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): SyncResult = withContext(io) { fullSync(client, onProgress, fullFeed = null) }
+
+    /** [sync], with [fullFeed] when a full feed with items was already read and need not be asked again. */
+    private suspend fun fullSync(
+        client: SubsonicClient,
+        onProgress: (done: Int, total: Int) -> Unit,
+        fullFeed: LibraryChangesDto?,
     ): SyncResult =
         withContext(io) {
             val runStart = clock()
-            val checkpoint = timed("checkpoint") { changeCheckpoint(client) }
+            val feed =
+                fullFeed ?: if (hasItemFeed(client)) {
+                    timed("feed") { client.libraryChanges(since = null, withItems = true) }
+                } else {
+                    null
+                }
+            val checkpoint =
+                if (feed != null) {
+                    feed.serverTime.takeIf { syncState != null }
+                } else {
+                    timed("checkpoint") { changeCheckpoint(client) }
+                }
 
-            val fetched = timed("listing") { fetchCatalog(client, runStart, onProgress) }
+            val fetched =
+                if (feed != null) {
+                    // The number of albums is only known once the feed is read, so there is no count to report.
+                    onProgress(0, 0)
+                    catalogFromFeed(feed, runStart)
+                } else {
+                    timed("listing") { fetchCatalog(client, runStart, onProgress) }
+                }
             val rowsWritten = timed("write") { db.withTransaction { writeChangedRows(fetched) } }
 
             saveSyncPoint(client, checkpoint)
@@ -189,13 +216,16 @@ class LibraryRepository(
                 // Nothing changed in the catalog, but DanceBrainz may have data for tracks not looked up yet.
                 unchangedResult(refreshAllDanceMetadata())
             } else {
-                val feed = client.libraryChanges(since)
-                if (feed.full) {
-                    sync(client)
-                } else {
-                    applyChanges(client, feed).also {
-                        store.save(url, serverTime = feed.serverTime, checkedAt = clock())
-                    }
+                val withItems = hasItemFeed(client)
+                val feed = client.libraryChanges(since, withItems)
+                when {
+                    // A full feed with items is the whole library already: list it without asking again.
+                    feed.full && withItems -> fullSync(client, onProgress = { _, _ -> }, fullFeed = feed)
+                    feed.full -> sync(client)
+                    else ->
+                        (if (withItems) applyItemChanges(client, feed) else applyChanges(client, feed)).also {
+                            store.save(url, serverTime = feed.serverTime, checkedAt = clock())
+                        }
                 }
             }
         }
@@ -283,6 +313,16 @@ class LibraryRepository(
         }
     }
 
+    /**
+     * True when [client]'s server reports its changes in a feed, which keeps every stored track current. A one-track
+     * check before playing is then not needed (#154).
+     */
+    suspend fun hasChangeFeed(client: SubsonicClient): Boolean = client.supports(CHANGES_EXTENSION)
+
+    /** True when [client]'s change feed carries the changed items themselves (`include=items`, version 2). */
+    private suspend fun hasItemFeed(client: SubsonicClient): Boolean =
+        client.supports(CHANGES_EXTENSION, SubsonicClient.ITEMS_VERSION)
+
     /** True when no incremental check has run for [serverUrl] within [minAgeMillis]. */
     suspend fun incrementalCheckDue(
         serverUrl: String,
@@ -340,14 +380,6 @@ class LibraryRepository(
             timings.record(phase, (System.nanoTime() - started) / NANOS_PER_MILLI)
         }
     }
-
-    /** Everything a full listing read, ready to be compared with the store. */
-    private data class Fetched(
-        val artists: List<ArtistEntity>,
-        val albums: List<AlbumEntity>,
-        val tracks: List<TrackEntity>,
-        val skippedAlbums: Int,
-    )
 
     /** Rows to write in one transaction, plus the ids to remove. */
     private class Patch(
@@ -441,6 +473,55 @@ class LibraryRepository(
         val patch = Patch(artistRows, albumRows, deletedArtistIds, deletedAlbumIds, deletedSongIds)
         // Albums the server no longer has (code 70) and albums without a known artist both count as skipped.
         return commitPatch(patch, skipped = changedAlbumIds.size - albumRows.size)
+    }
+
+    /**
+     * Applies a change feed that carries its items (#154): nothing is fetched one by one, except the rare artist of a
+     * changed album that neither the feed nor the store has. An album is written without touching its songs; songs
+     * change on their own entries, and the feed lists removed songs as deletions. An entry without an item was
+     * deleted after the snapshot and is left for the next sync, which reports the deletion.
+     */
+    private suspend fun applyItemChanges(
+        client: SubsonicClient,
+        feed: LibraryChangesDto,
+    ): SyncResult {
+        val runStart = clock()
+        val deletedArtistIds = feed.deleted.idsOf("artist")
+        val deletedAlbumIds = feed.deleted.idsOf("album")
+        val deletedSongIds = feed.deleted.idsOf("song")
+        val artists = feed.artists.filter { it.id !in deletedArtistIds }.mapNotNull { it.item }
+        val albums = feed.albums.filter { it.id !in deletedAlbumIds }.mapNotNull { it.item }
+        val songs = feed.songs.filter { it.id !in deletedSongIds }.mapNotNull { it.item }
+
+        val artistNames = artists.associate { it.id to artistName(it.name) }.toMutableMap()
+        val missingParentIds =
+            albums
+                .mapNotNull { it.artistId }
+                .distinct()
+                .filter { it !in artistNames && db.artistDao().get(it) == null }
+        val fetchedParents = fetchEach(missingParentIds) { client.artist(it) }
+        fetchedParents.forEach { artistNames[it.id] = artistName(it.name) }
+        val artistRows = (artists + fetchedParents).map { artistRow(it.id, it.name, runStart) }
+
+        for (parentId in albums.mapNotNull { it.artistId }.distinct() - artistNames.keys) {
+            db.artistDao().get(parentId)?.let { artistNames[parentId] = it.name }
+        }
+        val albumRows = albums.mapNotNull { it.copy(song = emptyList()).toEntities(artistNames, runStart)?.first }
+        val trackRows = db.songRowsOf(songs, albums, albumRows, runStart)
+
+        val rowsWritten =
+            db.withTransaction {
+                db.writeItemRows(artistRows, albumRows, trackRows, deletedArtistIds, deletedAlbumIds, deletedSongIds)
+            }
+        return SyncResult(
+            artists = artistRows.size,
+            albums = albumRows.size,
+            tracks = trackRows.size,
+            danceLookupsFailed = refreshAllDanceMetadata(),
+            skippedAlbums = albums.size - albumRows.size,
+            rowsWritten = rowsWritten,
+            mode = if (rowsWritten == 0) SyncMode.Unchanged else SyncMode.Changes,
+        )
     }
 
     /**
@@ -578,22 +659,7 @@ class LibraryRepository(
         val songs = timed("song-list") { client.allSongs() }
         // The number of albums is not known until the songs are read, so there is no count to report.
         onProgress(0, 0)
-
-        val songsByAlbum =
-            songs.mapNotNull { song -> song.albumId?.let { it to song } }.groupBy(
-                { it.first },
-                { it.second },
-            )
-        val artists = artistNames.map { (id, name) -> artistRow(id, name, runStart) }
-        val albums = mutableListOf<AlbumEntity>()
-        val tracks = mutableListOf<TrackEntity>()
-        for (stub in albumStubs) {
-            val withSongs = stub.copy(song = songsByAlbum[stub.id].orEmpty())
-            val (albumRow, songRows) = withSongs.toEntities(artistNames, runStart) ?: continue
-            albums += albumRow
-            tracks += songRows
-        }
-        return Fetched(artists, albums, tracks, skippedAlbums = albumStubs.size - albums.size)
+        return assembleCatalog(artistNames, albumStubs, songs, runStart)
     }
 
     /**
@@ -614,44 +680,6 @@ class LibraryRepository(
 
     private fun AlbumDto.headerDiffers(stored: AlbumEntity): Boolean =
         stored.artistId != artistId || stored.name != albumName(name) || stored.year != year
-
-    /**
-     * Rows for one album and its songs. Null when the album's artist is not in [artistNames]. A song
-     * without its own artist takes the album's, then the parent's.
-     */
-    private fun AlbumDto.toEntities(
-        artistNames: Map<String, String>,
-        runStart: Long,
-    ): Pair<AlbumEntity, List<TrackEntity>>? {
-        val parentId = artistId?.takeIf { it in artistNames } ?: return null
-        val parentName = artistNames.getValue(parentId)
-        val album =
-            AlbumEntity(
-                id = id,
-                artistId = parentId,
-                name = albumName(name),
-                year = year,
-                syncedAt = runStart,
-            )
-        val songs =
-            song.map {
-                TrackEntity(
-                    id = it.id,
-                    albumId = id,
-                    artistName = it.artist ?: artist ?: parentName,
-                    title = it.title.orEmpty().ifBlank { "Untitled" },
-                    trackNumber = it.track,
-                    durationSec = it.duration,
-                    mbid = it.musicBrainzId?.takeIf { mbid -> mbid.isNotBlank() },
-                    syncedAt = runStart,
-                    bpm = it.bpm?.takeIf { bpm -> bpm in TEMPO_RANGE },
-                    trackGain = it.replayGain?.trackGain,
-                    trackPeak = it.replayGain?.trackPeak,
-                    sizeBytes = it.size?.takeIf { size -> size > 0 },
-                )
-            }
-        return album to songs
-    }
 
     /** Fetches each id with at most [MAX_PARALLEL_REQUESTS] in flight. Ids the server no longer has are left out. */
     private suspend fun <T : Any> fetchEach(
@@ -811,16 +839,6 @@ private fun List<DeletedDto>.idsOf(type: String): Set<String> =
 
 private fun AlbumDto.hasArtistIn(artistNames: Map<String, String>): Boolean =
     artistId?.let { it in artistNames } == true
-
-private fun artistName(raw: String?): String = raw.orEmpty().ifBlank { "Unknown artist" }
-
-private fun albumName(raw: String?): String = raw.orEmpty().ifBlank { "Unknown album" }
-
-private fun artistRow(
-    id: String,
-    name: String?,
-    syncedAt: Long,
-): ArtistEntity = ArtistEntity(id = id, name = artistName(name), syncedAt = syncedAt)
 
 /** A chapter as the lookup or a read returned it, stored under its recording. */
 internal fun DanceChapter.toEntity(mbid: String): ChapterEntity =

@@ -1,13 +1,17 @@
 package org.dancesonic.player.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.waitUntilAtLeastOneExists
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -82,7 +86,9 @@ class DanceScreenPlayTest {
         Dispatchers.resetMain()
     }
 
-    private fun openWaltz() {
+    private fun onTrackList() = composeRule.onNode(hasScrollToIndexAction())
+
+    private fun openWaltz(waitFor: String = "Five") {
         val library = host.create { LibraryViewModel(container) }
         val playlists = host.create { PlaylistViewModel(container) }
         composeRule.setContent {
@@ -96,7 +102,7 @@ class DanceScreenPlayTest {
         composeRule.onNodeWithText("W · 1").performClick()
         composeRule.waitUntilAtLeastOneExists(hasText("Waltz"))
         composeRule.onNodeWithText("Waltz").performClick()
-        composeRule.waitUntilAtLeastOneExists(hasText("Five"))
+        composeRule.waitUntilAtLeastOneExists(hasText(waitFor))
     }
 
     /** The track titles in the order they are drawn, top to bottom. */
@@ -147,6 +153,23 @@ class DanceScreenPlayTest {
         val (queue, index) = started.last()
         assertEquals(shownOrder(), queue)
         assertEquals("Three", queue[index])
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h420dp")
+    fun `a new order shows the list from its top, the track Play starts`() {
+        openWaltz(waitFor = "One")
+        onTrackList().performScrollToIndex(titles.size - 1)
+        composeRule.onNodeWithText("Sort: Artist").performClick()
+        composeRule.onNodeWithText("Randomize").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Play").performClick()
+
+        val (queue, index) = started.last()
+        composeRule.onNodeWithText(queue[index]).assertIsDisplayed()
+        val scrolled = onTrackList().fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        assertEquals(0f, scrolled, 0f)
     }
 
     @Test

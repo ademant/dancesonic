@@ -8,6 +8,8 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.SimpleCache
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -105,6 +107,9 @@ class AudioCache(
         upstream: DataSource.Factory,
     ) = withContext(io) {
         if (holdsWhole(key, size)) return@withContext
+        // With the length on record, a reader that reaches the end stops there instead of asking the server for bytes
+        // past it, which it answers with 416 (#154).
+        rememberLength(key, size)
         // Unbounded, like the player's first request: the cache learns the track's total length from the response,
         // and later unbounded reads are then served from disk.
         val spec =
@@ -123,6 +128,16 @@ class AudioCache(
         } finally {
             source.close()
         }
+    }
+
+    private fun rememberLength(
+        key: String,
+        size: Long,
+    ) {
+        if (ContentMetadata.getContentLength(cache.getContentMetadata(key)) == size) return
+        val mutations = ContentMetadataMutations()
+        ContentMetadataMutations.setContentLength(mutations, size)
+        cache.applyContentMetadataMutations(key, mutations)
     }
 
     /** Removes every cached track. Runs on IO because it deletes files. */

@@ -1,17 +1,22 @@
 package org.dancesonic.player.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import org.dancesonic.player.data.MeterView
 import org.dancesonic.player.data.ShoesView
 import org.dancesonic.player.data.db.EditEntity
@@ -28,6 +33,11 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class TrackDetailRowsTest {
+    private companion object {
+        val NARROW = 280.dp
+        val MIN_SHOE = 48.dp
+    }
+
     @get:Rule
     val composeRule = createComposeRule()
 
@@ -199,6 +209,23 @@ class TrackDetailRowsTest {
         shoe(4).assertIsSelected()
         shoe(5).assertIsNotSelected()
         composeRule.onNodeWithText("Shoes (not sent yet):").assertIsDisplayed()
+    }
+
+    @Test
+    fun `all five shoes fit in a narrow dialog`() {
+        val shoes = ShoesView(mine = 2, median = null, raters = 0, pending = false, error = null)
+        val entries = TrackEntries(emptyList(), meter = null, hasDescription = false, shoes = shoes, canEdit = true)
+        composeRule.setContent {
+            // About the content width of the track detail dialog on a phone, where the fifth shoe was cut off.
+            Box(Modifier.width(NARROW)) { TrackDetailRows(entries = entries, actions = TrackEntryActions()) }
+        }
+
+        (1..5).forEach { value ->
+            val bounds = shoe(value).assertIsDisplayed().getBoundsInRoot()
+            assertTrue("shoe $value ends at ${bounds.right}", bounds.right <= NARROW)
+            val width = bounds.right - bounds.left
+            assertTrue("shoe $value is squeezed to $width", width >= MIN_SHOE)
+        }
     }
 
     @Test

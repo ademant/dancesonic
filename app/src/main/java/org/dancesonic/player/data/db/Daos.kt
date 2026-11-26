@@ -131,6 +131,10 @@ interface TrackDao {
     @Query("SELECT DISTINCT mbid FROM track WHERE mbid IS NOT NULL")
     suspend fun allMbids(): List<String>
 
+    /** The file size of every track that has one; emits again whenever the tracks change. */
+    @Query("SELECT id, sizeBytes FROM track WHERE sizeBytes IS NOT NULL")
+    fun observeSizes(): Flow<List<TrackSize>>
+
     @Query("SELECT id FROM track")
     suspend fun allIds(): List<String>
 
@@ -377,3 +381,9 @@ interface WaveformDao {
     @Query("DELETE FROM onsets")
     suspend fun deleteAllOnsets()
 }
+
+/** A track's file size, for bounding stream requests (#154). */
+data class TrackSize(
+    val id: String,
+    val sizeBytes: Long,
+)

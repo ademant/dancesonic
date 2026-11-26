@@ -258,7 +258,7 @@ fun DanceScreen(
                     row = { entry: DanceTypeCount ->
                         ListRow(
                             title = entry.danceType,
-                            subtitle = "${entry.trackCount} tracks",
+                            subtitle = count(entry.trackCount, "track"),
                             onClick = { danceType = entry.danceType },
                         )
                     },
@@ -270,6 +270,8 @@ fun DanceScreen(
                     selected,
                 ) { vm.tracksForDance(selected) }.collectAsStateWithLifecycle(emptyList())
                 val shown = remember(tracks, trackSort, shuffleSeed) { sortTracks(tracks, trackSort, shuffleSeed) }
+                val listState = keptListState(vm, "dance:$selected")
+                ScrollToTopOnReorder(listState, order = trackSort to shuffleSeed)
                 // The header names the tab; the path, Play and the sort only appear once a dance is open.
                 DanceTracksBar(
                     crumbs = crumbs,
@@ -287,9 +289,28 @@ fun DanceScreen(
                     onPlay = { index -> play(shown, index) },
                     playlistVm = playlistVm,
                     libraryVm = vm,
-                    listState = keptListState(vm, "dance:$selected"),
+                    listState = listState,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Scrolls [listState] to the top when [order] changes, so the new first track, the one Play starts, is in view. The
+ * list keeps its keyed rows in place on a reorder, which once left the top tracks scrolled out of sight. The first
+ * composition does not scroll, so returning to a dance keeps the place it was left.
+ */
+@Composable
+private fun ScrollToTopOnReorder(
+    listState: LazyListState,
+    order: Any,
+) {
+    var shownOrder by remember { mutableStateOf(order) }
+    LaunchedEffect(order) {
+        if (order != shownOrder) {
+            shownOrder = order
+            listState.scrollToItem(0)
         }
     }
 }

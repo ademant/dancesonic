@@ -150,7 +150,9 @@ class RelayStudioLinkTest {
             val second = studio.seal("""{"n":2}""").single()
 
             studio.incoming.send(second)
-            studio.incoming.send(first)
+            // The link may already have ended the session on the out-of-order frame and closed the channel, so this
+            // send may fail; it was a race in this test that flaked the build.
+            studio.incoming.trySend(first)
 
             assertEquals(null, link.next())
         }

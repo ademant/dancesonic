@@ -263,12 +263,16 @@ internal interface SubsonicService {
     @GET("rest/tinysonicLibraryInfo.view")
     suspend fun libraryInfo(): SubsonicEnvelope
 
-    /** Either [since] for the first page, or [cursor] alone for the next page of the same snapshot. */
+    /**
+     * Either [since] for the first page, or [cursor] alone for the next page of the same snapshot. [include] is
+     * `items` to get each changed item with its entry (version 2 of the extension), on every page.
+     */
     @GET("rest/getLibraryChanges.view")
     suspend fun libraryChanges(
         @Query("since") since: Long?,
         @Query("size") size: Int?,
         @Query("cursor") cursor: String?,
+        @Query("include") include: String? = null,
     ): SubsonicEnvelope
 }
 
