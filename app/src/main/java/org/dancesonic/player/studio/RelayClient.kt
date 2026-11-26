@@ -66,6 +66,9 @@ interface RelayEndpoint {
         phoneId: String,
         studioId: String,
     ): RelayPipe
+
+    /** Removes the Studio's record from the account, which also ends its relay connection. */
+    suspend fun removeStudio(studioId: String)
 }
 
 @Serializable
@@ -122,6 +125,20 @@ class RelayClient(
                 .put(json.encodeToString(RelayRecordBody.serializer(), body).toRequestBody(JSON))
                 .build()
         client.newCall(request).execute().use(::checkOffered)
+    }
+
+    /**
+     * Removes the Studio's record from the account, so it is no longer listed for any of its devices, and folksonic
+     * drops its relay connection at once. A record that is already gone counts as removed.
+     */
+    override suspend fun removeStudio(studioId: String) {
+        require(RelayWire.validDeviceId(studioId)) { "not a relay device id" }
+        withContext(io) {
+            val url = devicesUrl().newBuilder().addPathSegment(studioId).build()
+            client.newCall(authorized(url).delete().build()).execute().use { response ->
+                if (response.code != HTTP_NOT_FOUND) checkOffered(response)
+            }
+        }
     }
 
     /** Opens the phone's relay connection, for the session with [studioId]. Returns once the WebSocket is open. */
