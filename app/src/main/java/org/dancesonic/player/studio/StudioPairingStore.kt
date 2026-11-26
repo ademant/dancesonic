@@ -47,7 +47,9 @@ data class StudioPairing(
  * The paired Studios, kept in the settings DataStore as one JSON list. Not secret, so it is not encrypted; the keys
  * stay in the Keystore.
  */
-class StudioPairingStore(private val dataStore: DataStore<Preferences>) {
+class StudioPairingStore(
+    private val dataStore: DataStore<Preferences>,
+) {
     /** Every pairing, in the order they were added. */
     val pairings: Flow<List<StudioPairing>> = dataStore.data.map { decode(it[KEY]) }
 

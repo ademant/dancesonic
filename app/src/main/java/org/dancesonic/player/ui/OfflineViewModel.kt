@@ -11,7 +11,9 @@ import org.dancesonic.player.playback.DownloadSettings
 import org.dancesonic.player.playback.OfflineStatus
 
 /** The offline section of the config page: what is kept and downloaded, and whether mobile data may be used. */
-class OfflineViewModel(private val container: AppContainer) : ViewModel() {
+class OfflineViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val status: StateFlow<OfflineStatus> =
         container.offline.status
             .stateIn(viewModelScope, SharingStarted.Eagerly, OfflineStatus())

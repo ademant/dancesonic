@@ -18,7 +18,8 @@ class ShoesMigrationTest {
     @Test
     fun `migration 6 to 7 adds the shoes tables and keeps existing tracks and playlists`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {

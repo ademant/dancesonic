@@ -36,7 +36,8 @@ internal class CachedMediaDataSource(
         val source = reader.createDataSource()
         return try {
             source.open(
-                DataSpec.Builder()
+                DataSpec
+                    .Builder()
                     .setUri(uri)
                     .setKey(key)
                     .setPosition(position)

@@ -28,18 +28,27 @@ class DanceBrainzDeviceAuthTest {
     @Test
     fun `a signed request carries a DPoP proof for its method and URL without the query`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(MockResponse().setResponseCode(200))
             val http =
-                server.plain.newBuilder().addInterceptor(
-                    DanceBrainzDeviceInterceptor({
-                        SoftwareDeviceSigner()
-                    }, { 1_700_000_000L }),
-                ).build()
+                server.plain
+                    .newBuilder()
+                    .addInterceptor(
+                        DanceBrainzDeviceInterceptor({
+                            SoftwareDeviceSigner()
+                        }, { 1_700_000_000L }),
+                    ).build()
             val url = server.server.url("/api/v1/devices/me?probe=1")
 
-            http.newCall(
-                okhttp3.Request.Builder().url(url).get().header(DEVICE_KEY_HEADER, "dancesonic.device.abc").build(),
-            ).execute().close()
+            http
+                .newCall(
+                    okhttp3.Request
+                        .Builder()
+                        .url(url)
+                        .get()
+                        .header(DEVICE_KEY_HEADER, "dancesonic.device.abc")
+                        .build(),
+                ).execute()
+                .close()
 
             val request = server.server.takeRequest()
             val proof = request.getHeader("DPoP")!!
@@ -54,15 +63,23 @@ class DanceBrainzDeviceAuthTest {
     @Test
     fun `a request without a device header is sent unchanged`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(MockResponse().setResponseCode(200))
             val http =
-                server.plain.newBuilder().addInterceptor(
-                    DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
-                ).build()
+                server.plain
+                    .newBuilder()
+                    .addInterceptor(
+                        DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
+                    ).build()
 
-            http.newCall(
-                okhttp3.Request.Builder().url(server.server.url("/api/v1/recordings/x")).get().build(),
-            ).execute().close()
+            http
+                .newCall(
+                    okhttp3.Request
+                        .Builder()
+                        .url(server.server.url("/api/v1/recordings/x"))
+                        .get()
+                        .build(),
+                ).execute()
+                .close()
 
             val request = server.server.takeRequest()
             assertNull(request.getHeader("DPoP"))
@@ -72,11 +89,13 @@ class DanceBrainzDeviceAuthTest {
     @Test
     fun `a paired device edits a rating with a proof and no bearer token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(204))
+            server.enqueue(MockResponse().setResponseCode(204))
             val http =
-                server.plain.newBuilder().addInterceptor(
-                    DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
-                ).build()
+                server.plain
+                    .newBuilder()
+                    .addInterceptor(
+                        DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
+                    ).build()
             val client = DanceBrainzRatingsClient(server.server.url("/"), http)
 
             runBlocking {

@@ -27,7 +27,9 @@ data class StudioUiState(
 )
 
 /** Pairs, lists, renames and forgets Studios for the Config screen. */
-class StudioViewModel(private val container: AppContainer) : ViewModel() {
+class StudioViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val pairings: StateFlow<List<StudioPairing>> =
         container.studioPairings.pairings
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())

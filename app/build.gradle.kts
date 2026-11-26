@@ -4,7 +4,11 @@
 fun gitOutput(vararg args: String): String? =
     runCatching {
         val process = ProcessBuilder(listOf("git") + args).directory(rootDir).start()
-        val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        val text =
+            process.inputStream
+                .bufferedReader()
+                .use { it.readText() }
+                .trim()
         if (process.waitFor() == 0) text.ifEmpty { null } else null
     }.getOrNull()
 
@@ -90,13 +94,6 @@ configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configu
 }
 
 dependencies {
-    // Coil's OkHttp module asks for a newer Kotlin stdlib than this project's compiler reads. Keep the stdlib at the
-    // project's Kotlin version; Coil's own classes are built against the same stdlib API.
-    constraints {
-        implementation("org.jetbrains.kotlin:kotlin-stdlib") {
-            version { strictly(libs.versions.kotlin.get()) }
-        }
-    }
     implementation(platform(libs.compose.bom))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -114,6 +111,7 @@ dependencies {
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.work.runtime.ktx)
     ksp(libs.room.compiler)
 
     implementation(libs.okhttp)
@@ -138,6 +136,7 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.turbine)
+    testImplementation(libs.work.testing)
     androidTestImplementation(platform(libs.compose.bom))
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)

@@ -24,7 +24,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `the public median is read without a token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"recording":"$mbid","hearts":2,"shoes_median":3.5,"shoes_raters":4}"""))
+            server.enqueue(json("""{"recording":"$mbid","hearts":2,"shoes_median":3.5,"shoes_raters":4}"""))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
             val ratings = runBlocking { client.ratings(mbid, credential = null) }
@@ -40,7 +40,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `with a token the viewer's own rating is read too`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(
+            server.enqueue(
                 json("""{"recording":"$mbid","hearts":0,"shoes_median":null,"shoes_raters":0,"my_shoes":5}"""),
             )
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
@@ -57,7 +57,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `setting a rating sends its value with the token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(204))
+            server.enqueue(MockResponse().setResponseCode(204))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
             runBlocking {
@@ -79,7 +79,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `clearing a rating sends a delete with the token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(204))
+            server.enqueue(MockResponse().setResponseCode(204))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
             runBlocking { client.clearShoes(mbid, credential = tokenCredential("dbz_viewer_token_1234567890")) }
@@ -113,7 +113,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `a server that refuses the token gives a message for the user and the status`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
+            server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)
 
             val error =
@@ -136,7 +136,7 @@ class DanceBrainzRatingsClientTest {
     @Test
     fun `a removed device is told to pair again (#69)`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(
+            server.enqueue(
                 MockResponse().setResponseCode(401).setBody("""{"error":{"code":"device_unknown","message":"x"}}"""),
             )
             val client = DanceBrainzRatingsClient(server.server.url("/"), server.plain)

@@ -33,7 +33,8 @@ class WaveformStoreTest {
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         db =
-            Room.inMemoryDatabaseBuilder(context, DanceSonicDatabase::class.java)
+            Room
+                .inMemoryDatabaseBuilder(context, DanceSonicDatabase::class.java)
                 .allowMainThreadQueries()
                 .build()
         server = TestSubsonicServer()
@@ -57,7 +58,7 @@ class WaveformStoreTest {
     @Test
     fun `a stored server waveform is saved with its source and time`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(WAVEFORM_123))
+            server.enqueue(MockResponse().setBody(WAVEFORM_123))
 
             store.loadFromServer(SONG)
 
@@ -70,8 +71,8 @@ class WaveformStoreTest {
     @Test
     fun `a song the server is still working on is asked again after its wait`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setResponseCode(202).setHeader("Retry-After", "1").setBody("{}"))
-            server.server.enqueue(MockResponse().setBody(WAVEFORM_123))
+            server.enqueue(MockResponse().setResponseCode(202).setHeader("Retry-After", "1").setBody("{}"))
+            server.enqueue(MockResponse().setBody(WAVEFORM_123))
 
             store.loadFromServer(SONG)
 
@@ -105,7 +106,7 @@ class WaveformStoreTest {
     @Test
     fun `onsets are stored with the waveform and read back`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+            server.enqueue(MockResponse().setBody(WITH_ONSETS))
 
             store.loadFromServer(SONG)
 
@@ -119,7 +120,7 @@ class WaveformStoreTest {
     fun `a server waveform stored before onsets existed is asked once more for them`() =
         runBlocking {
             db.waveformDao().upsert(WaveformEntity(SONG, "9", "server", 1L))
-            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+            server.enqueue(MockResponse().setBody(WITH_ONSETS))
 
             store.loadFromServer(SONG)
 
@@ -130,7 +131,7 @@ class WaveformStoreTest {
     @Test
     fun `a server without onsets is not asked again at once`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(WAVEFORM_123))
+            server.enqueue(MockResponse().setBody(WAVEFORM_123))
             store.loadFromServer(SONG)
             assertNull(store.onsets(SONG))
 
@@ -145,7 +146,7 @@ class WaveformStoreTest {
             val dayAgo = System.currentTimeMillis() - WaveformStore.ONSETS_RECHECK_MS - 1
             db.waveformDao().upsert(WaveformEntity(SONG, "9", "server", 1L))
             db.waveformDao().upsertOnsets(OnsetsEntity(SONG, "", "", dayAgo))
-            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+            server.enqueue(MockResponse().setBody(WITH_ONSETS))
 
             store.loadFromServer(SONG)
 
@@ -156,7 +157,7 @@ class WaveformStoreTest {
     @Test
     fun `clear removes the onsets too`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(WITH_ONSETS))
+            server.enqueue(MockResponse().setBody(WITH_ONSETS))
             store.loadFromServer(SONG)
 
             store.clear()
@@ -168,7 +169,7 @@ class WaveformStoreTest {
     @Test
     fun `a server with no waveform and no pending work stores nothing`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody("""{"id":"$SONG","waveform":null}"""))
+            server.enqueue(MockResponse().setBody("""{"id":"$SONG","waveform":null}"""))
 
             store.loadFromServer(SONG)
 
@@ -178,7 +179,7 @@ class WaveformStoreTest {
     @Test
     fun `a failed request stores nothing and does not throw`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
+            server.enqueue(MockResponse().setResponseCode(500).setBody("{}"))
 
             store.loadFromServer(SONG)
 

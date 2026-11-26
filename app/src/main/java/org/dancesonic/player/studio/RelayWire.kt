@@ -46,7 +46,9 @@ private const val KIND_TRANSPORT: Byte = 2
 private const val KIND_HANDSHAKE: Byte = 3
 
 /** What one relay payload carries: the byte before the Noise message. */
-enum class RelayKind(val byte: Byte) {
+enum class RelayKind(
+    val byte: Byte,
+) {
     /** The phone's first handshake message; it starts a session and replaces an older one. */
     START(KIND_START),
 
@@ -58,7 +60,9 @@ enum class RelayKind(val byte: Byte) {
 }
 
 /** A relay frame or chunk that breaks the format. Ends the session. */
-class RelayFormatException(message: String) : Exception(message)
+class RelayFormatException(
+    message: String,
+) : Exception(message)
 
 /**
  * The bytes of the folksonic relay transport in Studio's `docs/remote-protocol.md`: device ids, relay frames
@@ -182,7 +186,9 @@ object RelayWire {
 }
 
 /** Joins chunk plaintexts back into protocol messages of at most [max] bytes. */
-class RelayJoiner(private val max: Int) {
+class RelayJoiner(
+    private val max: Int,
+) {
     private val buffer = ByteArrayOutputStream()
 
     /** Adds one chunk plaintext; returns the message when it is complete. */

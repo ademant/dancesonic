@@ -25,7 +25,9 @@ sealed interface DanceBrainzCredential {
     }
 
     /** A paired device. Its key is the Keystore key named [alias]; no secret is stored. */
-    data class Device(val alias: String) : DanceBrainzCredential
+    data class Device(
+        val alias: String,
+    ) : DanceBrainzCredential
 }
 
 /**

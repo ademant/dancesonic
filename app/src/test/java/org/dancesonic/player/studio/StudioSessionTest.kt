@@ -36,7 +36,9 @@ internal class FakeLink(
 }
 
 /** Counts up from zero and records each step, so a test can see that a counter is stored before it is sent. */
-internal class RecordingCounter(private val log: MutableList<String>) : StudioCounter {
+internal class RecordingCounter(
+    private val log: MutableList<String>,
+) : StudioCounter {
     private var value = 0L
 
     override suspend fun advance(): Long {
@@ -49,9 +51,11 @@ internal class RecordingCounter(private val log: MutableList<String>) : StudioCo
 /** A software P-256 key standing in for the Keystore key. */
 internal class SoftwareSigner : StudioSigner {
     private val pair =
-        java.security.KeyPairGenerator.getInstance("EC").apply {
-            initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
-        }.generateKeyPair()
+        java.security.KeyPairGenerator
+            .getInstance("EC")
+            .apply {
+                initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
+            }.generateKeyPair()
 
     override fun devicePoint(): ByteArray = uncompressedPoint(pair.public)
 

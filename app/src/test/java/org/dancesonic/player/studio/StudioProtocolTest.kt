@@ -84,9 +84,10 @@ class StudioProtocolTest {
 
         assertEquals(
             setOf("type", "v", "name", "device_key", "noise_key", "proof", "sig"),
-            kotlinx.serialization.json.Json.parseToJsonElement(
-                text,
-            ).let { (it as kotlinx.serialization.json.JsonObject).keys },
+            kotlinx.serialization.json.Json
+                .parseToJsonElement(
+                    text,
+                ).let { (it as kotlinx.serialization.json.JsonObject).keys },
         )
         assertEquals(true, text.contains("\"v\":1"))
     }

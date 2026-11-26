@@ -47,7 +47,8 @@ internal fun PairingVerification(
 
 /**
  * What a connect attempt shows under its form: the error, the local network prompt after a refusal (#124), the status,
- * and the checks that wait for the user: the server certificate (#126) and the pairing code (folksonic #103).
+ * and the checks that wait for the user: replacing the server (#135), the server certificate (#126) and the pairing
+ * code (folksonic #103).
  */
 @Composable
 internal fun ColumnScope.ConnectFeedback(
@@ -58,6 +59,7 @@ internal fun ColumnScope.ConnectFeedback(
     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     LocalNetworkAllow(state.localNetworkBlocked, localNetwork)
     state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    ReplaceConfirmation(state.replacement, vm.replaceCheck::answer)
     CertificateConfirmation(state.certificateFingerprint, vm.certificateCheck::answer)
     PairingVerification(state.verificationCode, vm.verifier::answer)
     if (state.busy) {

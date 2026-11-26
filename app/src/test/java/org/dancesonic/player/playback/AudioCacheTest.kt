@@ -59,7 +59,12 @@ class AudioCacheTest {
         server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 0-5/6").setBody("abcdef"))
         val cache = AudioCache(context)
         val factory = cache.dataSourceFactory(StreamDataSource.Factory(OkHttpDataSource.Factory(OkHttpClient())))
-        val spec = DataSpec.Builder().setUri(streamUri()).setKey("song-1").build()
+        val spec =
+            DataSpec
+                .Builder()
+                .setUri(streamUri())
+                .setKey("song-1")
+                .build()
 
         factory.createDataSource().session { source ->
             source.open(spec)
@@ -79,7 +84,12 @@ class AudioCacheTest {
         val cache = AudioCache(context)
         val factory =
             cache.dataSourceFactory(StreamDataSource.Factory(OkHttpDataSource.Factory(OkHttpClient())) { 6L })
-        val spec = DataSpec.Builder().setUri(streamUri()).setKey("song-4").build()
+        val spec =
+            DataSpec
+                .Builder()
+                .setUri(streamUri())
+                .setKey("song-4")
+                .build()
 
         factory.createDataSource().session { source ->
             source.open(spec)
@@ -104,7 +114,12 @@ class AudioCacheTest {
 
             cache.prefetch("song-6", streamUri(), 6L, upstream)
             val factory = cache.dataSourceFactory(upstream)
-            val spec = DataSpec.Builder().setUri(streamUri()).setKey("song-6").build()
+            val spec =
+                DataSpec
+                    .Builder()
+                    .setUri(streamUri())
+                    .setKey("song-6")
+                    .build()
             factory.createDataSource().session { source ->
                 source.open(spec)
                 assertEquals("abcdef", readAll(source))
@@ -132,7 +147,12 @@ class AudioCacheTest {
                 }
             kotlinx.coroutines.delay(50)
 
-            val spec = DataSpec.Builder().setUri(streamUri()).setKey("song-9").build()
+            val spec =
+                DataSpec
+                    .Builder()
+                    .setUri(streamUri())
+                    .setKey("song-9")
+                    .build()
             cache.dataSourceFactory(upstream).createDataSource().session { source ->
                 source.open(spec)
                 assertEquals("abcdef", readAll(source))
@@ -166,7 +186,12 @@ class AudioCacheTest {
             )
             val cache = AudioCache(context)
             val factory = cache.dataSourceFactory(StreamDataSource.Factory(OkHttpDataSource.Factory(OkHttpClient())))
-            val spec = DataSpec.Builder().setUri(streamUri()).setKey("song-2").build()
+            val spec =
+                DataSpec
+                    .Builder()
+                    .setUri(streamUri())
+                    .setKey("song-2")
+                    .build()
 
             factory.createDataSource().session { source ->
                 source.open(spec)

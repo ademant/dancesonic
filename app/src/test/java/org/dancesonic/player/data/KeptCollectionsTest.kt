@@ -28,10 +28,12 @@ class KeptCollectionsTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         kept = KeptCollections(db, clock = { 42L })
         runBlocking {
             db.artistDao().upsertAll(listOf(ArtistEntity(id = "artist", name = "Artist", syncedAt = 1)))
@@ -82,7 +84,14 @@ class KeptCollectionsTest {
         position: Int,
     ) = PlaylistItemEntity(playlistId = playlistId, trackId = trackId, danceType = null, position = position)
 
-    private fun keptIds(): List<String> = runBlocking { db.keptCollectionDao().keptTracks().map { it.id }.sorted() }
+    private fun keptIds(): List<String> =
+        runBlocking {
+            db
+                .keptCollectionDao()
+                .keptTracks()
+                .map { it.id }
+                .sorted()
+        }
 
     @Test
     fun `nothing is kept until a collection is marked`() {

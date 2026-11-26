@@ -29,8 +29,8 @@ class SubsonicRetryTest {
     @Test
     fun `a transient server error is retried until the server answers`() =
         runBlocking {
-            fake.server.enqueue(MockResponse().setResponseCode(503))
-            fake.server.enqueue(MockResponse().setResponseCode(500))
+            fake.enqueue(MockResponse().setResponseCode(503))
+            fake.enqueue(MockResponse().setResponseCode(500))
             fake.enqueueJson(NO_ARTISTS)
 
             assertEquals(emptyList<ArtistDto>(), client.artists())
@@ -40,7 +40,7 @@ class SubsonicRetryTest {
     @Test
     fun `too many requests is treated as transient`() =
         runBlocking {
-            fake.server.enqueue(MockResponse().setResponseCode(429))
+            fake.enqueue(MockResponse().setResponseCode(429))
             fake.enqueueJson(NO_ARTISTS)
 
             assertEquals(emptyList<ArtistDto>(), client.artists())
@@ -50,7 +50,7 @@ class SubsonicRetryTest {
     @Test
     fun `a dropped connection is retried`() =
         runBlocking {
-            fake.server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+            fake.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
             fake.enqueueJson(NO_ARTISTS)
 
             assertEquals(emptyList<ArtistDto>(), client.artists())
@@ -59,7 +59,7 @@ class SubsonicRetryTest {
 
     @Test
     fun `retrying gives up after the last attempt`() {
-        repeat(SubsonicClient.MAX_ATTEMPTS) { fake.server.enqueue(MockResponse().setResponseCode(503)) }
+        repeat(SubsonicClient.MAX_ATTEMPTS) { fake.enqueue(MockResponse().setResponseCode(503)) }
 
         assertThrows(SubsonicException::class.java) { runBlocking { client.artists() } }
         assertEquals(SubsonicClient.MAX_ATTEMPTS, fake.server.requestCount)
@@ -82,7 +82,7 @@ class SubsonicRetryTest {
         assertEquals(1, fake.server.requestCount)
     }
 
-    private companion object {
+    internal companion object {
         const val NO_ARTISTS = """{"subsonic-response":{"status":"ok","artists":{"index":[]}}}"""
         const val FAILED_WRONG_KEY =
             """{"subsonic-response":{"status":"failed","error":{"code":40,"message":"Wrong username or password"}}}"""

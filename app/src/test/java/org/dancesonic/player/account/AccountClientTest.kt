@@ -38,7 +38,7 @@ class AccountClientTest {
     @Test
     fun `login posts the credentials and returns the session token`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"token":"sess-abc","username":"ada","role":"user"}"""))
+            fake.enqueue(json("""{"token":"sess-abc","username":"ada","role":"user"}"""))
 
             val token = account.login(base, "ada", "s3cret")
 
@@ -53,7 +53,7 @@ class AccountClientTest {
     @Test
     fun `wrong password gives a readable message`() =
         runBlocking<Unit> {
-            fake.server.enqueue(
+            fake.enqueue(
                 MockResponse().setResponseCode(401).setBody("""{"error":"wrong username or password"}"""),
             )
 
@@ -67,7 +67,7 @@ class AccountClientTest {
     @Test
     fun `api key is created with the session as Bearer token and never expires`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"apiKey":"key-xyz","label":"DanceSonic Android","expiresAt":null}"""))
+            fake.enqueue(json("""{"apiKey":"key-xyz","label":"DanceSonic Android","expiresAt":null}"""))
 
             val key = account.createApiKey(base, "sess-abc")
 
@@ -83,7 +83,7 @@ class AccountClientTest {
     @Test
     fun `logout sends the session token`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"status":"ok"}"""))
+            fake.enqueue(json("""{"status":"ok"}"""))
 
             account.logout(base, "sess-abc")
 
@@ -95,7 +95,7 @@ class AccountClientTest {
     @Test
     fun `failed logout is reported as an account error`() =
         runBlocking<Unit> {
-            fake.server.enqueue(MockResponse().setResponseCode(500))
+            fake.enqueue(MockResponse().setResponseCode(500))
 
             assertThrows(AccountException::class.java) {
                 runBlocking { account.logout(base, "sess-abc") }
@@ -105,7 +105,7 @@ class AccountClientTest {
     @Test
     fun `the pairing sends the token and the public key, and waits for approval`() =
         runBlocking<Unit> {
-            fake.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"pending"}"""))
+            fake.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"pending"}"""))
             val request = PairingRequest(server = base, token = "tsp_abcdefgh12345")
             val jwk = SoftwareDeviceSigner().publicJwk()
 
@@ -123,7 +123,7 @@ class AccountClientTest {
     @Test
     fun `an expired pairing token gives the account page hint`() =
         runBlocking<Unit> {
-            fake.server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"pairing_expired"}"""))
+            fake.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"pairing_expired"}"""))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -154,9 +154,9 @@ class AccountClientTest {
     @Test
     fun `the wait ends when the owner approves the device`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
-            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
-            fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
+            fake.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            fake.enqueue(json("""{"id":7,"name":"Pixel"}"""))
 
             awaitApproval()
 
@@ -166,7 +166,7 @@ class AccountClientTest {
     @Test
     fun `every poll carries a proof for the device's own request`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"id":7,"name":"Pixel"}"""))
+            fake.enqueue(json("""{"id":7,"name":"Pixel"}"""))
 
             awaitApproval()
 
@@ -179,7 +179,7 @@ class AccountClientTest {
     @Test
     fun `a removed device is told to pair again`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"device_unknown"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"device_unknown"}""").setResponseCode(401))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -191,7 +191,7 @@ class AccountClientTest {
     @Test
     fun `a pairing never approved gives up at its deadline`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"pairing_pending"}""").setResponseCode(401))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -203,8 +203,8 @@ class AccountClientTest {
     @Test
     fun `the answer asks for the code to be confirmed, and an older server does not`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"status":"pending","confirm":true}""").setResponseCode(202))
-            fake.server.enqueue(json("""{"status":"pending"}""").setResponseCode(202))
+            fake.enqueue(json("""{"status":"pending","confirm":true}""").setResponseCode(202))
+            fake.enqueue(json("""{"status":"pending"}""").setResponseCode(202))
             val jwk = SoftwareDeviceSigner().publicJwk()
             val request = PairingRequest(base, "tsp_abcdefgh12345")
 
@@ -218,7 +218,7 @@ class AccountClientTest {
     @Test
     fun `the confirmation carries the answer and the device's proof`() =
         runBlocking<Unit> {
-            fake.server.enqueue(MockResponse().setResponseCode(200))
+            fake.enqueue(MockResponse().setResponseCode(200))
 
             deviceAccount().confirmDevicePairing(base, PairingDecision.MATCH)
 
@@ -233,7 +233,7 @@ class AccountClientTest {
     @Test
     fun `a code used by another device gives its own message when the phone confirms`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -247,7 +247,7 @@ class AccountClientTest {
     @Test
     fun `a token already used at the start gives the same message`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(401))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -265,7 +265,7 @@ class AccountClientTest {
     @Test
     fun `a code used by another device gives its message whatever the status`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(409))
+            fake.enqueue(json("""{"error":"pairing_token_used"}""").setResponseCode(409))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -283,7 +283,7 @@ class AccountClientTest {
     @Test
     fun `a busy QR code gives its message whatever the status`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_busy"}""").setResponseCode(429))
+            fake.enqueue(json("""{"error":"pairing_busy"}""").setResponseCode(429))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -301,7 +301,7 @@ class AccountClientTest {
     @Test
     fun `a pairing the owner rejected ends the wait with that reason`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"error":"pairing_rejected"}""").setResponseCode(401))
+            fake.enqueue(json("""{"error":"pairing_rejected"}""").setResponseCode(401))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -314,14 +314,18 @@ class AccountClientTest {
     private fun deviceAccount(): AccountClient {
         val settings = ServerSettings(base, ServerAuth.Device("test-device"))
         val signer = SoftwareDeviceSigner()
-        val http = fake.plain.newBuilder().addInterceptor(DeviceProofInterceptor({ settings }, { signer })).build()
+        val http =
+            fake.plain
+                .newBuilder()
+                .addInterceptor(DeviceProofInterceptor({ settings }, { signer }))
+                .build()
         return AccountClient(http)
     }
 
     @Test
     fun `unexpected status is reported with its code`() =
         runBlocking<Unit> {
-            fake.server.enqueue(MockResponse().setResponseCode(503))
+            fake.enqueue(MockResponse().setResponseCode(503))
 
             val error =
                 assertThrows(AccountException::class.java) {
@@ -333,13 +337,13 @@ class AccountClientTest {
     @Test
     fun `own key is revoked by id after matching its prefix`() =
         runBlocking<Unit> {
-            fake.server.enqueue(
+            fake.enqueue(
                 json(
                     """{"keys":[{"id":7,"prefix":"tsk_other","label":"x"},
                     {"id":42,"prefix":"tsk_mine","label":"DanceSonic Android"}]}""",
                 ),
             )
-            fake.server.enqueue(json("""{"status":"revoked"}"""))
+            fake.enqueue(json("""{"status":"revoked"}"""))
 
             val revoked = account.revokeOwnKey(base, "tsk_mine_full_secret")
 
@@ -354,8 +358,8 @@ class AccountClientTest {
     @Test
     fun `key management sends the key in the header, never in the URL (#125)`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"keys":[{"id":42,"prefix":"tsk_mine"}]}"""))
-            fake.server.enqueue(json("""{"status":"revoked"}"""))
+            fake.enqueue(json("""{"keys":[{"id":42,"prefix":"tsk_mine"}]}"""))
+            fake.enqueue(json("""{"status":"revoked"}"""))
 
             account.revokeOwnKey(base, "tsk_mine_full_secret")
 
@@ -370,7 +374,7 @@ class AccountClientTest {
     @Test
     fun `nothing is revoked when the key is no longer listed`() =
         runBlocking<Unit> {
-            fake.server.enqueue(json("""{"keys":[{"id":7,"prefix":"tsk_other"}]}"""))
+            fake.enqueue(json("""{"keys":[{"id":7,"prefix":"tsk_other"}]}"""))
 
             assertFalse(account.revokeOwnKey(base, "tsk_mine_full_secret"))
             assertEquals(1, fake.server.requestCount)

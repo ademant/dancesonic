@@ -77,5 +77,9 @@ class StudioWireTest {
     }
 
     private fun sha256Hex(bytes: ByteArray): String =
-        hex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes))
+        hex(
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(bytes),
+        )
 }

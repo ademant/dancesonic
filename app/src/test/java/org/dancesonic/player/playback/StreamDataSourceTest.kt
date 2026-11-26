@@ -72,7 +72,13 @@ class StreamDataSourceTest {
     fun `with the size known, the first request is bounded to the end of the file`() {
         server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 0-5/6").setBody("abcdef"))
         val source = StreamDataSource.Factory(OkHttpDataSource.Factory(OkHttpClient())) { 6L }.createDataSource()
-        source.open(DataSpec.Builder().setUri(streamUri()).setKey("song-1").build())
+        source.open(
+            DataSpec
+                .Builder()
+                .setUri(streamUri())
+                .setKey("song-1")
+                .build(),
+        )
         source.close()
 
         val request = server.takeRequest()
@@ -83,7 +89,14 @@ class StreamDataSourceTest {
     fun `with the size known, a request from a position stops at the end of the file`() {
         server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 4-5/6").setBody("ef"))
         val source = StreamDataSource.Factory(OkHttpDataSource.Factory(OkHttpClient())) { 6L }.createDataSource()
-        source.open(DataSpec.Builder().setUri(streamUri()).setKey("song-1").setPosition(4).build())
+        source.open(
+            DataSpec
+                .Builder()
+                .setUri(streamUri())
+                .setKey("song-1")
+                .setPosition(4)
+                .build(),
+        )
         source.close()
 
         val request = server.takeRequest()

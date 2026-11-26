@@ -55,7 +55,8 @@ internal object ControllerPolicy {
      * read access beyond the current item, its metadata and the timeline that decides whether Next and Previous apply.
      */
     val TRANSPORT_COMMANDS: Player.Commands =
-        Player.Commands.Builder()
+        Player.Commands
+            .Builder()
             .addAll(
                 Player.COMMAND_PLAY_PAUSE,
                 Player.COMMAND_PREPARE,

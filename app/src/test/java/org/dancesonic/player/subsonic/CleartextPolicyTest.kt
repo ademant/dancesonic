@@ -1,6 +1,10 @@
 package org.dancesonic.player.subsonic
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -83,7 +87,13 @@ class CleartextPolicyTest {
     fun `a server being connected is reachable during setup only`() {
         server.enqueue(MockResponse().setBody("ok"))
 
-        val code = runBlocking { CleartextPolicy.whileConnecting(server.at("/")) { get(server.at("/api/login")) } }
+        val code =
+            runBlocking {
+                CleartextPolicy.whileConnecting(
+                    server.at("/"),
+                    allowCleartext = true,
+                ) { get(server.at("/api/login")) }
+            }
 
         assertEquals(200, code)
         assertThrows(CleartextRefusedException::class.java) { get(server.at("/api/login")) }
@@ -92,9 +102,52 @@ class CleartextPolicyTest {
     @Test
     fun `setup never opens http to a public address`() {
         assertThrows(IllegalArgumentException::class.java) {
-            runBlocking { CleartextPolicy.whileConnecting("http://music.example.com/".toHttpUrl()) { } }
+            runBlocking { CleartextPolicy.whileConnecting("http://music.example.com/".toHttpUrl(), true) { } }
         }
     }
+
+    @Test
+    fun `setup never opens http without the user's opt-in (#140)`() {
+        var ran = false
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { CleartextPolicy.whileConnecting(server.at("/"), allowCleartext = false) { ran = true } }
+        }
+        assertFalse(ran)
+    }
+
+    @Test
+    fun `overlapping setups never open http to both servers (#127)`() =
+        runBlocking {
+            val firstRunning = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val first =
+                launch(Dispatchers.Default) {
+                    CleartextPolicy.whileConnecting(server.at("/"), allowCleartext = true) {
+                        firstRunning.complete(Unit)
+                        releaseFirst.await()
+                    }
+                }
+            firstRunning.await()
+            var otherOpenDuringFirst = true
+            val second =
+                launch(Dispatchers.Default) {
+                    CleartextPolicy.whileConnecting(other.at("/"), allowCleartext = true) {
+                        assertTrue(CleartextPolicy.permits(other.at("/")))
+                        assertFalse(CleartextPolicy.permits(server.at("/")))
+                    }
+                }
+            // While the first setup runs, the second waits: its server is not open yet.
+            repeat(20) {
+                otherOpenDuringFirst = otherOpenDuringFirst && !CleartextPolicy.permits(other.at("/"))
+                yield()
+            }
+            assertTrue(otherOpenDuringFirst)
+            assertTrue(CleartextPolicy.permits(server.at("/")))
+            releaseFirst.complete(Unit)
+            first.join()
+            second.join()
+            assertFalse(CleartextPolicy.permits(other.at("/")))
+        }
 
     @Test
     fun `a redirect from the opted-in server to another http server is not followed`() {

@@ -39,7 +39,12 @@ object StudioHint {
         if (port !in 1..MAX_PORT) return emptyList()
         return addresses.mapNotNull { address ->
             if (!isPrivateAddress(address)) return@mapNotNull null
-            HttpUrl.Builder().scheme("https").host(address).port(port).build()
+            HttpUrl
+                .Builder()
+                .scheme("https")
+                .host(address)
+                .port(port)
+                .build()
         }
     }
 

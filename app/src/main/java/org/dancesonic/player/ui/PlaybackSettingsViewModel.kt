@@ -11,7 +11,9 @@ import org.dancesonic.player.playback.PlaybackSettings
 import org.dancesonic.player.playback.TempoMode
 
 /** The playback choices on the config page and the player bar. Each change is saved and applied at once. */
-class PlaybackSettingsViewModel(private val container: AppContainer) : ViewModel() {
+class PlaybackSettingsViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val settings: StateFlow<PlaybackSettings> =
         container.playbackSettingsStore.settings
             .stateIn(viewModelScope, SharingStarted.Eagerly, PlaybackSettings())

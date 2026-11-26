@@ -6,17 +6,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
-import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.dancesonic.player.data.db.TrackEntity
@@ -93,20 +88,24 @@ class PlayerController(
     /** What playback reports to the app: a track starting, a new queue, and a counted play (#89). */
     private val events: PlaybackEvents = PlaybackEvents.None,
 ) {
-    private val _state = MutableStateFlow(PlaybackUiState())
-    val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
+    private val playCounter =
+        PlayCounter(System::currentTimeMillis) { songId, startedAtMs -> events.playCounted(songId, startedAtMs) }
 
-    private val _progress = MutableStateFlow(PlaybackProgress())
+    /** Reads the state, queue and progress from the session, and runs the progress ticker while playing. */
+    private val publisher =
+        PlaybackPublisher(scope, playCounter, onTrackStarted = { player, songId ->
+            applyCurrentTrack(player, fromStart = true)
+            events.trackStarted(songId)
+        })
 
-    /** Position and length of the track now playing, refreshed twice a second while connected. */
-    val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
+    /** What the UI shows about playback. */
+    val state: StateFlow<PlaybackUiState> = publisher.state
 
-    private val _queue = MutableStateFlow(PlayQueue())
+    /** Position and length of the track now playing, refreshed twice a second while it plays. */
+    val progress: StateFlow<PlaybackProgress> = publisher.progress
 
     /** The songs in playback order, including those already played and those still to come. */
-    val queue: StateFlow<PlayQueue> = _queue.asStateFlow()
-
-    private var ticker: Job? = null
+    val queue: StateFlow<PlayQueue> = publisher.queue
 
     /** The connection to the service. [reset] closes it, and work started before a reset sees that it is stale. */
     private val slot =
@@ -117,80 +116,12 @@ class PlayerController(
 
     private val controller: MediaController? get() = slot.connection
 
-    /** The tracks as they were loaded, so a track's tempo and gain can be looked up by its queue index. */
-    @Volatile
-    private var loadedTracks: List<TrackWithTempo> = emptyList()
-
-    private val playCounter =
-        PlayCounter(System::currentTimeMillis) { songId, startedAtMs -> events.playCounted(songId, startedAtMs) }
-
     /** Connects once; concurrent first calls wait for the same connection. */
-    private suspend fun connected(): MediaController = slot.get(::attach)
-
-    /** Follows a new connection: its events, its state, and the progress ticker. */
-    private fun attach(built: MediaController) {
-        built.addListener(
-            object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) = publish(built)
-
-                override fun onMediaItemTransition(
-                    mediaItem: MediaItem?,
-                    reason: Int,
-                ) {
-                    applyCurrentTrack(built, fromStart = true)
-                    publish(built)
-                    publishQueue(built)
-                    val songId = mediaItem?.mediaId
-                    if (songId == null) {
-                        playCounter.stopped()
-                    } else {
-                        playCounter.trackStarted(songId, lengthMs(built.currentMediaItemIndex))
-                        events.trackStarted(songId)
-                    }
-                }
-
-                override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = publish(built)
-
-                // A new or emptied queue changes what the transport controls can do.
-                override fun onTimelineChanged(
-                    timeline: Timeline,
-                    reason: Int,
-                ) {
-                    publish(built)
-                    publishQueue(built)
-                }
-            },
-        )
-        publish(built)
-        publishQueue(built)
-        ticker?.cancel()
-        ticker =
-            scope.launch(Dispatchers.Main) {
-                while (true) {
-                    publishProgress(built)
-                    playCounter.tick(built.isPlaying, built.playbackParameters.speed)
-                    delay(PROGRESS_INTERVAL_MS)
-                }
-            }
-    }
+    private suspend fun connected(): MediaController = slot.get(publisher::attach)
 
     /** Connects to the playback service now, starting it if needed. Used before playback is handed to a Studio. */
     suspend fun ensureConnected() {
         connected()
-    }
-
-    /** The length of the track at [index] in the queue, in milliseconds; 0 when the server did not give one. */
-    private fun lengthMs(index: Int): Long =
-        loadedTracks.getOrNull(index)?.track?.durationSec?.let { it * MILLIS_PER_SECOND } ?: 0L
-
-    private fun publishProgress(player: Player) {
-        // Some streams never report a length; the server's length for the track is the fallback.
-        val serverLengthMs =
-            loadedTracks.getOrNull(
-                player.currentMediaItemIndex,
-            )?.track?.durationSec?.let { it * MILLIS_PER_SECOND }
-        val duration = if (player.duration > 0) player.duration else serverLengthMs ?: player.duration
-        _progress.value = PlaybackProgress.of(player.currentPosition, duration)
     }
 
     /** Moves the track now playing to [positionMs], and shows the new position at once. */
@@ -198,44 +129,20 @@ class PlayerController(
         scope.launch(Dispatchers.Main) {
             val player = connected()
             player.seekTo(positionMs)
-            publishProgress(player)
+            publisher.publishProgress(player)
         }
-    }
-
-    private fun publish(player: Player) {
-        val metadata = player.mediaMetadata
-        _state.value =
-            PlaybackUiState(
-                nowPlayingTitle = metadata.title?.toString(),
-                nowPlayingArtist = metadata.artist?.toString(),
-                nowPlayingId = player.currentMediaItem?.mediaId,
-                isPlaying = player.isPlaying,
-                tempo = player.playbackParameters.speed,
-                trackBpm = loadedTracks.getOrNull(player.currentMediaItemIndex)?.tempoBpm,
-                queueLength = player.mediaItemCount,
-                hasPrevious = player.hasPreviousMediaItem(),
-                hasNext = player.hasNextMediaItem(),
-            )
-    }
-
-    /** Publishes the media items of the session, so the player screen can list what played and what is next. */
-    private fun publishQueue(player: Player) {
-        val items =
-            buildList {
-                repeat(player.mediaItemCount) { add(player.getMediaItemAt(it)) }
-            }
-        _queue.value = playQueueOf(items, player.currentMediaItemIndex)
     }
 
     /**
      * Speed and volume for the track now playing, from the playback settings. Called when a track starts and when
-     * a setting changes, so the current track follows the change at once.
+     * a setting changes, so the current track follows the change at once. The track is found by its media id, so a
+     * reordered queue keeps each song's tempo and gain (#129).
      */
     private fun applyCurrentTrack(
-        player: MediaController,
+        player: Player,
         fromStart: Boolean = false,
     ) {
-        val entry = loadedTracks.getOrNull(player.currentMediaItemIndex)
+        val entry = publisher.current(player)
         val current = settings.current()
         val settings =
             if (fromStart && !current.keepTempoForNextTrack) {
@@ -262,7 +169,7 @@ class PlayerController(
         scope.launch(Dispatchers.Main.immediate) {
             val player = controller ?: return@launch
             applyCurrentTrack(player)
-            publish(player)
+            publisher.publish(player)
         }
     }
 
@@ -274,14 +181,14 @@ class PlayerController(
         val settings = settingsProvider() ?: return
         if (tracks.isEmpty()) return
         val generation = slot.generation
-        loadedTracks = tracks
+        publisher.load(tracks)
         events.queued(tracks.map { it.track }, startIndex, settings)
         scope.launch(Dispatchers.Main) {
             val player = connected()
             // A reset since this call (a disconnect or another server) drops this queue: it belongs to the old server.
             if (!slot.isCurrent(generation)) return@launch
             player.setMediaItems(tracks.map { it.track.toMediaItem(settings) }, startIndex, 0L)
-            publishQueue(player)
+            publisher.publishQueue(player)
             player.prepare()
             applyCurrentTrack(player, fromStart = true)
             player.play()
@@ -303,13 +210,16 @@ class PlayerController(
         scope.launch(Dispatchers.Main) { connected().seekToPreviousMediaItem() }
     }
 
-    /** Starts the song at [index] in the current queue, leaving the other songs in place. */
+    /**
+     * Starts the song at [index] in the current queue, leaving the other songs in place. Connects first when the
+     * session is not connected yet (#129); an index outside the session's queue does nothing.
+     */
     fun playAt(index: Int) {
         scope.launch(Dispatchers.Main) {
-            val player = controller ?: return@launch
+            val player = connected()
             if (index !in 0 until player.mediaItemCount) return@launch
             player.seekTo(index, 0L)
-            publishQueue(player)
+            publisher.publishQueue(player)
         }
     }
 
@@ -317,50 +227,38 @@ class PlayerController(
      * Stops playback and forgets everything about it (#130): the queue, the track and tempo shown, the progress, and
      * the tracks loaded. Called when the app disconnects or switches to another server, whose songs these are not. The
      * connection to the service is closed and its player emptied; a connection still being opened is closed as soon as
-     * it opens, and a [play] that started before the reset does nothing. Safe to call repeatedly.
+     * it opens, and a [play] that started before the reset does nothing. Safe to call repeatedly. The progress ticker
+     * stops with it (#136).
      */
     fun reset() {
         slot.invalidate()
-        loadedTracks = emptyList()
-        clearPublished()
+        publisher.clear()
         scope.launch(Dispatchers.Main.immediate) {
             slot.close { player ->
-                ticker?.cancel()
-                ticker = null
                 player.stop()
                 player.clearMediaItems()
                 player.release()
             }
             playCounter.stopped()
             // The old player may have published once more before it was released.
-            loadedTracks = emptyList()
-            clearPublished()
+            publisher.clear()
         }
     }
 
-    private fun clearPublished() {
-        _state.value = PlaybackUiState()
-        _progress.value = PlaybackProgress()
-        _queue.value = PlayQueue()
-    }
-
     companion object {
-        /** How often the progress is read while connected. */
-        private const val PROGRESS_INTERVAL_MS = 500L
-        private const val MILLIS_PER_SECOND = 1_000L
-
         fun TrackEntity.toMediaItem(settings: ServerSettings): MediaItem =
-            MediaItem.Builder()
+            MediaItem
+                .Builder()
                 .setMediaId(id)
                 .setUri(settings.streamUrl(id).toString())
                 .setCustomCacheKey(id)
                 .setMediaMetadata(
-                    MediaMetadata.Builder()
+                    MediaMetadata
+                        .Builder()
                         .setTitle(title)
                         .setArtist(artistName)
                         .build(),
-                )
-                .build()
+                ).build()
 
         private suspend fun <T> awaitFuture(future: ListenableFuture<T>): T =
             suspendCancellableCoroutine { cont ->

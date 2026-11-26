@@ -3,6 +3,7 @@ package org.dancesonic.player.playback
 import android.net.Uri
 import android.util.Log
 import androidx.media3.datasource.DataSource
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,6 +23,8 @@ class AudioPrefetcher(
     private val scope: CoroutineScope,
     /** Called once the whole track is in the cache, with its song id and size. Not called when the download stops. */
     private val onCached: suspend (songId: String, size: Long) -> Unit = { _, _ -> },
+    /** Where the download runs. Tests pass their own (#137). */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private var job: Job? = null
     private var activeSongId: String? = null
@@ -40,7 +43,7 @@ class AudioPrefetcher(
         job?.cancel()
         activeSongId = songId
         job =
-            scope.launch(Dispatchers.IO) {
+            scope.launch(io) {
                 try {
                     cache.prefetch(songId, Uri.parse(url.toString()), size, upstream)
                     onCached(songId, size)

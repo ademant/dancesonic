@@ -7,6 +7,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.work.Configuration
+import androidx.work.WorkManager
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -36,12 +38,14 @@ import org.dancesonic.player.data.PlaylistRepository
 import org.dancesonic.player.data.Scrobbles
 import org.dancesonic.player.data.SyncStateStore
 import org.dancesonic.player.data.SyncTimings
+import org.dancesonic.player.data.TrackRefreshThrottle
 import org.dancesonic.player.data.db.DanceSonicDatabase
 import org.dancesonic.player.data.db.TrackEntity
 import org.dancesonic.player.playback.AudioCache
 import org.dancesonic.player.playback.AudioPrefetcher
 import org.dancesonic.player.playback.DownloadConditions
 import org.dancesonic.player.playback.DownloadNetwork
+import org.dancesonic.player.playback.DownloadScheduler
 import org.dancesonic.player.playback.DownloadSettings
 import org.dancesonic.player.playback.DownloadSettingsStore
 import org.dancesonic.player.playback.OfflineDownloads
@@ -52,6 +56,7 @@ import org.dancesonic.player.playback.PlaybackSettingsStore
 import org.dancesonic.player.playback.PlayerController
 import org.dancesonic.player.playback.StreamDataSource
 import org.dancesonic.player.playback.StreamLengths
+import org.dancesonic.player.playback.WorkDownloadScheduler
 import org.dancesonic.player.playback.stretch.OnsetCache
 import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.studio.PlayOnTarget
@@ -76,7 +81,10 @@ private const val TAG = "DanceSonicApp"
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dancesonic_settings")
 
-class DanceSonicApp : Application(), SingletonImageLoader.Factory {
+class DanceSonicApp :
+    Application(),
+    SingletonImageLoader.Factory,
+    Configuration.Provider {
     lateinit var container: AppContainer
         private set
 
@@ -87,6 +95,13 @@ class DanceSonicApp : Application(), SingletonImageLoader.Factory {
         container = AppContainer(this, settingsDataStore)
     }
 
+    /**
+     * WorkManager starts on first use with this configuration, not from a startup provider (#139). The default
+     * configuration is enough; it is provided here so the first `WorkManager.getInstance` call sets it up.
+     */
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().build()
+
     /** Cover art loads through the authenticated client; see [AppContainer.imageLoader]. */
     override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader
 }
@@ -94,7 +109,12 @@ class DanceSonicApp : Application(), SingletonImageLoader.Factory {
 /**
  * Manual dependency container. Small enough that a DI framework is not yet warranted.
  */
-class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
+class AppContainer(
+    context: Context,
+    dataStore: DataStore<Preferences>,
+    /** Where offline download passes are scheduled: WorkManager in the app (#139), a stand-in in tests. */
+    downloadScheduler: DownloadScheduler = WorkDownloadScheduler { WorkManager.getInstance(context) },
+) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Current server settings, kept in memory for the HTTP interceptor. Written only by [settingsStore]'s flow. */
@@ -109,18 +129,20 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
 
     /**
      * Loads cover art from the server through [httpClient], so the API key is added as for every Subsonic request.
-     * Cover images are cached on disk with a size cap; the cache keys are the album id, never the URL.
+     * Cover images are cached on disk with a size cap. Coil keys the cache by the cover-art URL, which holds only the
+     * album id and size: [httpClient] adds the API key to the request, never to that URL (#140).
      */
     val imageLoader: ImageLoader by lazy {
-        ImageLoader.Builder(context.applicationContext)
+        ImageLoader
+            .Builder(context.applicationContext)
             .components { add(OkHttpNetworkFetcherFactory(callFactory = { httpClient })) }
             .diskCache {
-                DiskCache.Builder()
+                DiskCache
+                    .Builder()
                     .directory(context.cacheDir.resolve(COVER_CACHE_DIR).toOkioPath())
                     .maxSizeBytes(COVER_CACHE_BYTES)
                     .build()
-            }
-            .build()
+            }.build()
     }
 
     /**
@@ -178,6 +200,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             streamSource,
             conditions = { DownloadConditions(currentSettings, currentDownloadSettings.allowMobileData) },
             network = DownloadNetwork(context),
+            scheduler = downloadScheduler,
             scope = appScope,
         )
 
@@ -365,16 +388,33 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
         val settings = currentSettings ?: return
         appScope.launch {
             // The shoes rating is cached, and read again at most once a day. A failure leaves the cached value.
-            database.trackDao().get(songId)?.mbid?.let { edits.refreshShoes(listOf(it)) }
+            database
+                .trackDao()
+                .get(songId)
+                ?.mbid
+                ?.let { edits.refreshShoes(listOf(it)) }
         }
+        refreshTrack(songId)
+    }
+
+    /** Throttles the one-track refreshes, so a track is asked for at most every few hours (#121). */
+    private val trackRefresh = TrackRefreshThrottle()
+
+    /**
+     * Compares one stored track with the server, in the background: when it starts playing, and when its details are
+     * opened (#121). On a standard Subsonic server this replaces a scheduled catalog-wide sync. Throttled per track;
+     * a failure only leaves the stored rows as they were.
+     */
+    fun refreshTrack(songId: String) {
+        val settings = currentSettings ?: return
         appScope.launch {
             try {
-                library.refreshTrack(SubsonicClient(settings), songId)
+                trackRefresh.run(songId) { library.refreshTrack(catalogClient(settings), songId) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException) {
                 // Deliberately not shown: the stored track still plays, and the next sync corrects it.
-                Log.d(TAG, "Play-time refresh skipped: ${e.javaClass.simpleName}")
+                Log.d(TAG, "Track refresh skipped: ${e.javaClass.simpleName}")
             }
         }
     }
@@ -386,14 +426,12 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
                 LanPins.remember(it)
                 CleartextPolicy.remember(it)
                 offline.kick()
-            }
-            .launchIn(appScope)
+            }.launchIn(appScope)
         downloadSettingsStore.settings
             .onEach {
                 currentDownloadSettings = it
                 offline.kick()
-            }
-            .launchIn(appScope)
+            }.launchIn(appScope)
         offline.start()
         danceBrainzSettings.baseUrl
             .onEach { currentDanceBrainzUrl = it }
@@ -402,8 +440,7 @@ class AppContainer(context: Context, dataStore: DataStore<Preferences>) {
             .onEach {
                 currentPlaybackSettings = it
                 player.settingsChanged()
-            }
-            .launchIn(appScope)
+            }.launchIn(appScope)
     }
 }
 

@@ -58,4 +58,7 @@ class BleReassembler {
 }
 
 /** Why a Bluetooth connection to Studio could not be opened or kept: framing, the handshake, or Studio's identity. */
-class BleStudioException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class BleStudioException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)

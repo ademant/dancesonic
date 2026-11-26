@@ -6,7 +6,8 @@ import androidx.media3.exoplayer.ExoPlayer
 
 /** What the player tells the system it plays: music, for media. */
 internal val MUSIC_AUDIO: AudioAttributes =
-    AudioAttributes.Builder()
+    AudioAttributes
+        .Builder()
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
         .build()

@@ -1,11 +1,8 @@
 package org.dancesonic.player.subsonic
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.SerializationException
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.HttpException
-import retrofit2.Retrofit
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.io.IOException
@@ -22,12 +19,7 @@ class PlayReporter(
     client: OkHttpClient,
 ) {
     private val service: ScrobbleService =
-        Retrofit.Builder()
-            .baseUrl(settings.baseUrl)
-            .client(client)
-            .addConverterFactory(subsonicJson.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(ScrobbleService::class.java)
+        SubsonicHttp.retrofit(settings.baseUrl, client).create(ScrobbleService::class.java)
 
     /** Reports one play that started at [playedAtMs]. Throws [SubsonicException] when the server does not accept it. */
     suspend fun scrobble(

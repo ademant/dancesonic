@@ -98,7 +98,8 @@ class PlaylistRepository(
             val byKey = items.groupBy { it.danceType?.lowercase() }
             val ungrouped = byKey[null].orEmpty()
             val named =
-                byKey.mapNotNull { (key, list) -> key?.let { it to list } }
+                byKey
+                    .mapNotNull { (key, list) -> key?.let { it to list } }
                     .sortedBy { (key, _) -> key }
                     .map { (_, list) ->
                         val sorted = list.sortedBy { it.position }

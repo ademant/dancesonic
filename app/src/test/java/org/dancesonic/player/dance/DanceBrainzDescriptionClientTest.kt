@@ -20,10 +20,11 @@ class DanceBrainzDescriptionClientTest {
     @Test
     fun `a stored description is reported, read without a token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(
-                MockResponse().setResponseCode(
-                    200,
-                ).setBody("""{"recording":"$mbid","text":"Walk, walk","updated_at":"x"}"""),
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(
+                        200,
+                    ).setBody("""{"recording":"$mbid","text":"Walk, walk","updated_at":"x"}"""),
             )
             val client = DanceBrainzDescriptionClient(server.server.url("/"), server.plain)
 
@@ -38,7 +39,7 @@ class DanceBrainzDescriptionClientTest {
     @Test
     fun `no stored description is a plain no, not an error`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(404).setBody("""{"error":"not_found"}"""))
+            server.enqueue(MockResponse().setResponseCode(404).setBody("""{"error":"not_found"}"""))
             val client = DanceBrainzDescriptionClient(server.server.url("/"), server.plain)
 
             assertFalse(runBlocking { client.hasDescription(mbid) })
@@ -48,7 +49,7 @@ class DanceBrainzDescriptionClientTest {
     @Test
     fun `a server failure is thrown, so the caller can keep its last answer`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(500))
+            server.enqueue(MockResponse().setResponseCode(500))
             val client = DanceBrainzDescriptionClient(server.server.url("/"), server.plain)
 
             val error =

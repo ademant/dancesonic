@@ -28,7 +28,9 @@ class RelayGatewayTest {
     private val fingerprint = StudioWire.fingerprint(tlsSpki, studioKey.publicKey)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
-    private class FakeEndpoint(private val pipe: () -> RelayPipe) : RelayEndpoint {
+    private class FakeEndpoint(
+        private val pipe: () -> RelayPipe,
+    ) : RelayEndpoint {
         val published = mutableListOf<Pair<String, String>>()
         val opened = mutableListOf<Pair<String, String>>()
         var refuse: Exception? = null

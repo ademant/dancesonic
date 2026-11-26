@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.first
  * last applied sync, and when an incremental check last ran. Not secret, so it lives beside the
  * settings without encryption. Every value is tied to one server URL and ignored for any other.
  */
-class SyncStateStore(private val dataStore: DataStore<Preferences>) {
+class SyncStateStore(
+    private val dataStore: DataStore<Preferences>,
+) {
     /** Change-feed point (epoch ms) for [serverUrl], or null when there is none for that server. */
     suspend fun serverTime(serverUrl: String): Long? {
         val prefs = dataStore.data.first()

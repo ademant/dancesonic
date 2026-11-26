@@ -29,10 +29,12 @@ class ScrobblesTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         current = server.settings
         scrobbles = Scrobbles(db, currentServer = { current }, reporterFor = { PlayReporter(it, server.http) })
@@ -48,7 +50,11 @@ class ScrobblesTest {
 
     private fun pending() = runBlocking { db.scrobbleQueueDao().pending(serverUrl) }
 
-    private fun takeTime(): String? = server.server.takeRequest().requestUrl?.queryParameter("time")
+    private fun takeTime(): String? =
+        server.server
+            .takeRequest()
+            .requestUrl
+            ?.queryParameter("time")
 
     @Test
     fun `an accepted play is sent with the time it started, then removed`() =
@@ -94,8 +100,20 @@ class ScrobblesTest {
             scrobbles.record("song-b", 200L)
 
             assertEquals(2, server.server.requestCount)
-            assertEquals("missing-song", server.server.takeRequest().requestUrl?.queryParameter("id"))
-            assertEquals("song-b", server.server.takeRequest().requestUrl?.queryParameter("id"))
+            assertEquals(
+                "missing-song",
+                server.server
+                    .takeRequest()
+                    .requestUrl
+                    ?.queryParameter("id"),
+            )
+            assertEquals(
+                "song-b",
+                server.server
+                    .takeRequest()
+                    .requestUrl
+                    ?.queryParameter("id"),
+            )
         }
 
     @Test

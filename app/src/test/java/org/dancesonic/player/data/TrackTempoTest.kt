@@ -29,10 +29,12 @@ class TrackTempoTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
     }
 
     @After
@@ -50,7 +52,12 @@ class TrackTempoTest {
             db.danceLookupDao().upsert(DanceLookupEntity("rec-1", checkedAt = 1L))
             db.danceLookupDao().upsert(DanceLookupEntity("rec-2", checkedAt = 1L))
 
-            val tempos = db.trackDao().observeByAlbumWithTempo("al-1").first().associate { it.track.id to it.tempoBpm }
+            val tempos =
+                db
+                    .trackDao()
+                    .observeByAlbumWithTempo("al-1")
+                    .first()
+                    .associate { it.track.id to it.tempoBpm }
 
             assertEquals(118, tempos["s-1"])
             assertNull(tempos["s-2"])

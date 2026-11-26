@@ -23,7 +23,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 1 to 2 creates the dance lookup table and keeps its rows usable`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -52,7 +53,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 2 to 3 adds tempo columns and keeps existing lookups`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -89,7 +91,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 3 to 4 adds the server tempo to tracks`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -121,7 +124,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 4 to 5 adds the ReplayGain columns to tracks`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -154,7 +158,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 5 to 6 adds the file size to tracks`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -186,7 +191,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 9 to 10 adds the chapter table and the version column, and keeps existing lookups`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
@@ -229,7 +235,8 @@ class DanceSonicMigrationTest {
     @Test
     fun `migration 10 to 11 adds the waveform table and keeps existing chapters`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {

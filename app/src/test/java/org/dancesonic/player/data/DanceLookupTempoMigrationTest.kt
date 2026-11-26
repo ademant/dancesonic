@@ -17,7 +17,8 @@ import org.robolectric.annotation.Config
 class DanceLookupTempoMigrationTest {
     private fun version13(): SupportSQLiteOpenHelper {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(13) {
@@ -60,7 +61,8 @@ class DanceLookupTempoMigrationTest {
             }
             assertEquals(listOf("mbid", "checkedAt", "chaptersVersion", "meter", "subMeter"), columns)
 
-            db.query("SELECT checkedAt, chaptersVersion, meter, subMeter FROM dance_lookup WHERE mbid = 'rec-1'")
+            db
+                .query("SELECT checkedAt, chaptersVersion, meter, subMeter FROM dance_lookup WHERE mbid = 'rec-1'")
                 .use { cursor ->
                     assertEquals(true, cursor.moveToFirst())
                     assertEquals(5L, cursor.getLong(0))

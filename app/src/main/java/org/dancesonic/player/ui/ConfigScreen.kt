@@ -88,8 +88,11 @@ fun ConfigScreen(
         ConfigSection(
             "Subsonic connection",
             attention =
-                state.busy || state.error != null || state.verificationCode != null ||
-                    state.certificateFingerprint != null,
+                state.busy ||
+                    state.error != null ||
+                    state.verificationCode != null ||
+                    state.certificateFingerprint != null ||
+                    state.replacement != null,
             summary = summaries.connection,
         ) {
             val current = settings
@@ -157,7 +160,13 @@ private fun ColumnScope.ReenterConnection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val localNetwork = rememberLocalNetworkRequest()
-    var address by rememberSaveable { mutableStateOf(vm.settings.value?.baseUrl?.toString() ?: "https://") }
+    var address by rememberSaveable {
+        mutableStateOf(
+            vm.settings.value
+                ?.baseUrl
+                ?.toString() ?: "https://",
+        )
+    }
     // Not saved: the typed key never reaches the saved-instance state.
     var apiKey by remember { mutableStateOf("") }
 

@@ -10,6 +10,11 @@ data class PlayQueueEntry(
     val title: String,
     /** The artist to show, when the server gave one. */
     val artist: String?,
+    /**
+     * A key unique in the queue, stable while the queue keeps its songs: the song id and which occurrence of it this
+     * is, so a song queued twice has two keys (#129).
+     */
+    val key: String = songId,
 )
 
 /** The songs Media3 will play in order, with the index of the song playing now, or -1 when there is none. */
@@ -18,19 +23,30 @@ data class PlayQueue(
     val currentIndex: Int = -1,
 )
 
-/** Reads the session's media items as a queue the player screen can show. */
+/**
+ * Reads the session's media items as a queue the player screen can show. A [currentIndex] outside the items, which a
+ * session reports while it has nothing current, becomes -1 (#129).
+ */
 internal fun playQueueOf(
     items: List<MediaItem>,
     currentIndex: Int,
-): PlayQueue =
-    PlayQueue(
-        entries =
-            items.map { item ->
-                PlayQueueEntry(
-                    songId = item.mediaId,
-                    title = item.mediaMetadata.title?.toString()?.takeIf { it.isNotBlank() } ?: item.mediaId,
-                    artist = item.mediaMetadata.artist?.toString()?.takeIf { it.isNotBlank() },
-                )
-            },
-        currentIndex = currentIndex,
-    )
+): PlayQueue {
+    val seen = HashMap<String, Int>()
+    val entries =
+        items.map { item ->
+            val occurrence = seen.merge(item.mediaId, 1, Int::plus) ?: 1
+            PlayQueueEntry(
+                songId = item.mediaId,
+                key = "${item.mediaId}#$occurrence",
+                title =
+                    item.mediaMetadata.title
+                        ?.toString()
+                        ?.takeIf { it.isNotBlank() } ?: item.mediaId,
+                artist =
+                    item.mediaMetadata.artist
+                        ?.toString()
+                        ?.takeIf { it.isNotBlank() },
+            )
+        }
+    return PlayQueue(entries = entries, currentIndex = currentIndex.takeIf { it in entries.indices } ?: -1)
+}

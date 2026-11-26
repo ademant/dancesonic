@@ -6,7 +6,9 @@ import org.dancesonic.player.data.db.TrackWithTempo
  * How the tracks of a dance are ordered on the Dance tab. [ARTIST_TITLE] is the order the library gives: artist, then
  * title.
  */
-internal enum class TrackSort(val label: String) {
+internal enum class TrackSort(
+    val label: String,
+) {
     ARTIST_TITLE("Artist"),
     LENGTH_ASC("Length asc"),
     LENGTH_DESC("Length desc"),

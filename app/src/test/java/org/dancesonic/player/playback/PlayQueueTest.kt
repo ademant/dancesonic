@@ -39,15 +39,39 @@ class PlayQueueTest {
         assertEquals(null, queue.entries.single().artist)
     }
 
+    @Test
+    fun `a current index outside the queue becomes none`() {
+        val items = listOf(item("s-1", "First", null))
+
+        assertEquals(-1, playQueueOf(items, currentIndex = 5).currentIndex)
+        assertEquals(-1, playQueueOf(items, currentIndex = -3).currentIndex)
+        assertEquals(-1, playQueueOf(emptyList(), currentIndex = 0).currentIndex)
+    }
+
+    @Test
+    fun `each occurrence of a song has its own stable key`() {
+        val items = listOf(item("s-1", "A", null), item("s-1", "A", null), item("s-2", "B", null))
+
+        val first = playQueueOf(items, currentIndex = 0).entries.map { it.key }
+        val again = playQueueOf(items, currentIndex = 2).entries.map { it.key }
+
+        assertEquals(listOf("s-1#1", "s-1#2", "s-2#1"), first)
+        assertEquals(first, again)
+    }
+
     private fun item(
         id: String,
         title: String?,
         artist: String?,
     ): MediaItem =
-        MediaItem.Builder()
+        MediaItem
+            .Builder()
             .setMediaId(id)
             .setMediaMetadata(
-                MediaMetadata.Builder().setTitle(title).setArtist(artist).build(),
-            )
-            .build()
+                MediaMetadata
+                    .Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .build(),
+            ).build()
 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -143,24 +144,27 @@ internal fun NowPlayingSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.fillMaxHeight(),
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
-        ) {
-            val current = detail
-            if (current == null) {
-                Text("Nothing playing")
-            } else {
-                TrackHeader(current, libraryVm, coverSize = SHEET_COVER)
-                TrackFacts(current)
-                TrackEntries(current, libraryVm)
-                SeekBar(player, libraryVm.nowPlayingWaveform)
-                TransportRow(player)
-                // The same tempo control as the player bar, so the tempo is at hand while the track is open.
-                TempoRow(playbackVm, playback.trackBpm)
-                current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
+        // One scrolling list for the track and its queue, so a long queue does not nest a list in a scroll (#129).
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            item(key = "now-playing") {
+                Column {
+                    val current = detail
+                    if (current == null) {
+                        Text("Nothing playing")
+                    } else {
+                        TrackHeader(current, libraryVm, coverSize = SHEET_COVER)
+                        TrackFacts(current)
+                        TrackEntries(current, libraryVm)
+                        SeekBar(player, libraryVm.nowPlayingWaveform)
+                        TransportRow(player)
+                        // The same tempo control as the player bar, so the tempo is at hand while the track is open.
+                        TempoRow(playbackVm, playback.trackBpm)
+                        current.track.mbid?.let { ChapterPanel(it, player, libraryVm) }
+                    }
+                    HorizontalDivider()
+                }
             }
-            HorizontalDivider()
-            PlayQueueSection(queue, onPlayAt = player::playAt)
+            playQueueItems(queue, onPlayAt = player::playAt)
         }
     }
 }

@@ -50,10 +50,12 @@ suspend fun DanceBrainzViewModel.scanAndSignIn(context: Context) {
 suspend fun scanQrCode(context: Context): String? =
     suspendCancellableCoroutine { cont ->
         val options =
-            GmsBarcodeScannerOptions.Builder()
+            GmsBarcodeScannerOptions
+                .Builder()
                 .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
                 .build()
-        GmsBarcodeScanning.getClient(context, options)
+        GmsBarcodeScanning
+            .getClient(context, options)
             .startScan()
             .addOnSuccessListener { barcode -> cont.resume(barcode.rawValue) }
             .addOnCanceledListener { cont.resume(null) }

@@ -11,10 +11,17 @@ class PrivateNetworkTest {
     @Test
     fun `loopback, RFC 1918 and link-local addresses are private`() {
         listOf(
-            "localhost", "127.0.0.1", "10.0.2.2", "10.255.0.1", "172.16.0.1", "172.31.255.9", "192.168.1.20", "::1",
-            "fd12:3456::1", "fe80::1",
-        )
-            .forEach { assertTrue(it, isPrivateNetworkHost(it)) }
+            "localhost",
+            "127.0.0.1",
+            "10.0.2.2",
+            "10.255.0.1",
+            "172.16.0.1",
+            "172.31.255.9",
+            "192.168.1.20",
+            "::1",
+            "fd12:3456::1",
+            "fe80::1",
+        ).forEach { assertTrue(it, isPrivateNetworkHost(it)) }
     }
 
     @Test
@@ -28,8 +35,7 @@ class PrivateNetworkTest {
             "11.0.0.1",
             "2001:db8::1",
             "192.168.1",
-        )
-            .forEach { assertFalse(it, isPrivateNetworkHost(it)) }
+        ).forEach { assertFalse(it, isPrivateNetworkHost(it)) }
     }
 
     @Test

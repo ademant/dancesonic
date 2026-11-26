@@ -5,6 +5,9 @@ import kotlinx.serialization.SerializationException
 import okhttp3.HttpUrl
 import retrofit2.HttpException
 import java.io.IOException
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 /**
  * High-level Subsonic operations used by the app. Every method unwraps the JSON envelope and
@@ -14,12 +17,15 @@ class SubsonicClient internal constructor(
     val settings: ServerSettings,
     private val service: SubsonicService,
     private val retryBackoffMillis: Long = INITIAL_BACKOFF_MILLIS,
+    /** Waits between attempts. Tests record the waits instead. */
+    private val pause: suspend (Long) -> Unit = { delay(it) },
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     constructor(settings: ServerSettings) : this(
         settings,
         SubsonicHttp.service(
             baseUrl = settings.baseUrl,
-            client = SubsonicHttp.okHttpClient { settings },
+            client = SubsonicHttp.clientFor(settings),
         ),
     )
 
@@ -102,7 +108,12 @@ class SubsonicClient internal constructor(
         call { song(id) }.song ?: throw SubsonicException(null, "Song response was empty")
 
     /** All artists, flattened from the alphabetical index. */
-    suspend fun artists(): List<ArtistDto> = call { artists() }.artists?.index.orEmpty().flatMap { it.artist }
+    suspend fun artists(): List<ArtistDto> =
+        call { artists() }
+            .artists
+            ?.index
+            .orEmpty()
+            .flatMap { it.artist }
 
     /** One artist with its albums (no songs). */
     suspend fun artist(id: String): ArtistDto =
@@ -140,12 +151,14 @@ class SubsonicClient internal constructor(
     /**
      * Runs one request. Every Subsonic call here is a GET, so a transient failure (no connection,
      * HTTP 429 or 5xx) is retried with exponential backoff. A `status: failed` answer and other HTTP
-     * errors are not retried: repeating them would not change the answer.
+     * errors are not retried: repeating them would not change the answer. A valid `Retry-After` on a
+     * retried answer sets the wait instead, up to [MAX_RETRY_AFTER_MILLIS] (#123).
      */
     private suspend fun call(block: suspend SubsonicService.() -> SubsonicEnvelope): SubsonicResponse {
         var attempt = 1
         var backoffMillis = retryBackoffMillis
         while (true) {
+            var serverWait: Long? = null
             // Only the transport step is inside the try: SubsonicException is an IOException, so an
             // envelope error caught here would be retried and reported as "could not reach server".
             val envelope: SubsonicResponse? =
@@ -155,6 +168,7 @@ class SubsonicClient internal constructor(
                     if (!isTransient(e) || attempt >= MAX_ATTEMPTS) {
                         throw SubsonicException(null, "Server returned HTTP ${e.code()}", e)
                     }
+                    serverWait = retryAfterMillis(e.response()?.headers()?.get("Retry-After"), clock())
                     null
                 } catch (e: SerializationException) {
                     throw SubsonicException(null, "Unexpected response from server", e)
@@ -163,8 +177,8 @@ class SubsonicClient internal constructor(
                     null
                 }
             if (envelope != null) return unwrap(envelope)
-            delay(backoffMillis)
-            backoffMillis *= 2
+            pause(serverWait ?: backoffMillis)
+            backoffMillis = (backoffMillis * 2).coerceAtMost(MAX_BACKOFF_MILLIS)
             attempt++
         }
     }
@@ -175,6 +189,12 @@ class SubsonicClient internal constructor(
 
         /** Delay before the first retry; doubles after each further failure. */
         const val INITIAL_BACKOFF_MILLIS = 500L
+
+        /** The longest wait the backoff grows to. */
+        const val MAX_BACKOFF_MILLIS = 8_000L
+
+        /** The longest `Retry-After` honoured. A longer one is shortened to this, so a sync does not hang. */
+        const val MAX_RETRY_AFTER_MILLIS = 30_000L
 
         /** Songs per search3 page. Servers may cap this lower; paging stops at the first empty page. */
         const val SONG_PAGE_SIZE = 500
@@ -254,3 +274,35 @@ private fun transportFailure(
         attempt >= SubsonicClient.MAX_ATTEMPTS -> SubsonicException(null, "Could not reach server", e)
         else -> null
     }
+
+/**
+ * The wait a `Retry-After` header asks for, in milliseconds from [nowMillis], or null when [value] is missing or
+ * invalid (#123). Both forms of RFC 9110 are read: delay seconds, and an HTTP date. A date in the past waits 0; any
+ * wait is capped at [SubsonicClient.MAX_RETRY_AFTER_MILLIS].
+ */
+internal fun retryAfterMillis(
+    value: String?,
+    nowMillis: Long,
+): Long? {
+    val text = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val millis =
+        if (text.all { it.isDigit() }) {
+            // Too many digits for a Long is still a long wait: it is capped like any other.
+            val seconds = text.toLongOrNull() ?: Long.MAX_VALUE
+            if (seconds > MAX_RETRY_AFTER_SECONDS) Long.MAX_VALUE else seconds * MILLIS_PER_SECOND
+        } else {
+            parseHttpDate(text)?.let { (it.toInstant().toEpochMilli() - nowMillis).coerceAtLeast(0) }
+        }
+    return millis?.coerceAtMost(SubsonicClient.MAX_RETRY_AFTER_MILLIS)
+}
+
+/** An RFC 1123 HTTP date, or null when [text] is not one. */
+private fun parseHttpDate(text: String): ZonedDateTime? =
+    try {
+        ZonedDateTime.parse(text, DateTimeFormatter.RFC_1123_DATE_TIME)
+    } catch (_: DateTimeParseException) {
+        null
+    }
+
+private const val MILLIS_PER_SECOND = 1_000L
+private const val MAX_RETRY_AFTER_SECONDS = SubsonicClient.MAX_RETRY_AFTER_MILLIS / MILLIS_PER_SECOND

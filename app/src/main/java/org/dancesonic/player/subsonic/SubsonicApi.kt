@@ -1,6 +1,5 @@
 package org.dancesonic.player.subsonic
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -10,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.io.IOException
@@ -17,7 +17,9 @@ import java.io.IOException
 /** How the app proves who it is to the server. */
 sealed interface ServerAuth {
     /** An API key, typed in or issued by a password sign-in. A secret: stored encrypted. */
-    data class ApiKey(val key: String) : ServerAuth {
+    data class ApiKey(
+        val key: String,
+    ) : ServerAuth {
         init {
             require(key.isNotBlank()) { "API key must not be blank" }
         }
@@ -29,7 +31,9 @@ sealed interface ServerAuth {
      * A paired device (folksonic #101): every request carries a DPoP proof signed by the Keystore key named [alias].
      * The server never sees the key, and nothing secret is stored.
      */
-    data class Device(val alias: String) : ServerAuth {
+    data class Device(
+        val alias: String,
+    ) : ServerAuth {
         init {
             require(alias.isNotBlank()) { "Device key alias must not be blank" }
         }
@@ -97,7 +101,8 @@ class ServerSettings(
  * [ApiKeyInterceptor] adds it when the request is sent, so the URL itself is not a secret.
  */
 fun ServerSettings.streamUrl(songId: String): HttpUrl =
-    baseUrl.endpoint(STREAM_PATH)
+    baseUrl
+        .endpoint(STREAM_PATH)
         .newBuilder()
         .addQueryParameter("id", songId)
         .build()
@@ -110,7 +115,8 @@ fun ServerSettings.coverArtUrl(
     albumId: String,
     size: Int,
 ): HttpUrl =
-    baseUrl.endpoint(COVER_ART_PATH)
+    baseUrl
+        .endpoint(COVER_ART_PATH)
         .newBuilder()
         .addQueryParameter("id", albumId)
         .addQueryParameter("size", size.toString())
@@ -285,7 +291,8 @@ internal class ApiKeyInterceptor(
             return chain.proceed(request)
         }
         val builder =
-            request.url.newBuilder()
+            request.url
+                .newBuilder()
                 .removeAllQueryParameters("apiKey")
                 .removeAllQueryParameters("c")
                 .removeAllQueryParameters("v")
@@ -332,35 +339,75 @@ internal val subsonicJson: Json =
         coerceInputValues = true
     }
 
-/** Builds HTTP clients and Retrofit services. Callers are responsible for keeping one client per app. */
+/**
+ * Builds HTTP clients and Retrofit services once and shares them (#134). Every client is derived from [base], so they
+ * share one connection pool, one dispatcher and the TLS sessions; a derived client adds only its interceptors.
+ */
 internal object SubsonicHttp {
     private const val CONNECT_TIMEOUT_SECONDS = 15L
     private const val READ_TIMEOUT_SECONDS = 30L
     private const val PREFER_MINIMAL = "tinysonic-minimal"
+    private const val SERVERS_KEPT = 4
+    private const val SERVICES_KEPT = 8
 
+    /** The app's one client with the transport rules. The others are derived from it. */
+    val base: OkHttpClient by lazy {
+        CleartextPolicy
+            .configure(OkHttpClient.Builder())
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * A client that adds the credentials of [settingsProvider]'s settings to Subsonic requests. Build it once per
+     * owner: the app keeps one for its current settings, and [clientFor] keeps one per fixed settings.
+     */
     fun okHttpClient(settingsProvider: () -> ServerSettings?): OkHttpClient =
-        // The transport rules come first, so a refused http request is stopped before any key is added to it.
-        CleartextPolicy.configure(OkHttpClient.Builder())
+        // The transport rules of [base] come first, so a refused http request is stopped before any key is added.
+        base
+            .newBuilder()
             .addInterceptor(ApiKeyInterceptor(settingsProvider))
             .addInterceptor(DeviceProofInterceptor(settingsProvider))
             // Asks folksonic for minimal responses (RFC 7240). Other servers ignore the Prefer header.
             .addInterceptor { chain ->
-                chain.proceed(chain.request().newBuilder().header("Prefer", PREFER_MINIMAL).build())
-            }
-            .connectTimeout(CONNECT_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
+                chain.proceed(
+                    chain
+                        .request()
+                        .newBuilder()
+                        .header("Prefer", PREFER_MINIMAL)
+                        .build(),
+                )
+            }.build()
+
+    private val bySettings = Memo<ServerSettings, OkHttpClient>(SERVERS_KEPT) { settings -> okHttpClient { settings } }
+
+    /** The client for these fixed [settings], built once and reused for later calls with the same settings. */
+    fun clientFor(settings: ServerSettings): OkHttpClient = bySettings[settings]
+
+    /** The client for requests that carry no credentials, such as the sign-in itself. */
+    val anonymous: OkHttpClient by lazy { okHttpClient { null } }
+
+    private val retrofits =
+        Memo<Pair<HttpUrl, OkHttpClient>, Retrofit>(SERVICES_KEPT) { (baseUrl, client) ->
+            Retrofit
+                .Builder()
+                .baseUrl(baseUrl)
+                .client(client)
+                .addConverterFactory(subsonicJson.asConverterFactory("application/json".toMediaType()))
+                .build()
+        }
+
+    /** The JSON Retrofit for [baseUrl] on [client], built once per pair. Retrofit caches its parsed methods. */
+    fun retrofit(
+        baseUrl: HttpUrl,
+        client: OkHttpClient,
+    ): Retrofit = retrofits[baseUrl to client]
 
     fun service(
         baseUrl: HttpUrl,
         client: OkHttpClient,
-    ): SubsonicService =
-        Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(client)
-            .addConverterFactory(subsonicJson.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(SubsonicService::class.java)
+    ): SubsonicService = retrofit(baseUrl, client).create(SubsonicService::class.java)
 }
 
 /** Raised when the server answers with `status: failed` or the request could not be completed. */

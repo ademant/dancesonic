@@ -37,7 +37,11 @@ class PlayOnTarget(
         data object Phone : Target
 
         /** [transport] is `ble`, `relay` or `network`, as Studio names the link it runs on. */
-        data class Studio(val pairingId: String, val name: String, val transport: String) : Target
+        data class Studio(
+            val pairingId: String,
+            val name: String,
+            val transport: String,
+        ) : Target
     }
 
     private val _target = MutableStateFlow<Target>(Target.Phone)

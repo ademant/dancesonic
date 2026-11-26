@@ -32,8 +32,15 @@ class DanceBrainzLookupMeterTest {
 
     private fun lookupOf(tagsJson: String): Map<String, RecordingDance> {
         val body = """{"recordings":[{"mbid":"$mbid","tags":[$tagsJson]}]}"""
-        server.server.enqueue(MockResponse().setResponseCode(200).setBody(body))
-        val client = DanceBrainzClient(server.server.url("/").toString().toHttpUrl(), server.plain)
+        server.enqueue(MockResponse().setResponseCode(200).setBody(body))
+        val client =
+            DanceBrainzClient(
+                server.server
+                    .url("/")
+                    .toString()
+                    .toHttpUrl(),
+                server.plain,
+            )
         return runBlocking { client.lookup(listOf(mbid)) }
     }
 

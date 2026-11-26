@@ -20,7 +20,8 @@ class EditQueueMigrationTest {
     @Test
     fun `migration 7 to 8 carries queued shoes changes into the edit queue and drops the old table`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {

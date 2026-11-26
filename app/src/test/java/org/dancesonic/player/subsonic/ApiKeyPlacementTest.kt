@@ -31,12 +31,21 @@ class ApiKeyPlacementTest {
     @Test
     fun `a folksonic server gets the key in the header and not in the URL`() {
         val http =
-            server.plain.newBuilder().addInterceptor(
-                ApiKeyInterceptor { server.settings.withKeyInHeader(true) },
-            ).build()
-        server.server.enqueue(MockResponse().setBody("{}"))
+            server.plain
+                .newBuilder()
+                .addInterceptor(
+                    ApiKeyInterceptor { server.settings.withKeyInHeader(true) },
+                ).build()
+        server.enqueue(MockResponse().setBody("{}"))
 
-        http.newCall(okhttp3.Request.Builder().url(server.server.url("/rest/ping.view")).build()).execute().close()
+        http
+            .newCall(
+                okhttp3.Request
+                    .Builder()
+                    .url(server.server.url("/rest/ping.view"))
+                    .build(),
+            ).execute()
+            .close()
 
         val request = server.server.takeRequest()
         assertEquals("test-api-key", request.getHeader("X-Api-Key"))
@@ -46,10 +55,21 @@ class ApiKeyPlacementTest {
 
     @Test
     fun `other servers keep the key in the query`() {
-        val http = server.plain.newBuilder().addInterceptor(ApiKeyInterceptor { server.settings }).build()
-        server.server.enqueue(MockResponse().setBody("{}"))
+        val http =
+            server.plain
+                .newBuilder()
+                .addInterceptor(ApiKeyInterceptor { server.settings })
+                .build()
+        server.enqueue(MockResponse().setBody("{}"))
 
-        http.newCall(okhttp3.Request.Builder().url(server.server.url("/rest/ping.view")).build()).execute().close()
+        http
+            .newCall(
+                okhttp3.Request
+                    .Builder()
+                    .url(server.server.url("/rest/ping.view"))
+                    .build(),
+            ).execute()
+            .close()
 
         val request = server.server.takeRequest()
         assertEquals("test-api-key", request.requestUrl?.queryParameter("apiKey"))
@@ -59,16 +79,28 @@ class ApiKeyPlacementTest {
     @Test
     fun `a key already in the query is replaced, not duplicated, when sent in the header`() {
         val http =
-            server.plain.newBuilder().addInterceptor(
-                ApiKeyInterceptor { server.settings.withKeyInHeader(true) },
-            ).build()
-        server.server.enqueue(MockResponse().setBody("{}"))
+            server.plain
+                .newBuilder()
+                .addInterceptor(
+                    ApiKeyInterceptor { server.settings.withKeyInHeader(true) },
+                ).build()
+        server.enqueue(MockResponse().setBody("{}"))
 
-        http.newCall(
-            okhttp3.Request.Builder().url(server.server.url("/rest/ping.view?apiKey=old")).build(),
-        ).execute().close()
+        http
+            .newCall(
+                okhttp3.Request
+                    .Builder()
+                    .url(server.server.url("/rest/ping.view?apiKey=old"))
+                    .build(),
+            ).execute()
+            .close()
 
-        assertNull(server.server.takeRequest().requestUrl?.queryParameter("apiKey"))
+        assertNull(
+            server.server
+                .takeRequest()
+                .requestUrl
+                ?.queryParameter("apiKey"),
+        )
     }
 
     @Test

@@ -89,12 +89,21 @@ class DeviceProofTest {
         val server = TestSubsonicServer()
         try {
             val device = ServerSettings(server.settings.baseUrl, ServerAuth.Device("alias"))
-            val http = server.plain.newBuilder().addInterceptor(DeviceProofInterceptor({ device }, { signer })).build()
-            server.server.enqueue(MockResponse().setBody("{}"))
+            val http =
+                server.plain
+                    .newBuilder()
+                    .addInterceptor(DeviceProofInterceptor({ device }, { signer }))
+                    .build()
+            server.enqueue(MockResponse().setBody("{}"))
 
-            http.newCall(
-                okhttp3.Request.Builder().url(server.server.url("/rest/ping.view?c=DanceSonic&apiKey=none")).build(),
-            ).execute().close()
+            http
+                .newCall(
+                    okhttp3.Request
+                        .Builder()
+                        .url(server.server.url("/rest/ping.view?c=DanceSonic&apiKey=none"))
+                        .build(),
+                ).execute()
+                .close()
 
             val sent = server.server.takeRequest()
             val proof = sent.getHeader("DPoP")!!

@@ -1,6 +1,5 @@
 package org.dancesonic.player.dance
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -10,9 +9,11 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import org.dancesonic.player.subsonic.CleartextPolicy
+import org.dancesonic.player.subsonic.Memo
+import org.dancesonic.player.subsonic.SubsonicHttp
 import retrofit2.HttpException
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
@@ -97,33 +98,50 @@ class DanceBrainzClient internal constructor(
             client: OkHttpClient,
         ): DanceBrainzService = retrofitFor(baseUrl, client).create(DanceBrainzService::class.java)
 
-        /** The JSON Retrofit for a DanceBrainz server; shared with the account endpoints. */
+        private const val SERVICES_KEPT = 4
+
+        private val retrofits =
+            Memo<Pair<HttpUrl, OkHttpClient>, Retrofit>(SERVICES_KEPT) { (baseUrl, client) ->
+                Retrofit
+                    .Builder()
+                    .baseUrl(baseUrl)
+                    .client(client)
+                    .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                    .build()
+            }
+
+        /**
+         * The JSON Retrofit for a DanceBrainz server; shared with the account, tag, rating, chapter and description
+         * endpoints. Built once per server and client (#134).
+         */
         internal fun retrofitFor(
             baseUrl: HttpUrl,
             client: OkHttpClient,
         ): Retrofit {
             require(baseUrl.isHttps) { "DanceBrainz must be reached over https" }
-            return Retrofit.Builder()
-                .baseUrl(baseUrl)
-                .client(client)
-                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-                .build()
+            return retrofits[baseUrl to client]
         }
 
-        internal fun defaultHttpClient(): OkHttpClient =
-            CleartextPolicy.configure(OkHttpClient.Builder())
+        /** The one DanceBrainz client of the app, derived from the shared one (#134). */
+        private val sharedHttpClient: OkHttpClient by lazy {
+            SubsonicHttp.base
+                .newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
                     chain.proceed(
-                        chain.request().newBuilder()
+                        chain
+                            .request()
+                            .newBuilder()
                             .header("Accept", "application/json")
                             .header("User-Agent", "DanceSonic")
                             .build(),
                     )
-                }
-                .addInterceptor(DanceBrainzDeviceInterceptor())
+                }.addInterceptor(DanceBrainzDeviceInterceptor())
                 .build()
+        }
+
+        internal fun defaultHttpClient(): OkHttpClient = sharedHttpClient
     }
 }
 

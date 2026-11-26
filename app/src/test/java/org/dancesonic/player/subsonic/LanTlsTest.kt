@@ -42,9 +42,13 @@ class LanTlsTest {
             val pin = checkNotNull(LanTls.connectPin(url))
             LanPins.trustForSetup(url, pin)
 
-            server.server.enqueue(MockResponse().setBody("{}"))
+            server.enqueue(MockResponse().setBody("{}"))
             val settings = server.settings.withTlsPin(pin)
-            SubsonicHttp.okHttpClient { settings }.newCall(pingRequest()).execute().close()
+            SubsonicHttp
+                .okHttpClient { settings }
+                .newCall(pingRequest())
+                .execute()
+                .close()
 
             assertEquals(1, server.server.requestCount)
         }

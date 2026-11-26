@@ -17,7 +17,8 @@ class OnsetsMigrationTest {
     @Test
     fun `migration 12 to 13 adds the onsets table and keeps the waveforms that exist`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(12) {
