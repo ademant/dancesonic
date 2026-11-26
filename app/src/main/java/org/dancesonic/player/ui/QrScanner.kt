@@ -11,12 +11,19 @@ import kotlin.coroutines.resumeWithException
 
 /**
  * Scans a code and connects with it. A cancelled scan does nothing. Play services reports scanner failures
- * without a common exception type, so any other failure reads as "not available".
+ * without a common exception type, so any other failure reads as "not available". A code for a server on the local
+ * network asks for that permission first (#124).
  */
 @Suppress("TooGenericExceptionCaught", "SwallowedException")
-suspend fun ConnectViewModel.scanAndConnect(context: Context) {
+internal suspend fun ConnectViewModel.scanAndConnect(
+    context: Context,
+    localNetwork: LocalNetworkRequest,
+) {
     try {
-        scanQrCode(context.applicationContext)?.let { connectFromScan(it) }
+        scanQrCode(context.applicationContext)?.let { code ->
+            localNetwork.ensureFor(scannedServer(code, allowCleartext.value))
+            connectFromScan(code)
+        }
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

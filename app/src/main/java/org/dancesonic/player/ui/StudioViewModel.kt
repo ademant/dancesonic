@@ -176,6 +176,8 @@ class StudioViewModel(private val container: AppContainer) : ViewModel() {
             StudioUnavailable.Reason.NOT_THIS_STUDIO -> "The Studio that answered is not the one that showed the code."
             StudioUnavailable.Reason.REFUSED -> "Studio did not accept this phone."
             StudioUnavailable.Reason.TIMEOUT -> "Studio did not answer in time."
+            StudioUnavailable.Reason.LOCAL_NETWORK_BLOCKED ->
+                "Studio is on the local network. Allow \"Nearby devices\" for DanceSonic, then try again."
             StudioUnavailable.Reason.FAILED -> "Could not reach Studio."
         }
 }

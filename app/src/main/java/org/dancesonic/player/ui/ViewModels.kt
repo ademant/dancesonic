@@ -48,7 +48,9 @@ import org.dancesonic.player.security.ServerSettingsStore
 import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.DeviceKeys
 import org.dancesonic.player.subsonic.KeystoreDeviceSigner
-import org.dancesonic.player.subsonic.LanTls
+import org.dancesonic.player.subsonic.LanPins
+import org.dancesonic.player.subsonic.LocalNetworkAccess
+import org.dancesonic.player.subsonic.LocalNetworkBlockedException
 import org.dancesonic.player.subsonic.ServerAuth
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.ServerUrl
@@ -56,6 +58,8 @@ import org.dancesonic.player.subsonic.SubsonicClient
 import org.dancesonic.player.subsonic.SubsonicException
 import org.dancesonic.player.subsonic.advertisesTinysonic
 import org.dancesonic.player.subsonic.coverArtUrl
+import org.dancesonic.player.subsonic.localNetworkBlock
+import java.io.IOException
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
 
@@ -75,6 +79,10 @@ data class ConnectUiState(
     val status: String? = null,
     /** The code to compare with the account page while a pairing waits for both sides to confirm it. */
     val verificationCode: String? = null,
+    /** The certificate fingerprint of a self-signed server, while the user is asked to trust it (#126). */
+    val certificateFingerprint: String? = null,
+    /** True when the last connect failed because the app may not use the local network (#124). */
+    val localNetworkBlocked: Boolean = false,
     val lastSync: String? = null,
     /** Albums fetched so far in the running sync, or null when no sync is running. */
     val syncProgress: SyncProgress? = null,
@@ -165,6 +173,13 @@ class ConnectViewModel(
                 )
         })
 
+    /**
+     * Shows the fingerprint of a self-signed server certificate before anything secret is sent to the server (#126).
+     * The user's answer goes to [CertificateCheck.answer].
+     */
+    val certificateCheck: CertificateCheck =
+        CertificateCheck(show = { fingerprint -> _state.update { it.copy(certificateFingerprint = fingerprint) } })
+
     /** Shows an error that happened outside the ViewModel, such as a failed scanner launch. */
     fun reportError(message: String) {
         _state.value = ConnectUiState(error = message)
@@ -182,7 +197,11 @@ class ConnectViewModel(
         }
         val allowCleartext = _allowCleartext.value
         withAddress(address) { url ->
-            ServerSettings(url, key, allowCleartext = allowCleartext).withTlsPin(LanTls.connectPin(url))
+            ServerSettings(
+                url,
+                key,
+                allowCleartext = allowCleartext,
+            ).withTlsPin(trustedPin(url, null, certificateCheck::await))
         }
     }
 
@@ -198,8 +217,8 @@ class ConnectViewModel(
         }
         val allowCleartext = _allowCleartext.value
         withAddress(address) { url ->
-            // The certificate is read before the password is sent, so a self-signed server is pinned first.
-            val pin = LanTls.connectPin(url)
+            // The certificate is checked before the password is sent, so a self-signed server is pinned first.
+            val pin = trustedPin(url, null, certificateCheck::await)
             val session = account.login(url, username.trim(), password)
             val key =
                 try {
@@ -232,7 +251,7 @@ class ConnectViewModel(
         runConnect(
             shared.server.baseUrl,
             danceBrainz = shared.danceBrainz,
-        ) { shared.server.withTlsPin(LanTls.connectPin(shared.server.baseUrl)) }
+        ) { shared.server.withTlsPin(trustedPin(shared.server.baseUrl, null, certificateCheck::await)) }
     }
 
     /**
@@ -250,10 +269,8 @@ class ConnectViewModel(
         runConnect(request.server) {
             // The code was just scanned, so it expires about one pairing window from now.
             val expiresAt = System.currentTimeMillis() + AccountClient.PAIRING_WAIT_MILLIS
-            val pin = LanTls.connectPin(request.server)
-            require(request.pin == null || request.pin == pin) {
-                "The server certificate does not match the pin in this code. Create a new code on the account page."
-            }
+            // A pin in the code must match before the token is sent; a mismatch never becomes active (#126).
+            val pin = trustedPin(request.server, request.pin, certificateCheck::await)
             pairThisDevice(
                 account,
                 request,
@@ -307,13 +324,11 @@ class ConnectViewModel(
                 DeviceKeys.delete(device.alias)
                 warning = "This device stays paired on the server. Remove it on the account page."
             }
-            container.library.clearCatalog()
-            container.syncState.clear()
-            container.audioCache.clear()
-            container.waveforms.clear()
-            container.keptCollections.forgetAll()
-            container.scrobbles.forgetAll()
+            container.forgetServerData()
             container.settingsStore.clear()
+            // The store's flow forgets them too, but later; nothing may use the old server's pin or http opt-in now.
+            LanPins.remember(null)
+            CleartextPolicy.remember(null)
             _state.value = ConnectUiState(error = warning)
         }
     }
@@ -343,6 +358,11 @@ class ConnectViewModel(
         danceBrainz: HttpUrl? = null,
         obtain: suspend () -> ServerSettings,
     ) {
+        if (LocalNetworkAccess.needsPermission(server) && !LocalNetworkAccess.allowed()) {
+            // Nothing is sent: Android would block the connection, and it would only time out (#124).
+            _state.value = ConnectUiState(error = LocalNetworkBlockedException.MESSAGE, localNetworkBlocked = true)
+            return
+        }
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
@@ -353,13 +373,29 @@ class ConnectViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: AccountException) {
-                _state.value = ConnectUiState(error = e.message)
+                _state.value = ConnectUiState(error = e.message, localNetworkBlocked = e.localNetworkBlock() != null)
             } catch (e: SubsonicException) {
-                _state.value = ConnectUiState(error = e.message ?: "Connection failed")
+                _state.value =
+                    ConnectUiState(
+                        error = e.message ?: "Connection failed",
+                        localNetworkBlocked = e.localNetworkBlock() != null,
+                    )
             } catch (e: DanceBrainzException) {
                 _state.value = ConnectUiState(error = e.message)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message ?: "Invalid settings")
+            } catch (e: IOException) {
+                // After SubsonicException, which is an IOException too: a failure no client mapped, such as a
+                // blocked local network during a pairing request.
+                val blocked = e.localNetworkBlock()
+                _state.value =
+                    ConnectUiState(
+                        error = blocked?.message ?: "Could not reach the server.",
+                        localNetworkBlocked = blocked != null,
+                    )
+            } finally {
+                // A pin trusted for this setup is forgotten; a stored connection keeps its own (#126).
+                LanPins.endSetup()
             }
         }
     }
@@ -384,20 +420,14 @@ class ConnectViewModel(
             } else {
                 probe
             }
-        container.adoptCatalogClient(verified)
         danceBrainz?.let { DanceBrainzClient(it).checkServer() }
         val previous = container.settingsStore.settings.first()
-        if (connectionChangesServer(previous, settings)) {
-            container.library.clearCatalog()
-            container.syncState.clear()
-            container.audioCache.clear()
-            container.waveforms.clear()
-            container.keptCollections.forgetAll()
-            container.scrobbles.forgetAll()
-        }
+        if (connectionChangesServer(previous, settings)) container.forgetServerData()
+        container.adoptCatalogClient(verified)
         container.settingsStore.save(settings)
-        // The store's flow updates the policy too, but later: the first sync starts now.
+        // The store's flow updates the policies too, but later: the first sync starts now.
         CleartextPolicy.remember(settings)
+        LanPins.remember(settings)
         danceBrainz?.let { container.danceBrainzSettings.save(it) }
         return Connected(settings, revokeReplacedKey(previous, settings))
     }

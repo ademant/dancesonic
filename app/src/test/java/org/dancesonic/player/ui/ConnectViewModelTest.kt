@@ -3,12 +3,22 @@ package org.dancesonic.player.ui
 import app.cash.turbine.test
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.dancesonic.player.AppContainer
+import org.dancesonic.player.playback.PlayQueue
+import org.dancesonic.player.playback.PlaybackProgress
+import org.dancesonic.player.playback.PlaybackUiState
+import org.dancesonic.player.subsonic.LanPins
+import org.dancesonic.player.subsonic.LocalNetworkAccess
+import org.dancesonic.player.subsonic.LocalNetworkBlockedException
 import org.dancesonic.player.subsonic.ServerUrl
+import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.dancesonic.player.testsupport.TestViewModelHost
 import org.dancesonic.player.testsupport.newTestContainer
 import org.dancesonic.player.testsupport.resetDatabase
@@ -18,11 +28,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.net.URLEncoder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -41,6 +53,8 @@ class ConnectViewModelTest {
 
     @After
     fun tearDown() {
+        LocalNetworkAccess.install { true }
+        LanPins.clear()
         host.clear()
         container.database.close()
         Dispatchers.resetMain()
@@ -112,5 +126,48 @@ class ConnectViewModelTest {
             container.playlists.playlist(playlistId).test {
                 assertEquals("Keep me", awaitItem()?.name)
             }
+        }
+
+    @Test
+    fun `a server on the local network is refused at once while the permission is missing (#124)`() {
+        LocalNetworkAccess.install { false }
+        val vm = host.create { ConnectViewModel(container) }
+
+        vm.connectWithApiKey("https://192.168.1.5:4533", "key-123")
+
+        assertEquals(LocalNetworkBlockedException.MESSAGE, vm.state.value.error)
+        assertTrue(vm.state.value.localNetworkBlocked)
+        assertFalse(vm.state.value.busy)
+    }
+
+    @Test
+    fun `a pairing code whose pin does not match sends no pairing request (#126)`() =
+        runTest {
+            TestSubsonicServer().use { server ->
+                val address = URLEncoder.encode(server.server.url("/").toString(), "UTF-8")
+                val wrongPin = URLEncoder.encode("sha256/" + "A".repeat(43) + "=", "UTF-8")
+                val vm = host.create { ConnectViewModel(container) }
+
+                vm.pairWithCode("tinysonic://pair?server=$address&token=token-12345&pin=$wrongPin")
+                withContext(Dispatchers.Default) { withTimeout(10_000) { vm.state.first { !it.busy } } }
+
+                assertEquals(PIN_MISMATCH, vm.state.value.error)
+                assertEquals(0, server.server.requestCount)
+                assertNull(LanPins.pinFor(server.server.hostName, server.server.port))
+            }
+        }
+
+    @Test
+    fun `disconnect leaves nothing playing and an empty queue, also when repeated (#130)`() =
+        runTest {
+            val vm = host.create { ConnectViewModel(container) }
+
+            container.player.reset()
+            vm.disconnect()
+            vm.disconnect()
+
+            assertEquals(PlaybackUiState(), container.player.state.value)
+            assertEquals(PlayQueue(), container.player.queue.value)
+            assertEquals(PlaybackProgress(), container.player.progress.value)
         }
 }

@@ -10,6 +10,7 @@ import org.dancesonic.player.studio.ble.BleGateway
 import org.dancesonic.player.studio.ble.BleStudioException
 import org.dancesonic.player.studio.noise.NoiseKeyPair
 import org.dancesonic.player.subsonic.DeviceKeys
+import org.dancesonic.player.subsonic.LocalNetworkAccess
 import java.util.UUID
 
 /** Why a Studio could not be paired or reached, for the message the user sees. */
@@ -35,6 +36,9 @@ class StudioUnavailable(val reason: Reason, cause: Throwable? = null) : Exceptio
 
         /** The phone was not accepted in time, or Studio did not answer. */
         TIMEOUT,
+
+        /** The local network is needed and the app may not use it: Android 17's permission is missing (#124). */
+        LOCAL_NETWORK_BLOCKED,
 
         /** Anything else: the connection failed. */
         FAILED,
@@ -362,11 +366,14 @@ class StudioRemote
             var failure = StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
             for (transport in order) {
                 try {
-                    return when (transport) {
-                        StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey) ?: continue
-                        StudioTransports.RELAY -> openRelayForConnect(record, fingerprint, noiseKey) ?: continue
-                        else -> openNetwork(record, fingerprint, noiseKey)
-                    }
+                    // Bluetooth and the relay give null when they cannot be used; the next transport is tried then.
+                    val link =
+                        when (transport) {
+                            StudioTransports.BLUETOOTH -> openBluetoothForConnect(record, fingerprint, noiseKey)
+                            StudioTransports.RELAY -> openRelayForConnect(record, fingerprint, noiseKey)
+                            else -> openNetwork(record, fingerprint, noiseKey)
+                        }
+                    if (link != null) return link
                 } catch (e: StudioUnavailable) {
                     failure = e
                 }
@@ -427,8 +434,16 @@ class StudioRemote
 
         /** The address mDNS finds for [fingerprint]. Pairing has no hint yet, so only mDNS is used there. */
         private suspend fun locate(fingerprint: ByteArray): HttpUrl =
-            discovery.find(StudioWire.mdnsTag(fingerprint))
-                ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
+            findOnNetwork(fingerprint) ?: throw StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)
+
+        /**
+         * The address mDNS finds for [fingerprint], or null. Refused at once while the app may not use the local
+         * network, rather than waiting for a discovery that Android blocks (#124).
+         */
+        private suspend fun findOnNetwork(fingerprint: ByteArray): HttpUrl? {
+            if (!LocalNetworkAccess.allowed()) throw StudioUnavailable(StudioUnavailable.Reason.LOCAL_NETWORK_BLOCKED)
+            return discovery.find(StudioWire.mdnsTag(fingerprint))
+        }
 
         /**
          * The network link to [record]: the address mDNS finds first, then the addresses Studio reported over
@@ -439,7 +454,7 @@ class StudioRemote
             fingerprint: ByteArray,
             noiseKey: ByteArray,
         ): StudioLink {
-            val found = discovery.find(StudioWire.mdnsTag(fingerprint))
+            val found = findOnNetwork(fingerprint)
             // The record passed in may be older than the hint: a Bluetooth session saves its hint as it arrives.
             val current = store.find(record.id) ?: record
             var failure = StudioUnavailable(StudioUnavailable.Reason.NOT_FOUND)

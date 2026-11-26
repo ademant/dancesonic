@@ -31,6 +31,7 @@ import org.dancesonic.player.studio.PlayOnTarget
 import org.dancesonic.player.studio.RelayStudio
 import org.dancesonic.player.studio.StudioPairing
 import org.dancesonic.player.studio.ble.BlePermissions
+import org.dancesonic.player.subsonic.LocalNetworkAccess
 
 /**
  * The paired Studios: pair a new one from its QR code, play on one, check that each answers, and forget one. Studio
@@ -48,17 +49,19 @@ internal fun StudioSection(vm: StudioViewModel) {
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
     val permissions =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            // Denied permissions are fine: without them the link uses the network.
+            // Denied permissions are fine: without Bluetooth the link uses the network or the relay, and without the
+            // local network the error says so.
             pending?.invoke()
             pending = null
         }
-    // Runs [action] once Bluetooth may be used, asking for the permissions first when they are missing.
+    // Runs [action] once Bluetooth and the local network may be used, asking for the permissions first when they are
+    // missing. Both are "Nearby devices" on Android 17, so they share one prompt (#124).
     val withBluetooth: (() -> Unit) -> Unit = { action ->
-        if (BlePermissions.granted(context)) {
+        if (BlePermissions.granted(context) && LocalNetworkAccess.granted(context)) {
             action()
         } else {
             pending = action
-            permissions.launch(BlePermissions.required())
+            permissions.launch(BlePermissions.required() + LocalNetworkAccess.required())
         }
     }
 

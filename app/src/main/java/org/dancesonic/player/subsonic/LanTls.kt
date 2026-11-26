@@ -14,6 +14,7 @@ import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -26,6 +27,9 @@ import javax.net.ssl.X509TrustManager
  * so the server's leaf certificate is pinned instead: its SHA-256 fingerprint is read once, when the server is
  * connected, and every later connection must present that certificate. A certificate that changes fails the request
  * until the server is connected again. Public servers keep the platform's certificate checks.
+ *
+ * A pin read with [connectPin] is not trusted by itself (#126). The caller compares it with the pin a pairing code
+ * carries, or has the user confirm it, and only then makes it active with [LanPins.trustForSetup].
  */
 internal object LanTls {
     private const val HANDSHAKE_TIMEOUT_MILLIS = 15_000
@@ -42,23 +46,24 @@ internal object LanTls {
             )
 
     /**
-     * The pin to store for [url], read from the server now. Null for anything that is not https on a private
-     * network. Called once per connect, before the key is sent, so that first use is the only trust-on-first-use.
+     * The pin [url] presents now, or null for anything that is not https on a private network. It is only read: no
+     * connection uses it until it is verified and passed to [LanPins.trustForSetup]. Nothing is sent to the server.
      */
     suspend fun connectPin(
         url: HttpUrl,
         dispatcher: CoroutineDispatcher = Dispatchers.IO,
     ): String? {
-        if (!url.isHttps || !isPrivateNetworkHost(url.host)) return null
-        val pin =
-            try {
-                withContext(dispatcher) { readPin(url) }
-            } catch (e: IOException) {
-                throw SubsonicException(null, "Could not read the server certificate: ${e.message}", e)
-            }
-        LanPins.put(url.host, pin)
-        return pin
+        if (!needsPin(url)) return null
+        LocalNetworkAccess.requireAllowed(url.host)
+        return try {
+            withContext(dispatcher) { readPin(url) }
+        } catch (e: IOException) {
+            throw SubsonicException(null, "Could not read the server certificate: ${e.message}", e)
+        }
     }
+
+    /** Whether connections to [url] are pinned: https to a private network address. */
+    fun needsPin(url: HttpUrl): Boolean = url.isHttps && isPrivateNetworkHost(url.host)
 
     /** Reads the leaf certificate the server presents. It only reads the certificate and sends nothing. */
     private fun readPin(url: HttpUrl): String {
@@ -81,7 +86,9 @@ internal object LanTls {
             .sslSocketFactory(RoutingSocketFactory(platform), platformTrustManager())
             // A pinned host is identified by its certificate, not by its name, so self-signed certificates
             // without a matching name still connect.
-            .hostnameVerifier { host, session -> LanPins.pinFor(host) != null || defaultVerifier.verify(host, session) }
+            .hostnameVerifier { host, session ->
+                LanPins.pinFor(host, session.peerPort) != null || defaultVerifier.verify(host, session)
+            }
     }
 
     private fun platformTrustManager(): X509TrustManager {
@@ -90,12 +97,17 @@ internal object LanTls {
         return factory.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
-    /** Sends each TLS connection to the pinned socket factory when its host has a pin, else to the platform one. */
+    /** Sends each TLS connection to the pinned socket factory when its origin has a pin, else to the platform one. */
     private class RoutingSocketFactory(private val platform: SSLSocketFactory) : SSLSocketFactory() {
-        private val pinned = ConcurrentHashMap<String, SSLSocketFactory>()
+        private val pinned = ConcurrentHashMap<PinOrigin, SSLSocketFactory>()
 
-        private fun pick(host: String): SSLSocketFactory =
-            if (LanPins.pinFor(host) == null) platform else pinned.getOrPut(host) { pinnedFactory(host) }
+        private fun pick(
+            host: String,
+            port: Int,
+        ): SSLSocketFactory {
+            val origin = PinOrigin.of(host, port)
+            return if (LanPins.pinFor(origin) == null) platform else pinned.getOrPut(origin) { pinnedFactory(origin) }
+        }
 
         override fun getDefaultCipherSuites(): Array<String> = platform.defaultCipherSuites
 
@@ -106,19 +118,19 @@ internal object LanTls {
             host: String,
             port: Int,
             autoClose: Boolean,
-        ): Socket = pick(host).createSocket(socket, host, port, autoClose)
+        ): Socket = pick(host, port).createSocket(socket, host, port, autoClose)
 
         override fun createSocket(
             host: String,
             port: Int,
-        ): Socket = pick(host).createSocket(host, port)
+        ): Socket = pick(host, port).createSocket(host, port)
 
         override fun createSocket(
             host: String,
             port: Int,
             localHost: InetAddress,
             localPort: Int,
-        ): Socket = pick(host).createSocket(host, port, localHost, localPort)
+        ): Socket = pick(host, port).createSocket(host, port, localHost, localPort)
 
         override fun createSocket(
             host: InetAddress,
@@ -132,17 +144,17 @@ internal object LanTls {
             localPort: Int,
         ): Socket = platform.createSocket(host, port, localHost, localPort)
 
-        private fun pinnedFactory(host: String): SSLSocketFactory =
-            SSLContext.getInstance("TLS").apply { init(null, arrayOf(PinnedTrust(host)), null) }.socketFactory
+        private fun pinnedFactory(origin: PinOrigin): SSLSocketFactory =
+            SSLContext.getInstance("TLS").apply { init(null, arrayOf(PinnedTrust(origin)), null) }.socketFactory
     }
 
-    /** Accepts a server certificate only when it matches the pin stored for [host]. */
-    private class PinnedTrust(private val host: String) : X509TrustManager {
+    /** Accepts a server certificate only when it matches the pin trusted for [origin]. */
+    private class PinnedTrust(private val origin: PinOrigin) : X509TrustManager {
         override fun checkServerTrusted(
             chain: Array<out X509Certificate>,
             authType: String,
         ) {
-            val pin = LanPins.pinFor(host) ?: throw CertificateException("No pinned certificate for this server")
+            val pin = LanPins.pinFor(origin) ?: throw CertificateException("No pinned certificate for this server")
             val leaf = chain.firstOrNull() ?: throw CertificateException("The server sent no certificate")
             if (fingerprint(leaf) != pin) {
                 throw CertificateException("The server certificate changed. Connect to the server again to pin it.")
@@ -178,29 +190,71 @@ internal object LanTls {
     }
 }
 
+/** A server's host and port: pins belong to one origin, so another service on the same host gets none (#126). */
+internal data class PinOrigin(val host: String, val port: Int) {
+    companion object {
+        fun of(
+            host: String,
+            port: Int,
+        ) = PinOrigin(host.lowercase(), port)
+
+        fun of(url: HttpUrl) = of(url.host, url.port)
+    }
+}
+
 /**
- * Certificate pins by host, read by the TLS code on every handshake. Kept in memory; the stored copy is in settings.
+ * The certificate pins TLS checks on every handshake, by origin (#126). Two at most: the pin of the stored connection,
+ * which follows the settings, and the pin of a connection being set up, which is trusted only after it was verified
+ * and is forgotten when the setup ends. A cleared or changed connection leaves no pin behind.
  */
 internal object LanPins {
-    private val pins = ConcurrentHashMap<String, String>()
+    private class Pinned(val origin: PinOrigin, val pin: String)
 
-    fun put(
-        host: String,
-        pin: String,
-    ) {
-        pins[host] = pin
+    @Volatile
+    private var saved: Pinned? = null
+
+    private val connecting = AtomicReference<Pinned?>(null)
+
+    fun pinFor(origin: PinOrigin): String? {
+        connecting.get()?.takeIf { it.origin == origin }?.let { return it.pin }
+        return saved?.takeIf { it.origin == origin }?.pin
     }
 
-    fun pinFor(host: String): String? = pins[host]
+    fun pinFor(
+        host: String,
+        port: Int,
+    ): String? = pinFor(PinOrigin.of(host, port))
+
+    /** The pin stored for [url]'s origin, which the user already trusted. Null when there is none. */
+    fun savedPinFor(url: HttpUrl): String? = saved?.takeIf { it.origin == PinOrigin.of(url) }?.pin
+
+    /**
+     * Follows the stored connection: only the pin of [settings] stays active, so the pin of a server that was
+     * disconnected or replaced is forgotten. Called at start and whenever the settings change.
+     */
+    fun remember(settings: ServerSettings?) {
+        saved = settings?.tlsPin?.let { Pinned(PinOrigin.of(settings.baseUrl), it) }
+    }
+
+    /**
+     * Trusts [pin] for [url] while a connection is set up. Only for a pin that was compared with a pairing code or
+     * confirmed by the user. [endSetup] forgets it; the stored connection then keeps it through [remember].
+     */
+    fun trustForSetup(
+        url: HttpUrl,
+        pin: String,
+    ) {
+        connecting.set(Pinned(PinOrigin.of(url), pin))
+    }
+
+    /** Ends a setup, successful or not: its pin is no longer trusted unless it was stored. */
+    fun endSetup() {
+        connecting.set(null)
+    }
 
     /** Forgets every pin. Tests use it so one case does not see another's pin. */
     internal fun clear() {
-        pins.clear()
-    }
-
-    /** Loads the pin of [settings], if it has one, so connections after a restart use the stored certificate. */
-    fun remember(settings: ServerSettings?) {
-        val pin = settings?.tlsPin ?: return
-        settings.baseUrl.host.let { put(it, pin) }
+        saved = null
+        connecting.set(null)
     }
 }

@@ -159,7 +159,7 @@ class SubsonicClient internal constructor(
                 } catch (e: SerializationException) {
                     throw SubsonicException(null, "Unexpected response from server", e)
                 } catch (e: IOException) {
-                    if (attempt >= MAX_ATTEMPTS) throw SubsonicException(null, "Could not reach server", e)
+                    transportFailure(e, attempt)?.let { throw it }
                     null
                 }
             if (envelope != null) return unwrap(envelope)
@@ -240,3 +240,17 @@ private fun isTransient(e: HttpException): Boolean = e.code() == HTTP_TOO_MANY_R
 
 private const val HTTP_TOO_MANY_REQUESTS = 429
 private const val HTTP_SERVER_ERROR = 500
+
+/**
+ * The failure to report for a transport error on [attempt], or null to try again. A blocked local network stays blocked
+ * until the user allows it (#124), so it is reported at once and not retried.
+ */
+private fun transportFailure(
+    e: IOException,
+    attempt: Int,
+): SubsonicException? =
+    when {
+        e.localNetworkBlock() != null -> SubsonicException(null, LocalNetworkBlockedException.MESSAGE, e)
+        attempt >= SubsonicClient.MAX_ATTEMPTS -> SubsonicException(null, "Could not reach server", e)
+        else -> null
+    }

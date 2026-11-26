@@ -74,10 +74,11 @@ internal object CleartextPolicy {
 
     /**
      * Applies the transport rules to [builder]: this policy, no redirects across schemes (an https to http redirect
-     * would downgrade the connection), and the certificate pins of private servers ([LanTls]).
+     * would downgrade the connection), the certificate pins of private servers ([LanTls]), and Android 17's local
+     * network permission ([LocalNetworkAccess]).
      */
     fun configure(builder: OkHttpClient.Builder): OkHttpClient.Builder =
-        LanTls.configure(builder)
+        LocalNetworkAccess.configure(LanTls.configure(builder))
             .addInterceptor(interceptor)
             .addNetworkInterceptor(interceptor)
             .followSslRedirects(false)

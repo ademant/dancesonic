@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -191,6 +190,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
     val allowCleartext by vm.allowCleartext.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val localNetwork = rememberLocalNetworkRequest()
     var method by rememberSaveable { mutableStateOf(ConnectMethod.Qr) }
     var address by rememberSaveable { mutableStateOf("https://") }
     var username by rememberSaveable { mutableStateOf("") }
@@ -222,7 +222,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Button(
-                    onClick = { scope.launch { vm.scanAndConnect(context) } },
+                    onClick = { scope.launch { vm.scanAndConnect(context, localNetwork) } },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Scan pairing code") }
@@ -253,8 +253,12 @@ fun ConnectScreen(vm: ConnectViewModel) {
                 )
                 Button(
                     onClick = {
-                        vm.signInWithPassword(address, username, password)
+                        val typed = password
                         password = ""
+                        scope.launch {
+                            localNetwork.ensureFor(typedServer(address, allowCleartext))
+                            vm.signInWithPassword(address, username, typed)
+                        }
                     },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -278,8 +282,12 @@ fun ConnectScreen(vm: ConnectViewModel) {
                 )
                 Button(
                     onClick = {
-                        vm.connectWithApiKey(address, apiKey)
+                        val typed = apiKey
                         apiKey = ""
+                        scope.launch {
+                            localNetwork.ensureFor(typedServer(address, allowCleartext))
+                            vm.connectWithApiKey(address, typed)
+                        }
                     },
                     enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
@@ -289,13 +297,7 @@ fun ConnectScreen(vm: ConnectViewModel) {
 
         CleartextOptIn(allowCleartext, vm::setAllowCleartext)
 
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-
-        state.status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        PairingVerification(state.verificationCode, vm.verifier::answer)
-        if (state.busy) {
-            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-        }
+        ConnectFeedback(state, vm, localNetwork)
     }
 }
 
