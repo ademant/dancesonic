@@ -34,6 +34,11 @@ class StudioViewModel(
         container.studioPairings.pairings
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /** The Studio last chosen with "Play on", kept across restarts; the phone does not reconnect to it by itself. */
+    val lastActive: StateFlow<String?> =
+        container.studioPairings.lastActive
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private val _state = MutableStateFlow(StudioUiState())
     val state: StateFlow<StudioUiState> = _state.asStateFlow()
 
@@ -125,6 +130,7 @@ class StudioViewModel(
                 container.player.ensureConnected()
                 val opened = container.studioRemote.connect(record)
                 if (container.playOn.playOnStudio(opened)) {
+                    container.studioPairings.setLastActive(record.id)
                     val via = transportLabel(opened.transport)
                     _state.value = StudioUiState(message = "Playing on ${record.name} ($via).")
                 } else {
@@ -142,11 +148,27 @@ class StudioViewModel(
     /** Puts playback back on this phone. The Studio keeps playing. */
     fun playOnPhone() {
         container.playOn.playOnPhone()
+        viewModelScope.launch { container.studioPairings.setLastActive(null) }
         _state.value = StudioUiState(message = "Playing on this phone.")
+    }
+
+    /** Renames a pairing on this phone. The name is the phone's own; Studio is not told. Blank names are refused. */
+    fun rename(
+        record: StudioPairing,
+        name: String,
+    ) {
+        val clean = studioName(name)
+        if (clean == null) {
+            _state.value = StudioUiState(error = "Enter a name for the Studio.")
+            return
+        }
+        viewModelScope.launch { container.studioPairings.rename(record.id, clean) }
     }
 
     /** Removes a pairing and its device key on this phone. Studio keeps the phone listed until it is revoked there. */
     fun forget(record: StudioPairing) {
+        // Its key is about to go: playback on it returns to the phone first. The Studio keeps playing.
+        if ((target.value as? PlayOnTarget.Target.Studio)?.pairingId == record.id) container.playOn.playOnPhone()
         viewModelScope.launch { container.studioRemote.forget(record) }
     }
 
@@ -183,3 +205,15 @@ class StudioViewModel(
             StudioUnavailable.Reason.FAILED -> "Could not reach Studio."
         }
 }
+
+/** Longest name kept for a pairing; longer ones are cut. */
+internal const val MAX_STUDIO_NAME = 60
+
+/** [name] trimmed and cut to [MAX_STUDIO_NAME], or null when nothing is left. Control characters are dropped. */
+internal fun studioName(name: String): String? =
+    name
+        .filterNot { it.isISOControl() }
+        .trim()
+        .take(MAX_STUDIO_NAME)
+        .trim()
+        .takeIf { it.isNotEmpty() }

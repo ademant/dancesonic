@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +43,7 @@ internal fun StudioSection(vm: StudioViewModel) {
     val pairings by vm.pairings.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val target by vm.target.collectAsStateWithLifecycle()
+    val lastActive by vm.lastActive.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -85,17 +85,7 @@ internal fun StudioSection(vm: StudioViewModel) {
         if (pairings.isEmpty()) {
             Text("No Studio is paired.", style = MaterialTheme.typography.bodySmall)
         }
-        pairings.forEach { record ->
-            val active = studioTarget?.pairingId == record.id
-            StudioRow(
-                record = record,
-                busy = state.busy,
-                active = active,
-                onPlayOn = { withBluetooth { vm.playOn(record) } },
-                onCheck = { withBluetooth { vm.check(record) } },
-                onForget = { vm.forget(record) },
-            )
-        }
+        PairingList(pairings, studioTarget?.pairingId, lastActive, state.busy, vm, withBluetooth)
         Button(
             onClick = {
                 withBluetooth {
@@ -121,29 +111,36 @@ internal fun StudioSection(vm: StudioViewModel) {
     }
 }
 
-@Suppress("LongParameterList")
+/** The paired Studios, each with its role: playing now, last played on, or neither. */
+@Suppress("LongParameterList") // the list's state and the view model's actions, passed straight to each row
 @Composable
-private fun StudioRow(
-    record: StudioPairing,
+private fun PairingList(
+    pairings: List<StudioPairing>,
+    playingId: String?,
+    lastActive: String?,
     busy: Boolean,
-    active: Boolean,
-    onPlayOn: () -> Unit,
-    onCheck: () -> Unit,
-    onForget: () -> Unit,
+    vm: StudioViewModel,
+    withBluetooth: (() -> Unit) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(if (active) "${record.name} (playing)" else record.name, style = MaterialTheme.typography.titleSmall)
-        if (record.phoneNoiseSealed == null) {
-            Text(
-                "Paired before Bluetooth and folksonic were supported: forget it and pair again to use them.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onPlayOn, enabled = !busy && !active) { Text("Play on") }
-            OutlinedButton(onClick = onCheck, enabled = !busy) { Text("Check") }
-            TextButton(onClick = onForget, enabled = !busy) { Text("Forget") }
-        }
+    pairings.forEach { record ->
+        val role =
+            when (record.id) {
+                playingId -> StudioRowRole.Playing
+                lastActive -> StudioRowRole.LastUsed
+                else -> StudioRowRole.Other
+            }
+        StudioPairingRow(
+            record = record,
+            role = role,
+            busy = busy,
+            actions =
+                StudioRowActions(
+                    onPlayOn = { withBluetooth { vm.playOn(record) } },
+                    onCheck = { withBluetooth { vm.check(record) } },
+                    onRename = { name -> vm.rename(record, name) },
+                    onForget = { vm.forget(record) },
+                ),
+        )
     }
 }
 
