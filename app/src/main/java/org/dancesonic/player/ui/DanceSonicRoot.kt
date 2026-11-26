@@ -219,8 +219,9 @@ private fun ConnectForm(
     var method by rememberSaveable { mutableStateOf(ConnectMethod.Qr) }
     var address by rememberSaveable { mutableStateOf("https://") }
     var username by rememberSaveable { mutableStateOf("") }
-    // Secrets are plain remember, not saved: they never reach the saved-instance state, and they are cleared
-    // after each attempt. Leaving the screen drops them too.
+    // Secrets are plain remember, not saved: they never reach the saved-instance state, and they are cleared once
+    // an attempt sends them. An attempt refused before anything is sent keeps them, so they need not be typed again.
+    // Leaving the screen drops them too.
     var password by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
 
@@ -233,14 +234,10 @@ private fun ConnectForm(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Connect to your server", style = MaterialTheme.typography.headlineSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ConnectMethod.entries.forEach { entry ->
-                FilterChip(
-                    selected = method == entry,
-                    onClick = { method = entry },
-                    label = { Text(entry.label) },
-                )
-            }
+        ConnectMethodChips(method) { entry ->
+            // The last attempt's error belongs to the way it was made, not to the one now shown.
+            if (method != entry) vm.clearError()
+            method = entry
         }
 
         when (method) {
@@ -283,10 +280,9 @@ private fun ConnectForm(
                 Button(
                     onClick = {
                         val typed = password
-                        password = ""
                         scope.launch {
                             localNetwork.ensureFor(typedServer(address, allowCleartext))
-                            vm.signInWithPassword(address, username, typed)
+                            if (vm.signInWithPassword(address, username, typed)) password = ""
                         }
                     },
                     enabled = !state.busy,
@@ -312,10 +308,9 @@ private fun ConnectForm(
                 Button(
                     onClick = {
                         val typed = apiKey
-                        apiKey = ""
                         scope.launch {
                             localNetwork.ensureFor(typedServer(address, allowCleartext))
-                            vm.connectWithApiKey(address, typed)
+                            if (vm.connectWithApiKey(address, typed)) apiKey = ""
                         }
                     },
                     enabled = !state.busy,
@@ -327,6 +322,23 @@ private fun ConnectForm(
         CleartextOptIn(allowCleartext, vm::setAllowCleartext)
 
         ConnectFeedback(state, vm, localNetwork)
+    }
+}
+
+/** The ways to connect, one chip each, with [method] selected. */
+@Composable
+private fun ConnectMethodChips(
+    method: ConnectMethod,
+    onSelect: (ConnectMethod) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ConnectMethod.entries.forEach { entry ->
+            FilterChip(
+                selected = method == entry,
+                onClick = { onSelect(entry) },
+                label = { Text(entry.label) },
+            )
+        }
     }
 }
 

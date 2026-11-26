@@ -129,6 +129,7 @@ private suspend fun upgradeKeyHeader(
  * (exchanged for an API key), or an API key typed in. Every path ends with the same check and
  * only the API key is stored.
  */
+@Suppress("TooManyFunctions") // One entry point per way to connect, plus sync and disconnect, for one screen.
 class ConnectViewModel(
     private val container: AppContainer,
     private val account: AccountClient = AccountClient(),
@@ -194,23 +195,34 @@ class ConnectViewModel(
     val replaceCheck: ReplaceCheck =
         ReplaceCheck(show = { change -> _state.update { it.copy(replacement = change) } })
 
+    /**
+     * Clears the error of the last attempt, such as when the user switches to another way of connecting, where it
+     * would no longer apply. A running attempt is left alone: its outcome is still to come.
+     */
+    fun clearError() {
+        _state.update { if (it.busy) it else it.copy(error = null, localNetworkBlocked = false) }
+    }
+
     /** Shows an error that happened outside the ViewModel, such as a failed scanner launch. */
     fun reportError(message: String) {
         _state.value = ConnectUiState(error = message)
     }
 
-    /** Connects with a server address and an API key typed by the user. */
+    /**
+     * Connects with a server address and an API key typed by the user. Returns false when the input is refused before
+     * anything is sent, such as a missing key or a plain http address, so the screen can keep the typed key.
+     */
     fun connectWithApiKey(
         address: String,
         apiKey: String,
-    ) {
+    ): Boolean {
         val key = apiKey.trim()
         if (key.isBlank()) {
             _state.value = ConnectUiState(error = "Enter an API key.")
-            return
+            return false
         }
         val allowCleartext = _allowCleartext.value
-        withAddress(address) { url ->
+        return withAddress(address) { url ->
             ServerSettings(
                 url,
                 key,
@@ -219,18 +231,21 @@ class ConnectViewModel(
         }
     }
 
-    /** Signs in with a username and password, then keeps only the API key the server issues. */
+    /**
+     * Signs in with a username and password, then keeps only the API key the server issues. Returns false when the
+     * input is refused before anything is sent, so the screen can keep the typed password.
+     */
     fun signInWithPassword(
         address: String,
         username: String,
         password: String,
-    ) {
+    ): Boolean {
         if (username.isBlank() || password.isEmpty()) {
             _state.value = ConnectUiState(error = "Enter your username and password.")
-            return
+            return false
         }
         val allowCleartext = _allowCleartext.value
-        withAddress(address) { url ->
+        return withAddress(address) { url ->
             // The certificate is checked before the password is sent, so a self-signed server is pinned first.
             val pin = trustedPin(url, null, certificateCheck::await)
             val session = account.login(url, username.trim(), password)
@@ -352,35 +367,37 @@ class ConnectViewModel(
         }
     }
 
+    /** Starts a connect to the typed [address]; false when the address is refused and nothing was started. */
     private fun withAddress(
         address: String,
         build: suspend (HttpUrl) -> ServerSettings,
-    ) {
+    ): Boolean {
         val url =
             try {
                 ServerUrl.parse(address, _allowCleartext.value)
             } catch (e: IllegalArgumentException) {
                 _state.value = ConnectUiState(error = e.message)
-                return
+                return false
             }
-        runConnect(url) { build(url) }
+        return runConnect(url) { build(url) }
     }
 
     /**
      * Runs [obtain] to get settings, verifies them against the server, stores them and starts the
      * first sync. The sync uses the verified settings directly, because the in-memory copy in the
      * app container is updated asynchronously from the store. Nothing is stored or cleared until the
-     * check passes, so a failed attempt leaves the current connection untouched.
+     * check passes, so a failed attempt leaves the current connection untouched. Returns false when nothing was
+     * started because the app may not reach the server.
      */
     private fun runConnect(
         server: HttpUrl,
         danceBrainz: HttpUrl? = null,
         obtain: suspend () -> ServerSettings,
-    ) {
+    ): Boolean {
         if (LocalNetworkAccess.needsPermission(server) && !LocalNetworkAccess.allowed()) {
             // Nothing is sent: Android would block the connection, and it would only time out (#124).
             _state.value = ConnectUiState(error = LocalNetworkBlockedException.MESSAGE, localNetworkBlocked = true)
-            return
+            return false
         }
         // The address passed ServerUrl.parse with this opt-in; the policy checks it again (#140).
         val optIn = _allowCleartext.value
@@ -420,6 +437,7 @@ class ConnectViewModel(
                 LanPins.endSetup()
             }
         }
+        return true
     }
 
     /** What [verifyAndStore] stored, and anything the user should know about it. */

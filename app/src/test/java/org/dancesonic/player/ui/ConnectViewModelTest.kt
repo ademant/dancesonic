@@ -81,6 +81,38 @@ class ConnectViewModelTest {
     }
 
     @Test
+    fun `an attempt refused before anything is sent says so, so the screen keeps the typed secret`() {
+        val vm = host.create { ConnectViewModel(container) }
+
+        assertFalse(vm.connectWithApiKey("https://music.example.com", "   "))
+        assertFalse(vm.connectWithApiKey("http://music.example.com", "key-123"))
+        assertFalse(vm.signInWithPassword("https://music.example.com", "", "secret"))
+        assertFalse(vm.signInWithPassword("http://music.example.com", "ada", "secret"))
+    }
+
+    @Test
+    fun `switching the way to connect clears the last error`() {
+        val vm = host.create { ConnectViewModel(container) }
+        vm.connectWithApiKey("https://music.example.com", "   ")
+
+        vm.clearError()
+
+        assertNull(vm.state.value.error)
+    }
+
+    @Test
+    fun `clearing the error also clears the local network block it came with`() {
+        LocalNetworkAccess.install { false }
+        val vm = host.create { ConnectViewModel(container) }
+        vm.connectWithApiKey("https://192.168.1.5:4533", "key-123")
+
+        vm.clearError()
+
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.localNetworkBlocked)
+    }
+
+    @Test
     fun `scanned connection code over plain http is rejected before any network call`() {
         val vm = host.create { ConnectViewModel(container) }
 
@@ -133,7 +165,7 @@ class ConnectViewModelTest {
         LocalNetworkAccess.install { false }
         val vm = host.create { ConnectViewModel(container) }
 
-        vm.connectWithApiKey("https://192.168.1.5:4533", "key-123")
+        assertFalse(vm.connectWithApiKey("https://192.168.1.5:4533", "key-123"))
 
         assertEquals(LocalNetworkBlockedException.MESSAGE, vm.state.value.error)
         assertTrue(vm.state.value.localNetworkBlocked)
