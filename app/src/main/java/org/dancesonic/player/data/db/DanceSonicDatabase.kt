@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -23,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         OnsetsEntity::class,
         ScrobbleQueueEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 abstract class DanceSonicDatabase : RoomDatabase() {
@@ -55,7 +54,8 @@ abstract class DanceSonicDatabase : RoomDatabase() {
 
     companion object {
         fun create(context: Context): DanceSonicDatabase =
-            Room.databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
+            Room
+                .databaseBuilder(context, DanceSonicDatabase::class.java, "dancesonic.db")
                 .addMigrations(
                     MIGRATION_1_2,
                     MIGRATION_2_3,
@@ -71,15 +71,9 @@ abstract class DanceSonicDatabase : RoomDatabase() {
                     MIGRATION_12_13,
                     MIGRATION_13_14,
                     MIGRATION_14_15,
-                )
-                .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-                .addCallback(
-                    object : RoomDatabase.Callback() {
-                        override fun onOpen(db: SupportSQLiteDatabase) {
-                            db.execSQL("PRAGMA foreign_keys = ON")
-                        }
-                    },
-                )
+                    MIGRATION_15_16,
+                ).setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                // Room turns foreign keys on itself, because the schema declares some (#127).
                 // No fallbackToDestructiveMigration: playlists and cached metadata must survive upgrades.
                 .build()
     }

@@ -34,7 +34,7 @@ class AnalysisClientTest {
     @Test
     fun `a stored waveform is returned with its peaks`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(waveformBody("[0,10,255]")))
+            server.enqueue(MockResponse().setBody(waveformBody("[0,10,255]")))
 
             val answer = client.fetch("song-1")
 
@@ -45,7 +45,7 @@ class AnalysisClientTest {
     @Test
     fun `the key is sent in the header and never in the URL`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(waveformBody("[1]")))
+            server.enqueue(MockResponse().setBody(waveformBody("[1]")))
 
             client.fetch("song-1")
 
@@ -59,8 +59,10 @@ class AnalysisClientTest {
     @Test
     fun `a pending answer keeps the waveform it already has`() =
         runBlocking {
-            server.server.enqueue(
-                MockResponse().setResponseCode(202).setHeader("Retry-After", "45")
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(202)
+                    .setHeader("Retry-After", "45")
                     .setBody(waveformBody("[5,6]")),
             )
 
@@ -72,7 +74,7 @@ class AnalysisClientTest {
     @Test
     fun `a pending answer without a waveform asks to wait for the server's time`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setResponseCode(202).setHeader("Retry-After", "45").setBody("{}"))
+            server.enqueue(MockResponse().setResponseCode(202).setHeader("Retry-After", "45").setBody("{}"))
 
             val answer = client.fetch("song-1")
 
@@ -83,7 +85,7 @@ class AnalysisClientTest {
     @Test
     fun `a pending answer without a Retry-After header waits the default time`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setResponseCode(202).setBody("{}"))
+            server.enqueue(MockResponse().setResponseCode(202).setBody("{}"))
 
             assertEquals(30, client.fetch("song-1").retryAfterSeconds)
         }
@@ -91,7 +93,7 @@ class AnalysisClientTest {
     @Test
     fun `an unknown song gives nothing and no wait`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+            server.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
 
             val answer = client.fetch("missing")
 
@@ -102,7 +104,7 @@ class AnalysisClientTest {
     @Test
     fun `a song with no waveform yet and no pending work gives nothing`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody("""{"id":"song-1","waveform":null}"""))
+            server.enqueue(MockResponse().setBody("""{"id":"song-1","waveform":null}"""))
 
             val answer = client.fetch("song-1")
 
@@ -113,7 +115,7 @@ class AnalysisClientTest {
     @Test
     fun `peaks outside the byte range are clamped`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(waveformBody("[-3,300]")))
+            server.enqueue(MockResponse().setBody(waveformBody("[-3,300]")))
 
             assertEquals(listOf(0, 255), client.fetch("song-1").peaks)
         }
@@ -121,7 +123,7 @@ class AnalysisClientTest {
     @Test
     fun `onsets are read sorted by time, with strengths clamped and negative times dropped`() =
         runBlocking {
-            server.server.enqueue(
+            server.enqueue(
                 MockResponse().setBody(
                     """{"id":"song-1","waveform":{"bins":1,"peaks":[1]},""" +
                         """"onsets":{"timesMs":[900,-5,40],"strengths":[300,7,-1]}}""",
@@ -137,7 +139,7 @@ class AnalysisClientTest {
     @Test
     fun `an older server without onsets gives none and still the waveform`() =
         runBlocking {
-            server.server.enqueue(MockResponse().setBody(waveformBody("[1,2]")))
+            server.enqueue(MockResponse().setBody(waveformBody("[1,2]")))
 
             val answer = client.fetch("song-1")
 
@@ -148,7 +150,7 @@ class AnalysisClientTest {
     @Test
     fun `onsets whose lists differ in length are dropped`() =
         runBlocking {
-            server.server.enqueue(
+            server.enqueue(
                 MockResponse().setBody("""{"id":"song-1","onsets":{"timesMs":[10,20],"strengths":[5]}}"""),
             )
 
@@ -157,7 +159,7 @@ class AnalysisClientTest {
 
     @Test
     fun `a server error is reported with its status`() {
-        server.server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
 
         val error =
             assertThrows(SubsonicException::class.java) {

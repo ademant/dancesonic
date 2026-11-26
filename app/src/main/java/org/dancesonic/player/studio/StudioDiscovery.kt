@@ -20,7 +20,9 @@ import kotlin.coroutines.resume
  * Finds a paired Studio on the local network (`_dancesonic._tcp`) by the tag of its fingerprint. The phone keeps no
  * address; it looks Studio up each time. The tag only selects an instance: the connection checks the fingerprint.
  */
-class StudioDiscovery(private val context: Context) {
+class StudioDiscovery(
+    private val context: Context,
+) {
     private val resolving = Mutex()
 
     /**
@@ -37,7 +39,10 @@ class StudioDiscovery(private val context: Context) {
         }
     }
 
-    private data class Found(val tag: String?, val url: HttpUrl?)
+    private data class Found(
+        val tag: String?,
+        val url: HttpUrl?,
+    )
 
     /** Each service found, one at a time: the platform resolves only one name at once. */
     private fun services() =
@@ -101,7 +106,15 @@ class StudioDiscovery(private val context: Context) {
                     override fun onServiceResolved(resolved: NsdServiceInfo) {
                         val tag = resolved.attributes["fp"]?.toString(Charsets.UTF_8)
                         val host = resolved.host?.hostAddress?.substringBefore('%')
-                        val url = host?.let { HttpUrl.Builder().scheme("https").host(it).port(resolved.port).build() }
+                        val url =
+                            host?.let {
+                                HttpUrl
+                                    .Builder()
+                                    .scheme("https")
+                                    .host(it)
+                                    .port(resolved.port)
+                                    .build()
+                            }
                         cont.resume(Found(tag, url))
                     }
                 },

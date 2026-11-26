@@ -25,10 +25,12 @@ class RefreshTrackTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L })
         server.enqueueJson(ARTISTS)

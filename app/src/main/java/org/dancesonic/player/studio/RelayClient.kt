@@ -22,6 +22,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import org.dancesonic.player.subsonic.Memo
 import org.dancesonic.player.subsonic.ServerAuth
 import org.dancesonic.player.subsonic.ServerSettings
 import java.io.IOException
@@ -80,10 +81,16 @@ private class RelayDeviceDto(
 )
 
 @Serializable
-private class RelayDevicesDto(val devices: List<RelayDeviceDto>? = null)
+private class RelayDevicesDto(
+    val devices: List<RelayDeviceDto>? = null,
+)
 
 @Serializable
-private class RelayRecordBody(val kind: String, val name: String, val publicKey: String)
+private class RelayRecordBody(
+    val kind: String,
+    val name: String,
+    val publicKey: String,
+)
 
 /**
  * folksonic's device relay (ademant/folksonic#159): the account's device records and the WebSocket that carries
@@ -106,7 +113,14 @@ class RelayClient(
                     val id = device.id?.takeIf { device.kind == "studio" && RelayWire.validDeviceId(it) }
                     val record = device.publicKey?.let(StudioRecord::parse)
                     if (id == null || record == null) return@mapNotNull null
-                    RelayStudio(id, device.name.orEmpty().take(MAX_NAME).ifBlank { "Studio" }, record)
+                    RelayStudio(
+                        id,
+                        device.name
+                            .orEmpty()
+                            .take(MAX_NAME)
+                            .ifBlank { "Studio" },
+                        record,
+                    )
                 }
             }
         }
@@ -148,7 +162,7 @@ class RelayClient(
     ): RelayPipe {
         val url = relayUrl("api/relay/connect").newBuilder().addQueryParameter("device", phoneId).build()
         val pipe = OkHttpRelayPipe(studioId)
-        val socket = socketClient().newWebSocket(authorized(url).get().build(), pipe.listener)
+        val socket = socketClient.newWebSocket(authorized(url).get().build(), pipe.listener)
         pipe.socket = socket
         var open = false
         try {
@@ -162,16 +176,16 @@ class RelayClient(
         return pipe
     }
 
-    private fun socketClient(): OkHttpClient =
-        client.newBuilder()
-            // folksonic drops a connection after 60 seconds of silence; pings keep it open between commands.
-            .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)
-            .build()
+    /** The client for the relay socket: no read timeout, and pings to keep the socket open. Built once (#134). */
+    private val socketClient: OkHttpClient get() = socketClients[client]
 
     private fun devicesUrl(): HttpUrl = relayUrl("api/relay/devices")
 
-    private fun relayUrl(path: String): HttpUrl = settings.baseUrl.newBuilder().addPathSegments(path).build()
+    private fun relayUrl(path: String): HttpUrl =
+        settings.baseUrl
+            .newBuilder()
+            .addPathSegments(path)
+            .build()
 
     private fun authorized(url: HttpUrl): Request.Builder {
         val builder = Request.Builder().url(url)
@@ -188,6 +202,17 @@ class RelayClient(
     }
 
     companion object {
+        /** Socket clients by the client they derive from; a RelayClient is made per use, the socket client is not. */
+        private val socketClients =
+            Memo<OkHttpClient, OkHttpClient>(2) { client ->
+                client
+                    .newBuilder()
+                    // folksonic drops a connection after 60 seconds of silence; pings keep it open between commands.
+                    .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.SECONDS)
+                    .build()
+            }
+
         /** Whether [settings] is a server whose relay the phone may use: folksonic, by key in a header or a device. */
         fun usable(settings: ServerSettings): Boolean = settings.auth is ServerAuth.Device || settings.keyInHeader
 
@@ -208,7 +233,9 @@ class RelayClient(
 }
 
 /** A [RelayPipe] on an OkHttp WebSocket. Frames from any device but [studioId] are dropped. */
-private class OkHttpRelayPipe(private val studioId: String) : RelayPipe {
+private class OkHttpRelayPipe(
+    private val studioId: String,
+) : RelayPipe {
     @Volatile var socket: WebSocket? = null
     val opened = CompletableDeferred<Unit>()
     override val incoming = Channel<ByteArray>(INBOX)
@@ -237,7 +264,14 @@ private class OkHttpRelayPipe(private val studioId: String) : RelayPipe {
                 text: String,
             ) {
                 // `{"type":"undelivered","to":…}`: Studio is not connected, so the session cannot go on.
-                val type = runCatching { Json.parseToJsonElement(text).jsonObject["type"]?.jsonPrimitive?.content }
+                val type =
+                    runCatching {
+                        Json
+                            .parseToJsonElement(text)
+                            .jsonObject["type"]
+                            ?.jsonPrimitive
+                            ?.content
+                    }
                 if (type.getOrNull() == "undelivered") {
                     incoming.close(IOException("Studio is not connected to the relay"))
                     webSocket.close(NORMAL_CLOSURE, null)

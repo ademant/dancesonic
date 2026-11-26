@@ -187,8 +187,10 @@ val MIGRATION_12_13 =
 val MIGRATION_13_14 =
     object : Migration(FROM_13, TO_14) {
         override fun migrate(db: SupportSQLiteDatabase) {
+            // A copy left by an attempt that stopped before the rename would make the copy below fail (#138).
+            db.execSQL("DROP TABLE IF EXISTS `dance_lookup_new`")
             db.execSQL(
-                "CREATE TABLE IF NOT EXISTS `dance_lookup_new` " +
+                "CREATE TABLE `dance_lookup_new` " +
                     "(`mbid` TEXT NOT NULL, `checkedAt` INTEGER NOT NULL, `chaptersVersion` TEXT, " +
                     "`meter` TEXT, `subMeter` TEXT, PRIMARY KEY(`mbid`))",
             )
@@ -223,3 +225,19 @@ val MIGRATION_14_15 =
 
 private const val FROM_14 = 14
 private const val TO_15 = 15
+
+/**
+ * Indexes `dance_metadata.danceType` (#138). The Dance view filters and counts by dance type, which was a full scan:
+ * the primary key starts with the MBID. Existing data is untouched.
+ */
+val MIGRATION_15_16 =
+    object : Migration(FROM_15, TO_16) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_dance_metadata_danceType` ON `dance_metadata` (`danceType`)",
+            )
+        }
+    }
+
+private const val FROM_15 = 15
+private const val TO_16 = 16

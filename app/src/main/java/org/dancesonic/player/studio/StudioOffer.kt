@@ -43,9 +43,13 @@ data class StudioOffer(
 
     /** The outcome of [parse]: the offer, or the reason it was refused. */
     sealed interface ParseResult {
-        data class Ok(val offer: StudioOffer) : ParseResult
+        data class Ok(
+            val offer: StudioOffer,
+        ) : ParseResult
 
-        data class Refused(val problem: Problem) : ParseResult
+        data class Refused(
+            val problem: Problem,
+        ) : ParseResult
     }
 
     companion object {

@@ -153,7 +153,7 @@ class RelayClientTest {
                         webSocket.send("""{"type":"undelivered","to":"$studioId"}""")
                     }
                 }
-            server.server.enqueue(MockResponse().withWebSocketUpgrade(studioSide))
+            server.enqueue(MockResponse().withWebSocketUpgrade(studioSide))
 
             val pipe = relay.open("phone-xyz", studioId)
             val first = withTimeout(5_000) { pipe.incoming.receive() }

@@ -19,7 +19,10 @@ import java.security.SecureRandom
 internal const val NOISE_PROTOCOL_NAME = "Noise_XX_25519_ChaChaPoly_BLAKE2s"
 
 /** A Curve25519 key pair. [privateKey] is the 32-byte scalar; [publicKey] the 32-byte u-coordinate. */
-class NoiseKeyPair(val privateKey: ByteArray, val publicKey: ByteArray) {
+class NoiseKeyPair(
+    val privateKey: ByteArray,
+    val publicKey: ByteArray,
+) {
     companion object {
         /** A fresh key pair. */
         fun generate(random: SecureRandom = SecureRandom()): NoiseKeyPair {
@@ -39,7 +42,10 @@ class NoiseKeyPair(val privateKey: ByteArray, val publicKey: ByteArray) {
 }
 
 /** Why a Noise message could not be read: wrong length, a bad tag, or a key that is not valid. */
-class NoiseException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class NoiseException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
 
 /** The transport ciphers after the handshake: [send] for messages the local side writes, [receive] for the peer's. */
 class NoiseTransport internal constructor(
@@ -163,7 +169,9 @@ class NoiseXxResponder(
     val handshakeHash: ByteArray get() = state.handshakeHash()
 }
 
-internal class CipherState(private var key: ByteArray?) {
+internal class CipherState(
+    private var key: ByteArray?,
+) {
     private var nonce = 0L
 
     fun encrypt(
@@ -262,7 +270,9 @@ private class SymmetricState {
 }
 
 /** The handshake state shared by both roles: the symmetric state and the pre-message prologue. */
-private class HandshakeState(prologue: ByteArray) {
+private class HandshakeState(
+    prologue: ByteArray,
+) {
     private val symmetric = SymmetricState()
 
     init {

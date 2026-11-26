@@ -34,7 +34,13 @@ class FolksonicFeedTest {
 
             assertEquals(2, info.artists)
             assertEquals("2026-11-03T12:00:00Z", info.lastModified)
-            assertEquals("/rest/tinysonicLibraryInfo.view", fake.server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals(
+                "/rest/tinysonicLibraryInfo.view",
+                fake.server
+                    .takeRequest()
+                    .requestUrl!!
+                    .encodedPath,
+            )
         }
 
     @Test
@@ -69,7 +75,12 @@ class FolksonicFeedTest {
             val changes = client.libraryChanges(since = null)
 
             assertTrue(changes.full)
-            assertNull(fake.server.takeRequest().requestUrl!!.queryParameter("since"))
+            assertNull(
+                fake.server
+                    .takeRequest()
+                    .requestUrl!!
+                    .queryParameter("since"),
+            )
         }
 
     @Test

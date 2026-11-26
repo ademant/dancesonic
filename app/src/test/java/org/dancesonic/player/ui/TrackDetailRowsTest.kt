@@ -45,7 +45,11 @@ class TrackDetailRowsTest {
         composeRule.setContent { TrackDetailRows(entries = entries, actions = actions) }
     }
 
-    private fun topOf(text: String): Float = composeRule.onNodeWithText(text).fetchSemanticsNode().positionInRoot.y
+    private fun topOf(text: String): Float =
+        composeRule
+            .onNodeWithText(text)
+            .fetchSemanticsNode()
+            .positionInRoot.y
 
     @Test
     fun `the rows come in the order dance, meter, description, shoes`() {

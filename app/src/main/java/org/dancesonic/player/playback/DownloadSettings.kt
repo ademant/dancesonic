@@ -14,7 +14,9 @@ data class DownloadSettings(
 )
 
 /** Reads and writes [DownloadSettings] in DataStore. */
-class DownloadSettingsStore(private val dataStore: DataStore<Preferences>) {
+class DownloadSettingsStore(
+    private val dataStore: DataStore<Preferences>,
+) {
     val settings: Flow<DownloadSettings> =
         dataStore.data.map { prefs ->
             DownloadSettings(allowMobileData = prefs[ALLOW_MOBILE_DATA] ?: false)

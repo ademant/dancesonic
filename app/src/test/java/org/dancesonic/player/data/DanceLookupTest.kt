@@ -30,10 +30,12 @@ class DanceLookupTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         source = CountingSource()
         repo = LibraryRepository(db, source, clock = { now })

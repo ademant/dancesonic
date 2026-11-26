@@ -16,7 +16,7 @@ class DanceBrainzClientTest {
     @Test
     fun `sends one anonymous batch request with the recording ids`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(EMPTY_ANSWER))
+            server.enqueue(json(EMPTY_ANSWER))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             runBlocking { client.lookup(listOf(MBID)) }
@@ -33,7 +33,7 @@ class DanceBrainzClientTest {
     @Test
     fun `keeps only dance tags`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(ANSWER_WITH_TAGS))
+            server.enqueue(json(ANSWER_WITH_TAGS))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
@@ -45,7 +45,7 @@ class DanceBrainzClientTest {
     @Test
     fun `an untagged recording has no dance types`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(EMPTY_ANSWER))
+            server.enqueue(json(EMPTY_ANSWER))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
@@ -57,7 +57,7 @@ class DanceBrainzClientTest {
     @Test
     fun `an answer without bpm and raters is read as before (#82)`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(ANSWER_WITHOUT_TEMPO))
+            server.enqueue(json(ANSWER_WITHOUT_TEMPO))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val answer = runBlocking { client.lookup(listOf(MBID)) }[MBID]
@@ -69,7 +69,7 @@ class DanceBrainzClientTest {
     @Test
     fun `a recording missing from the answer is absent`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json(EMPTY_ANSWER))
+            server.enqueue(json(EMPTY_ANSWER))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val answers = runBlocking { client.lookup(listOf("other-mbid")) }
@@ -81,7 +81,7 @@ class DanceBrainzClientTest {
     @Test
     fun `a rate-limited batch throws so the caller can count it`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "2"))
+            server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "2"))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             assertThrows(HttpException::class.java) {
@@ -93,7 +93,7 @@ class DanceBrainzClientTest {
     @Test
     fun `a malformed answer throws`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("not json"))
+            server.enqueue(json("not json"))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             assertThrows(Exception::class.java) {
@@ -118,19 +118,25 @@ class DanceBrainzClientTest {
     @Test
     fun `a DanceBrainz server passes the check`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"build_time":"x","service":"dancebrainz","version":"c6a8a6c"}"""))
+            server.enqueue(json("""{"build_time":"x","service":"dancebrainz","version":"c6a8a6c"}"""))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             runBlocking { client.checkServer() }
 
-            assertEquals("/api/v1/", server.server.takeRequest().requestUrl?.encodedPath)
+            assertEquals(
+                "/api/v1/",
+                server.server
+                    .takeRequest()
+                    .requestUrl
+                    ?.encodedPath,
+            )
         }
     }
 
     @Test
     fun `another service at the address fails the check`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"service":"navidrome"}"""))
+            server.enqueue(json("""{"service":"navidrome"}"""))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val error = assertThrows(DanceBrainzException::class.java) { runBlocking { client.checkServer() } }
@@ -142,7 +148,7 @@ class DanceBrainzClientTest {
     @Test
     fun `an unreachable or failing server fails the check with a message for the user`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(500))
+            server.enqueue(MockResponse().setResponseCode(500))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val error = assertThrows(DanceBrainzException::class.java) { runBlocking { client.checkServer() } }

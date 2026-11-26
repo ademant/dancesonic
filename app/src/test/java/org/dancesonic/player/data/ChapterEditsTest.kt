@@ -32,10 +32,12 @@ class ChapterEditsTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
     }
 
@@ -49,15 +51,20 @@ class ChapterEditsTest {
         ChapterEdits(
             database = db,
             tokens = tokenStoreFor(if (signedIn) "dbz_viewer_token_1234567890" else null),
-            baseUrl = { server.server.url("/").toString().toHttpUrl() },
+            baseUrl = {
+                server.server
+                    .url("/")
+                    .toString()
+                    .toHttpUrl()
+            },
             newClient = { DanceBrainzChaptersClient(it, server.plain) },
         )
 
     @Test
     fun `a write goes against the version read just before it, and the list is stored after it`() {
-        server.server.enqueue(json(VERSION_1, "Ton simpl"))
-        server.server.enqueue(MockResponse().setResponseCode(200).setBody(EMPTY_CHANGE))
-        server.server.enqueue(json(VERSION_2, "Ton simpl renamed"))
+        server.enqueue(json(VERSION_1, "Ton simpl"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody(EMPTY_CHANGE))
+        server.enqueue(json(VERSION_2, "Ton simpl renamed"))
 
         val pending = runBlocking { edits().update(mbid, 0, ChapterChange(title = "Ton simpl renamed")) }
 
@@ -72,9 +79,9 @@ class ChapterEditsTest {
 
     @Test
     fun `a refused version reloads the stored list before the error is shown`() {
-        server.server.enqueue(json(VERSION_1, "Ton simpl"))
-        server.server.enqueue(MockResponse().setResponseCode(412).setBody("""{"error":"version_mismatch"}"""))
-        server.server.enqueue(json(VERSION_2, "someone else's name"))
+        server.enqueue(json(VERSION_1, "Ton simpl"))
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"error":"version_mismatch"}"""))
+        server.enqueue(json(VERSION_2, "someone else's name"))
 
         val error =
             assertThrows(DanceBrainzException::class.java) {

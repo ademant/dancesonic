@@ -1,6 +1,7 @@
 package org.dancesonic.player.ui
 
 import android.os.Build
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -63,14 +64,13 @@ import java.io.IOException
 
 private const val STOP_TIMEOUT_MILLIS = 5_000L
 
+private const val TAG = "DanceSonicSync"
+
 private const val PENDING_CHAPTER_MESSAGE = "Sent. DanceBrainz holds the change until a moderator approves it."
 private const val CHAPTER_NOT_SENT = "The chapter change was not sent"
 
-/** How long a successful check stays fresh before the next automatic check on start. */
-private const val CHECK_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
-
-/** How long a full listing stays fresh before the automatic check runs one. */
-private const val FULL_SYNC_INTERVAL_MILLIS = 7L * 24 * 60 * 60 * 1000
+/** How long a check stays fresh before the next automatic check on start: a week (#121). */
+internal const val CHECK_INTERVAL_MILLIS = 7L * 24 * 60 * 60 * 1000
 
 data class ConnectUiState(
     val busy: Boolean = false,
@@ -81,6 +81,8 @@ data class ConnectUiState(
     val verificationCode: String? = null,
     /** The certificate fingerprint of a self-signed server, while the user is asked to trust it (#126). */
     val certificateFingerprint: String? = null,
+    /** A scanned code's other server, while the user is asked whether it replaces the current one (#135). */
+    val replacement: ServerReplacement? = null,
     /** True when the last connect failed because the app may not use the local network (#124). */
     val localNetworkBlocked: Boolean = false,
     val lastSync: String? = null,
@@ -88,7 +90,10 @@ data class ConnectUiState(
     val syncProgress: SyncProgress? = null,
 )
 
-data class SyncProgress(val done: Int, val total: Int)
+data class SyncProgress(
+    val done: Int,
+    val total: Int,
+)
 
 /**
  * Why a refresh cannot start, or null if it can. A refresh without saved settings used to return
@@ -151,7 +156,9 @@ class ConnectViewModel(
 
     init {
         viewModelScope.launch {
-            container.settingsStore.settings.first()?.let { _allowCleartext.value = it.allowCleartext }
+            container.settingsStore.settings
+                .first()
+                ?.let { _allowCleartext.value = it.allowCleartext }
         }
     }
 
@@ -179,6 +186,13 @@ class ConnectViewModel(
      */
     val certificateCheck: CertificateCheck =
         CertificateCheck(show = { fingerprint -> _state.update { it.copy(certificateFingerprint = fingerprint) } })
+
+    /**
+     * Asks before a scanned code replaces the stored connection with another server's (#135). The user's answer goes
+     * to [ReplaceCheck.answer].
+     */
+    val replaceCheck: ReplaceCheck =
+        ReplaceCheck(show = { change -> _state.update { it.copy(replacement = change) } })
 
     /** Shows an error that happened outside the ViewModel, such as a failed scanner launch. */
     fun reportError(message: String) {
@@ -251,7 +265,11 @@ class ConnectViewModel(
         runConnect(
             shared.server.baseUrl,
             danceBrainz = shared.danceBrainz,
-        ) { shared.server.withTlsPin(trustedPin(shared.server.baseUrl, null, certificateCheck::await)) }
+        ) {
+            // Nothing is checked or sent before the user agrees to leave the current server.
+            replaceCheck.confirm(container.settingsStore.settings.first(), shared.server.baseUrl)
+            shared.server.withTlsPin(trustedPin(shared.server.baseUrl, null, certificateCheck::await))
+        }
     }
 
     /**
@@ -267,6 +285,7 @@ class ConnectViewModel(
                 return
             }
         runConnect(request.server) {
+            replaceCheck.confirm(container.settingsStore.settings.first(), request.server)
             // The code was just scanned, so it expires about one pairing window from now.
             val expiresAt = System.currentTimeMillis() + AccountClient.PAIRING_WAIT_MILLIS
             // A pin in the code must match before the token is sent; a mismatch never becomes active (#126).
@@ -363,11 +382,14 @@ class ConnectViewModel(
             _state.value = ConnectUiState(error = LocalNetworkBlockedException.MESSAGE, localNetworkBlocked = true)
             return
         }
+        // The address passed ServerUrl.parse with this opt-in; the policy checks it again (#140).
+        val optIn = _allowCleartext.value
         _state.value = ConnectUiState(busy = true)
         viewModelScope.launch {
             try {
                 // An http server the user allowed may be reached while it is set up, before it is stored.
-                val connected = CleartextPolicy.whileConnecting(server) { verifyAndStore(obtain, danceBrainz) }
+                val connected =
+                    CleartextPolicy.whileConnecting(server, optIn) { verifyAndStore(obtain, danceBrainz) }
                 _state.value = ConnectUiState()
                 runSync(connected.settings, incremental = false, notice = connected.notice)
             } catch (e: CancellationException) {
@@ -401,7 +423,10 @@ class ConnectViewModel(
     }
 
     /** What [verifyAndStore] stored, and anything the user should know about it. */
-    private class Connected(val settings: ServerSettings, val notice: String?)
+    private class Connected(
+        val settings: ServerSettings,
+        val notice: String?,
+    )
 
     /** The checks and the store of [runConnect]. */
     private suspend fun verifyAndStore(
@@ -454,18 +479,25 @@ class ConnectViewModel(
     }
 
     /**
-     * Asks the server whether anything changed, at most once a day. Runs without a Refresh tap, so it
-     * is quiet when nothing changed. Skipped while another sync runs.
+     * Asks a server with the change feed what changed, at most once a week (#121). Runs without a Refresh tap, so it
+     * is quiet when nothing changed; a standard Subsonic server is not checked at all. Skipped while another sync runs.
      */
     fun checkForChanges() {
         val settings = container.currentSettings ?: return
         if (_state.value.busy) return
+        // Busy, so a Refresh tap does not start a second sync next to this one.
+        _state.update { it.copy(busy = true) }
         viewModelScope.launch {
-            val url = settings.baseUrl.toString()
-            if (container.library.incrementalCheckDue(url, CHECK_INTERVAL_MILLIS)) {
-                // Once a week the check is a full listing, which also picks up tag-only edits.
-                val weeklyFull = container.library.fullSyncDue(url, FULL_SYNC_INTERVAL_MILLIS)
-                runSync(settings, incremental = !weeklyFull)
+            try {
+                val result = container.library.scheduledSync(container.catalogClient(settings), CHECK_INTERVAL_MILLIS)
+                if (result != null) container.edits.flush()
+                _state.update { it.copy(busy = false, lastSync = result?.summary() ?: it.lastSync) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SubsonicException) {
+                // Quiet: the stored catalog still works, and the next check or a Refresh tries again.
+                Log.d(TAG, "Scheduled check skipped: ${e.javaClass.simpleName}")
+                _state.update { it.copy(busy = false) }
             }
         }
     }
@@ -506,13 +538,17 @@ class ConnectViewModel(
 
 /** Passes library flows to the UI. Room is the source of truth; the UI never waits on the network. */
 @Suppress("TooManyFunctions") // The library screens and the DanceBrainz edits they call share this model.
-class LibraryViewModel(private val container: AppContainer) : ViewModel() {
+class LibraryViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val artists =
-        container.library.artists()
+        container.library
+            .artists()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     val danceTypes =
-        container.library.danceTypes()
+        container.library
+            .danceTypes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     /** The waveform of the track now playing, for the seek bar. Null while there is none. */
@@ -526,17 +562,20 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Shoes state by recording MBID, including changes not yet sent. */
     val shoes: StateFlow<Map<String, ShoesView>> =
-        container.edits.observeShoes()
+        container.edits
+            .observeShoes()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
 
     /** The meter and sub-meter by recording MBID, including a meter change not yet sent. */
     val meters: StateFlow<Map<String, MeterView>> =
-        container.edits.meters.observe()
+        container.edits.meters
+            .observe()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyMap())
 
     /** Every DanceBrainz change not yet confirmed: queued, held for review, or in conflict. */
     val queue: StateFlow<List<EditEntity>> =
-        container.edits.observeQueue()
+        container.edits
+            .observeQueue()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     /** True while a DanceBrainz token is stored on this phone, so ratings and dances can be changed. */
@@ -663,8 +702,14 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** A track's details from the local database, for the preview before it plays. */
-    suspend fun trackDetail(id: String): TrackDetail? = container.library.trackDetail(id)
+    /**
+     * A track's details from the local database, for the preview before it plays. The track is compared with the
+     * server in the background (#121), throttled, so the next look shows what changed.
+     */
+    suspend fun trackDetail(id: String): TrackDetail? {
+        container.refreshTrack(id)
+        return container.library.trackDetail(id)
+    }
 
     /** Which albums and playlists are kept on the phone; see [KeepOfflineToggle]. */
     val keptCollections = container.keptCollections
@@ -758,9 +803,12 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 }
 
 /** Course playlists, stored on the device. */
-class PlaylistViewModel(private val container: AppContainer) : ViewModel() {
+class PlaylistViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val playlists =
-        container.playlists.playlists()
+        container.playlists
+            .playlists()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
     fun playlist(id: Long) = container.playlists.playlist(id)

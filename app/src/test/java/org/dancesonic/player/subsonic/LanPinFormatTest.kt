@@ -19,9 +19,10 @@ class LanPinFormatTest {
     }
 
     private fun certificate(): X509Certificate =
-        CertificateFactory.getInstance(
-            "X.509",
-        ).generateCertificate(ByteArrayInputStream(PEM.toByteArray())) as X509Certificate
+        CertificateFactory
+            .getInstance(
+                "X.509",
+            ).generateCertificate(ByteArrayInputStream(PEM.toByteArray())) as X509Certificate
 
     private companion object {
         val PEM =

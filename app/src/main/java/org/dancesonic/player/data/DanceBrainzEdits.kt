@@ -330,7 +330,11 @@ private class EditSender(
             queue.delete(edit.id)
             return
         }
-        val shown = edit.expectedDances.orEmpty().split(NAME_SEPARATOR).filter { it.isNotEmpty() }
+        val shown =
+            edit.expectedDances
+                .orEmpty()
+                .split(NAME_SEPARATOR)
+                .filter { it.isNotEmpty() }
         val othersNow = current.map { it.name }.filter { it != name }.sorted()
         val othersShown = shown.filter { it != name }.sorted()
         if (othersNow != othersShown) {

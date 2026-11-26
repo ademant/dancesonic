@@ -38,10 +38,12 @@ class DanceBrainzMeterEditsTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         base = server.server.url("/").toString()
     }
@@ -74,13 +76,19 @@ class DanceBrainzMeterEditsTest {
     @Test
     fun `a sub-meter is sent as the id of its own value under its meter, without a qualifier`() {
         runBlocking { db.danceLookupDao().upsert(DanceLookupEntity(mbid, checkedAt = now)) }
-        server.server.enqueue(json(meterList))
-        server.server.enqueue(json("""{"change":{"status":"applied"}}"""))
+        server.enqueue(json(meterList))
+        server.enqueue(json("""{"change":{"status":"applied"}}"""))
         val repo = edits()
 
         runBlocking { repo.meters.set(mbid, name = "3+3+2", parentName = "8/4") }
 
-        assertEquals("/api/v1/tag-types/meter/tags", server.server.takeRequest().requestUrl?.encodedPath)
+        assertEquals(
+            "/api/v1/tag-types/meter/tags",
+            server.server
+                .takeRequest()
+                .requestUrl
+                ?.encodedPath,
+        )
         val put = server.server.takeRequest()
         assertEquals("PUT", put.method)
         assertEquals("type=meter", put.requestUrl?.encodedQuery)
@@ -91,8 +99,8 @@ class DanceBrainzMeterEditsTest {
     @Test
     fun `once sent, the phone shows the new meter and sub-meter from the stored lookup`() {
         runBlocking { db.danceLookupDao().upsert(DanceLookupEntity(mbid, checkedAt = now, meter = null)) }
-        server.server.enqueue(json(meterList))
-        server.server.enqueue(json("""{"change":{"status":"applied"}}"""))
+        server.enqueue(json(meterList))
+        server.enqueue(json("""{"change":{"status":"applied"}}"""))
         val repo = edits()
 
         runBlocking { repo.meters.set(mbid, name = "3+3+2", parentName = "8/4") }
@@ -120,7 +128,7 @@ class DanceBrainzMeterEditsTest {
 
     @Test
     fun `a meter DanceBrainz no longer has is a conflict, and nothing is sent`() {
-        server.server.enqueue(json("""[{"id":10,"name":"8/4","parent_id":null}]"""))
+        server.enqueue(json("""[{"id":10,"name":"8/4","parent_id":null}]"""))
         val repo = edits()
 
         runBlocking { repo.meters.set(mbid, name = "5/4", parentName = null) }
@@ -134,8 +142,8 @@ class DanceBrainzMeterEditsTest {
     @Test
     fun `a meter held by a moderated server stays pending review and is not shown as set`() {
         runBlocking { db.danceLookupDao().upsert(DanceLookupEntity(mbid, checkedAt = now, meter = "3/4")) }
-        server.server.enqueue(json(meterList))
-        server.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
+        server.enqueue(json(meterList))
+        server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
         val repo = edits()
 
         runBlocking { repo.meters.set(mbid, name = "8/4", parentName = null) }

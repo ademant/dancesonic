@@ -1,6 +1,7 @@
 package org.dancesonic.player.studio.ble
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +42,8 @@ private const val UUID_BYTES = 16
 /** The Noise prologue for a service UUID: the label, then the UUID's 16 bytes. Binds the session to the UUID. */
 fun blePrologue(serviceUuid: UUID): ByteArray =
     "dancesonic-ble-v1".toByteArray(Charsets.US_ASCII) + byteArrayOf(0) +
-        ByteBuffer.allocate(UUID_BYTES)
+        ByteBuffer
+            .allocate(UUID_BYTES)
             .putLong(serviceUuid.mostSignificantBits)
             .putLong(serviceUuid.leastSignificantBits)
             .array()
@@ -135,13 +137,15 @@ class BleStudioLink internal constructor(
     private val noise: NoiseTransport,
     override val binding: ByteArray,
     scope: CoroutineScope,
+    /** Where the reader runs. Tests pass their own (#137). */
+    io: CoroutineDispatcher = Dispatchers.IO,
 ) : StudioLink {
     override val incoming: Channel<String> = Channel(Channel.UNLIMITED)
     private val writeLock = Mutex()
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private val reader: Job =
-        scope.launch(Dispatchers.IO) {
+        scope.launch(io) {
             val reassembler = BleReassembler()
             try {
                 while (true) {

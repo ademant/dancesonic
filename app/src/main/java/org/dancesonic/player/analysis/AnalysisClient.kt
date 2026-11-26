@@ -1,20 +1,16 @@
 package org.dancesonic.player.analysis
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.Serializable
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import org.dancesonic.player.subsonic.CleartextPolicy
 import org.dancesonic.player.subsonic.DeviceProofInterceptor
+import org.dancesonic.player.subsonic.Memo
 import org.dancesonic.player.subsonic.ServerSettings
 import org.dancesonic.player.subsonic.SubsonicException
-import org.dancesonic.player.subsonic.subsonicJson
+import org.dancesonic.player.subsonic.SubsonicHttp
 import retrofit2.Response
-import retrofit2.Retrofit
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Query
-import java.util.concurrent.TimeUnit
 
 /**
  * What folksonic holds for one song. [peaks] is the waveform, or null while the server has none. [onsets] are where
@@ -38,13 +34,8 @@ class AnalysisClient internal constructor(
     private val service: AnalysisService,
     private val apiKey: String?,
 ) {
-    constructor(settings: ServerSettings, client: OkHttpClient = defaultClient(settings)) : this(
-        Retrofit.Builder()
-            .baseUrl(settings.baseUrl)
-            .client(client)
-            .addConverterFactory(subsonicJson.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(AnalysisService::class.java),
+    constructor(settings: ServerSettings, client: OkHttpClient = clients[settings]) : this(
+        SubsonicHttp.retrofit(settings.baseUrl, client).create(AnalysisService::class.java),
         settings.apiKey,
     )
 
@@ -60,7 +51,9 @@ class AnalysisClient internal constructor(
         }
         val body = response.body()
         val peaks =
-            body?.waveform?.peaks
+            body
+                ?.waveform
+                ?.peaks
                 ?.takeIf { it.isNotEmpty() }
                 ?.map { it.coerceIn(0, PEAK_MAX) }
         val retryAfter =
@@ -80,15 +73,17 @@ class AnalysisClient internal constructor(
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_ACCEPTED = 202
         private const val DEFAULT_RETRY_SECONDS = 30
-        private const val CONNECT_TIMEOUT_SECONDS = 15L
-        private const val READ_TIMEOUT_SECONDS = 30L
 
-        private fun defaultClient(settings: ServerSettings): OkHttpClient =
-            CleartextPolicy.configure(OkHttpClient.Builder())
-                .addInterceptor(DeviceProofInterceptor({ settings }))
-                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .build()
+        private const val SERVERS_KEPT = 4
+
+        /** One client per server, derived from the shared one, with only the device proof added (#134). */
+        private val clients =
+            Memo<ServerSettings, OkHttpClient>(SERVERS_KEPT) { settings ->
+                SubsonicHttp.base
+                    .newBuilder()
+                    .addInterceptor(DeviceProofInterceptor({ settings }))
+                    .build()
+            }
     }
 }
 

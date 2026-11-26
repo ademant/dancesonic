@@ -5,7 +5,9 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /** The pairing Studio accepted: the device id it gave the phone. */
-data class PairedDevice(val deviceId: String)
+data class PairedDevice(
+    val deviceId: String,
+)
 
 /**
  * Pairs the phone with the Studio on [link], using the one-time secret from the QR code. Studio shows the phone's name

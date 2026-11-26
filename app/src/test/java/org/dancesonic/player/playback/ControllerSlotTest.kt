@@ -17,7 +17,9 @@ import org.junit.Test
 /** The player's connection holder, reset on disconnect and server switch (#130). */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ControllerSlotTest {
-    private class FakeController(val id: Int) {
+    private class FakeController(
+        val id: Int,
+    ) {
         var released = false
     }
 

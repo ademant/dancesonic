@@ -2,6 +2,7 @@ package org.dancesonic.player.data
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.dancesonic.player.dance.NoDanceMetadataSource
@@ -11,7 +12,6 @@ import org.dancesonic.player.testsupport.TestSubsonicServer
 import org.dancesonic.player.testsupport.newTestSyncStateStore
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -21,6 +21,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 /** Sync against a folksonic-style change feed, and the Subsonic comparison fallback. Clock is fixed at 1000 ms. */
 @RunWith(RobolectricTestRunner::class)
@@ -34,10 +36,12 @@ class FeedSyncTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         store = newTestSyncStateStore(ApplicationProvider.getApplicationContext())
         repo = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L }, syncState = store)
@@ -250,16 +254,80 @@ class FeedSyncTest {
         }
 
     @Test
-    fun `a full listing is due when none ran or the last one is a week old`() =
+    fun `the scheduled check routes by the server's capabilities (#121)`() {
+        assertEquals(ScheduledSync.Feed, scheduledSyncFor(hasChangeFeed = true, hasSyncPoint = true))
+        assertEquals(ScheduledSync.Skip, scheduledSyncFor(hasChangeFeed = true, hasSyncPoint = false))
+        assertEquals(ScheduledSync.Skip, scheduledSyncFor(hasChangeFeed = false, hasSyncPoint = true))
+        assertEquals(ScheduledSync.Skip, scheduledSyncFor(hasChangeFeed = false, hasSyncPoint = false))
+    }
+
+    @Test
+    fun `the weekly check on a feed server asks the feed and lists nothing (#121)`() =
         runBlocking(Dispatchers.IO) {
-            val week = 7L * 24 * 60 * 60 * 1000
-            assertTrue(repo.fullSyncDue(serverUrl(), week))
             enqueueFirstSync()
             repo.syncIncremental(server.client)
+            val weekLater = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L + WEEK }, syncState = store)
+            val requestsBefore = server.server.requestCount
+            server.enqueueJson(INFO_OLD)
 
-            assertFalse(repo.fullSyncDue(serverUrl(), week))
-            val weekLater = LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L + week }, syncState = store)
-            assertTrue(weekLater.fullSyncDue(serverUrl(), week))
+            val result = weekLater.scheduledSync(server.client, WEEK)
+
+            assertEquals(SyncMode.Unchanged, result?.mode)
+            assertEquals(requestsBefore + 1, server.server.requestCount)
+        }
+
+    @Test
+    fun `the check runs at most once a week (#121)`() =
+        runBlocking(Dispatchers.IO) {
+            enqueueFirstSync()
+            repo.syncIncremental(server.client)
+            val requestsBefore = server.server.requestCount
+
+            val dayLater =
+                LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L + WEEK / 7 }, syncState = store)
+
+            assertNull(dayLater.scheduledSync(server.client, WEEK))
+            assertEquals(requestsBefore, server.server.requestCount)
+        }
+
+    @Test
+    fun `a standard Subsonic server gets no scheduled catalog sync (#121)`() =
+        runBlocking(Dispatchers.IO) {
+            server.advertised = listOf("apiKeyAuthentication")
+
+            val result = repo.scheduledSync(server.client, WEEK)
+
+            assertNull(result)
+            // Only the extensions were asked for: no artists, albums or songs.
+            server.server.takeRequest().let { assertTrue(it.path.orEmpty().contains("getOpenSubsonicExtensions")) }
+            assertEquals(1, server.server.requestCount)
+            // And not again within the week.
+            assertNull(repo.scheduledSync(server.client, WEEK))
+            assertEquals(1, server.server.requestCount)
+        }
+
+    @Test
+    fun `the repository runs its work on the dispatcher it is given (#137)`() =
+        runBlocking {
+            val dispatches = AtomicInteger()
+            val counting =
+                object : CoroutineDispatcher() {
+                    override fun dispatch(
+                        context: CoroutineContext,
+                        block: Runnable,
+                    ) {
+                        dispatches.incrementAndGet()
+                        Dispatchers.IO.dispatch(context, block)
+                    }
+                }
+            val repo =
+                LibraryRepository(db, NoDanceMetadataSource, clock = { 1_000L }, syncState = store, io = counting)
+            enqueueFirstSync()
+
+            repo.syncIncremental(server.client)
+
+            assertTrue(dispatches.get() > 0)
+            assertEquals(1, db.albumDao().count())
         }
 
     /** Extensions, sync point, artists, two album pages and one album: what a first sync reads. */
@@ -275,6 +343,7 @@ class FeedSyncTest {
     private fun serverUrl(): String = server.settings.baseUrl.toString()
 
     private companion object {
+        const val WEEK = 7L * 24 * 60 * 60 * 1000
         const val FEED_ALBUM_ONLY =
             """{"subsonic-response":{"status":"ok","libraryChanges":{"full":false,"serverTime":2000,""" +
                 """"artists":[],"albums":[{"id":"al-1","updated":1500}],"songs":[],"playlists":[],""" +

@@ -91,7 +91,9 @@ object PlaybackMath {
 }
 
 /** Reads and writes [PlaybackSettings] in DataStore. */
-class PlaybackSettingsStore(private val dataStore: DataStore<Preferences>) {
+class PlaybackSettingsStore(
+    private val dataStore: DataStore<Preferences>,
+) {
     val settings: Flow<PlaybackSettings> =
         dataStore.data.map { prefs ->
             PlaybackSettings(

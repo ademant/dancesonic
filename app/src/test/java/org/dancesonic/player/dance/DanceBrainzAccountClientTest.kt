@@ -17,7 +17,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `pairing sends the code, the device name and the public key, and no secret comes back`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"pending"}"""))
+            server.enqueue(MockResponse().setResponseCode(202).setBody("""{"status":"pending"}"""))
             val jwk = SoftwareDeviceSigner().publicJwk()
 
             runBlocking {
@@ -41,7 +41,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a rejected code is reported without the code`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("pairing_invalid").setResponseCode(401))
+            server.enqueue(nested("pairing_invalid").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -59,8 +59,8 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `the wait ends when the owner approves the device, and each poll is signed for the device`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("pairing_pending").setResponseCode(401))
-            server.server.enqueue(MockResponse().setResponseCode(200))
+            server.enqueue(nested("pairing_pending").setResponseCode(401))
+            server.enqueue(MockResponse().setResponseCode(200))
 
             runBlocking {
                 deviceAccount(
@@ -86,7 +86,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a removed device is told to pair again`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("device_unknown").setResponseCode(401))
+            server.enqueue(nested("device_unknown").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -107,7 +107,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a replayed proof is reported as a repeat`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("proof_replayed").setResponseCode(401))
+            server.enqueue(nested("proof_replayed").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -128,7 +128,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `an already paired phone is told to create a new code`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("device_exists").setResponseCode(409))
+            server.enqueue(nested("device_exists").setResponseCode(409))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -144,7 +144,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a device never approved gives up at its deadline`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(nested("pairing_pending").setResponseCode(401))
+            server.enqueue(nested("pairing_pending").setResponseCode(401))
 
             val error =
                 assertThrows(DanceBrainzException::class.java) {
@@ -165,7 +165,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `the check sends the token as a bearer header to the login-only read`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"id":7,"role":"user"}"""))
+            server.enqueue(json("""{"id":7,"role":"user"}"""))
             val client = DanceBrainzAccountClient(server.server.url("/"), server.plain)
 
             runBlocking { client.check(tokenCredential("dbz_checked_token_1234567890")) }
@@ -180,7 +180,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `a revoked token fails the check with a message for the user`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(401))
+            server.enqueue(MockResponse().setResponseCode(401))
             val client = DanceBrainzAccountClient(server.server.url("/"), server.plain)
 
             assertThrows(DanceBrainzException::class.java) {
@@ -192,7 +192,7 @@ class DanceBrainzAccountClientTest {
     @Test
     fun `revoke deletes the token by id with its own bearer token`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(204))
+            server.enqueue(MockResponse().setResponseCode(204))
             val client = DanceBrainzAccountClient(server.server.url("/"), server.plain)
 
             runBlocking { client.revoke(tokenCredential("dbz_device_token_1234567890"), 42L) }
@@ -207,9 +207,11 @@ class DanceBrainzAccountClientTest {
     /** A client that signs requests for a device with an in-memory key, as the Keystore would. */
     private fun deviceAccount(server: TestSubsonicServer): DanceBrainzAccountClient {
         val http =
-            server.plain.newBuilder().addInterceptor(
-                DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
-            ).build()
+            server.plain
+                .newBuilder()
+                .addInterceptor(
+                    DanceBrainzDeviceInterceptor({ SoftwareDeviceSigner() }),
+                ).build()
         return DanceBrainzAccountClient(server.server.url("/"), http)
     }
 

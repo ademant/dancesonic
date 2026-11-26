@@ -36,7 +36,9 @@ data class DanceBrainzUiState(
  * The DanceBrainz server on the config page. A new address is checked before it is saved. Saving runs an
  * incremental sync at once, so dance data from the new server appears without a separate Refresh.
  */
-class DanceBrainzViewModel(private val container: AppContainer) : ViewModel() {
+class DanceBrainzViewModel(
+    private val container: AppContainer,
+) : ViewModel() {
     val baseUrl: StateFlow<HttpUrl> =
         container.danceBrainzSettings.baseUrl
             .stateIn(viewModelScope, SharingStarted.Eagerly, DanceBrainzClient.DEFAULT_BASE_URL)

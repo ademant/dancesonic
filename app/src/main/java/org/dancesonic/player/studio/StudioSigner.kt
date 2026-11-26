@@ -19,7 +19,9 @@ interface StudioSigner {
 }
 
 /** A signer that uses a key already in the Keystore under [alias]. */
-internal class KeystoreStudioSigner(private val alias: String) : StudioSigner {
+internal class KeystoreStudioSigner(
+    private val alias: String,
+) : StudioSigner {
     override fun devicePoint(): ByteArray {
         val key =
             DeviceKeys.keyStore().getCertificate(alias)?.publicKey

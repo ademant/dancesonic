@@ -24,7 +24,8 @@ class ApiKeyScopeTest {
     @Before
     fun setUp() {
         val held =
-            HeldCertificate.Builder()
+            HeldCertificate
+                .Builder()
                 .commonName("localhost")
                 .addSubjectAlternativeName("localhost")
                 .addSubjectAlternativeName("127.0.0.1")
@@ -44,7 +45,8 @@ class ApiKeyScopeTest {
         settings = ServerSettings(server.url("/"), API_KEY)
         val trust = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
         client =
-            OkHttpClient.Builder()
+            OkHttpClient
+                .Builder()
                 .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
                 .addInterceptor(ApiKeyInterceptor { settings })
                 .build()
@@ -75,7 +77,12 @@ class ApiKeyScopeTest {
 
     @Test
     fun `a different host gets no key`() {
-        val url = server.url("/rest/ping.view").newBuilder().host("127.0.0.1").build()
+        val url =
+            server
+                .url("/rest/ping.view")
+                .newBuilder()
+                .host("127.0.0.1")
+                .build()
 
         assertNull(send(server, url).requestUrl!!.queryParameter("apiKey"))
     }
@@ -96,7 +103,12 @@ class ApiKeyScopeTest {
 
     @Test
     fun `an authentication parameter already on the request is replaced, not duplicated`() {
-        val url = server.url("/rest/ping.view").newBuilder().addQueryParameter("apiKey", "stale").build()
+        val url =
+            server
+                .url("/rest/ping.view")
+                .newBuilder()
+                .addQueryParameter("apiKey", "stale")
+                .build()
         val request = send(server, url)
 
         assertEquals(listOf(API_KEY), request.requestUrl!!.queryParameterValues("apiKey"))

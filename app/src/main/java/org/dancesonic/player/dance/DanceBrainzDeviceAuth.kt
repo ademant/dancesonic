@@ -37,10 +37,17 @@ internal class DanceBrainzDeviceInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val alias = request.header(DEVICE_KEY_HEADER) ?: return chain.proceed(request)
-        val htu = request.url.newBuilder().query(null).fragment(null).build().toString()
+        val htu =
+            request.url
+                .newBuilder()
+                .query(null)
+                .fragment(null)
+                .build()
+                .toString()
         val proof = DeviceProof.build(signerFor(alias), request.method, htu, nowSeconds())
         val signed =
-            request.newBuilder()
+            request
+                .newBuilder()
                 .removeHeader(DEVICE_KEY_HEADER)
                 .header(DPOP, proof)
                 .build()

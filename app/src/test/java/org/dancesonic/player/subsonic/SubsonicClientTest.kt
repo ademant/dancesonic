@@ -24,7 +24,8 @@ class SubsonicClientTest {
     @Before
     fun setUp() {
         val held =
-            HeldCertificate.Builder()
+            HeldCertificate
+                .Builder()
                 .commonName("localhost")
                 .addSubjectAlternativeName("localhost")
                 .addSubjectAlternativeName("127.0.0.1")
@@ -41,7 +42,8 @@ class SubsonicClientTest {
         settings = ServerSettings(server.url("/"), API_KEY)
 
         val okHttp =
-            OkHttpClient.Builder()
+            OkHttpClient
+                .Builder()
                 .sslSocketFactory(clientCerts.sslSocketFactory(), clientCerts.trustManager)
                 .addInterceptor(ApiKeyInterceptor { settings })
                 .build()
@@ -168,7 +170,13 @@ class SubsonicClientTest {
             assertEquals(3, server.requestCount)
             server.takeRequest()
             server.takeRequest()
-            assertTrue(server.takeRequest().requestUrl!!.encodedPath.endsWith("getAlbumList2.view"))
+            assertTrue(
+                server
+                    .takeRequest()
+                    .requestUrl!!
+                    .encodedPath
+                    .endsWith("getAlbumList2.view"),
+            )
         }
 
     @Test

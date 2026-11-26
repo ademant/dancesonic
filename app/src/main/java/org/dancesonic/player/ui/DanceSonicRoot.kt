@@ -91,8 +91,7 @@ private fun TabRow(
                             .clip(RoundedCornerShape(TAB_CORNER))
                             .background(
                                 if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                            )
-                            .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(entry) }),
+                            ).selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(entry) }),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
@@ -113,7 +112,9 @@ private fun TabRow(
     }
 }
 
-private enum class Tab(val label: String) {
+private enum class Tab(
+    val label: String,
+) {
     Library("Library"),
     Dance("Dance"),
     Playlists("Playlists"),
@@ -178,7 +179,9 @@ fun DanceSonicRoot(container: AppContainer) {
     }
 }
 
-private enum class ConnectMethod(val label: String) {
+private enum class ConnectMethod(
+    val label: String,
+) {
     Qr("QR code"),
     Password("Username & password"),
     ApiKey("API key"),

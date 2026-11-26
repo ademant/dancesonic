@@ -84,7 +84,7 @@ class LocalNetworkAccessTest {
     fun `this device and public servers do not need the permission`() {
         LocalNetworkAccess.install { false }
         TestSubsonicServer().use { server ->
-            server.server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("{}"))
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("{}"))
             val plain = SubsonicHttp.okHttpClient { null }
             // localhost: the TLS check fails later, but the local network check lets it through.
             val error = runCatching { plain.newCall(Request.Builder().url(server.server.url("/")).build()).execute() }

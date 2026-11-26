@@ -111,7 +111,13 @@ internal class DeviceProofInterceptor(
             return chain.proceed(request)
         }
         // The server builds the URL it checks from base_url and the path, so the query and fragment are left out.
-        val htu = request.url.newBuilder().query(null).fragment(null).build().toString()
+        val htu =
+            request.url
+                .newBuilder()
+                .query(null)
+                .fragment(null)
+                .build()
+                .toString()
         val proof =
             DeviceProof.build(
                 signer = signerFor(device.alias),
@@ -147,7 +153,8 @@ internal object DeviceKeys {
         val alias = ALIAS_PREFIX + UUID.randomUUID()
         KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE).apply {
             initialize(
-                KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+                KeyGenParameterSpec
+                    .Builder(alias, KeyProperties.PURPOSE_SIGN)
                     .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
                     .setDigests(KeyProperties.DIGEST_SHA256)
                     .build(),
@@ -166,7 +173,9 @@ internal object DeviceKeys {
 }
 
 /** A device key in the Keystore, read by its alias. */
-internal class KeystoreDeviceSigner(private val alias: String) : DeviceSigner {
+internal class KeystoreDeviceSigner(
+    private val alias: String,
+) : DeviceSigner {
     override fun publicJwk(): PublicJwk {
         val key =
             DeviceKeys.keyStore().getCertificate(alias)?.publicKey as? ECPublicKey

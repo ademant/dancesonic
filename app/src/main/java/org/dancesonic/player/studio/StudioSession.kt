@@ -21,7 +21,9 @@ interface StudioCounter {
 }
 
 /** A protocol refusal or a dropped connection, with the wire code (`not_paired`, `replay`, ...). */
-class StudioProtocolError(val code: String) : Exception(code)
+class StudioProtocolError(
+    val code: String,
+) : Exception(code)
 
 /**
  * The phone's side of one session with a paired Studio over an open [StudioLink]: `hello`, then signed commands

@@ -29,3 +29,11 @@ style:
     max: 3
   ThrowsCount:
     max: 3
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    # No `!!` in production code (AGENTS.md, #122). Tests may assert non-null with it.
+    active: true
+    excludes:
+      - '**/test/**'
+      - '**/androidTest/**'

@@ -41,10 +41,12 @@ class DanceBrainzEditsTest {
     @Before
     fun setUp() {
         db =
-            Room.inMemoryDatabaseBuilder(
-                ApplicationProvider.getApplicationContext(),
-                DanceSonicDatabase::class.java,
-            ).allowMainThreadQueries().build()
+            Room
+                .inMemoryDatabaseBuilder(
+                    ApplicationProvider.getApplicationContext(),
+                    DanceSonicDatabase::class.java,
+                ).allowMainThreadQueries()
+                .build()
         server = TestSubsonicServer()
         base = server.server.url("/").toString()
     }
@@ -93,7 +95,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `a rating is shown at once, sent, and no longer queued once DanceBrainz confirms it`() {
-        server.server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
         val repo = edits()
 
         runBlocking { repo.rate(mbid, 4) }
@@ -107,7 +109,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `a clear is sent as a delete and shows no rating`() {
-        server.server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
         val repo = edits()
 
         runBlocking { repo.clearRating(mbid) }
@@ -132,7 +134,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `a rating the server rejects is kept in the queue with its error`() {
-        server.server.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        server.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
         val repo = edits()
 
         runBlocking { repo.rate(mbid, 5) }
@@ -151,7 +153,7 @@ class DanceBrainzEditsTest {
         assertEquals(1, queued())
 
         base = server.server.url("/").toString()
-        server.server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
         val remaining = runBlocking { repo.flush() }
 
         assertEquals(0, remaining)
@@ -190,7 +192,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `refresh reads the median and the viewer's rating, and does not read again within a day`() {
-        server.server.enqueue(
+        server.enqueue(
             json("""{"recording":"$mbid","shoes_median":3.5,"shoes_raters":4,"my_shoes":2}"""),
         )
         val repo = edits()
@@ -210,7 +212,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `a queued rating is shown over the rating read from the server`() {
-        server.server.enqueue(json("""{"shoes_raters":0,"my_shoes":2}"""))
+        server.enqueue(json("""{"shoes_raters":0,"my_shoes":2}"""))
         val repo = edits()
         runBlocking { repo.refreshShoes(listOf(mbid)) }
         base = UNREACHABLE
@@ -249,7 +251,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `adding a dance posts it with its path and qualifier, and it leaves the queue once applied`() {
-        server.server.enqueue(json("""{"change":{"status":"applied"}}"""))
+        server.enqueue(json("""{"change":{"status":"applied"}}"""))
         val repo = edits()
 
         runBlocking {
@@ -272,7 +274,7 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `a dance held by a moderated server stays in the queue as pending review and is not sent again`() {
-        server.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
+        server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
         val repo = edits()
 
         runBlocking { repo.addDance(mbid, DanceSuggestion("valse", "valse"), "both") }
@@ -287,8 +289,8 @@ class DanceBrainzEditsTest {
     @Test
     fun `removing a dance replaces the dance tags with the rest, keeping their qualifiers`() {
         seedShown("gavotte", "valse")
-        server.server.enqueue(json(tracks(tag(1, "gavotte", "both"), tag(2, "valse", "learn"))))
-        server.server.enqueue(json("""{"change":{"status":"applied"}}"""))
+        server.enqueue(json(tracks(tag(1, "gavotte", "both"), tag(2, "valse", "learn"))))
+        server.enqueue(json("""{"change":{"status":"applied"}}"""))
         val repo = edits()
 
         runBlocking { repo.removeDance(mbid, "gavotte") }
@@ -304,7 +306,7 @@ class DanceBrainzEditsTest {
     @Test
     fun `a dance that changed on DanceBrainz since the phone showed it is a conflict, and nothing is sent`() {
         seedShown("gavotte", "valse")
-        server.server.enqueue(
+        server.enqueue(
             json(tracks(tag(1, "gavotte", "both"), tag(2, "valse", "learn"), tag(3, "tango", "both"))),
         )
         val repo = edits()
@@ -314,13 +316,19 @@ class DanceBrainzEditsTest {
         assertEquals(1, server.server.requestCount)
         val conflicts = runBlocking { db.editQueueDao().withStatus(EditStatus.CONFLICT) }
         assertEquals(1, conflicts.size)
-        assertTrue(conflicts.single().lastError.orEmpty().contains("changed"))
+        assertTrue(
+            conflicts
+                .single()
+                .lastError
+                .orEmpty()
+                .contains("changed"),
+        )
     }
 
     @Test
     fun `removing a dance that is already gone on DanceBrainz clears the change without sending anything`() {
         seedShown("gavotte", "valse")
-        server.server.enqueue(json(tracks(tag(2, "valse", "learn"))))
+        server.enqueue(json(tracks(tag(2, "valse", "learn"))))
         val repo = edits()
 
         runBlocking { repo.removeDance(mbid, "gavotte") }
@@ -332,8 +340,8 @@ class DanceBrainzEditsTest {
     @Test
     fun `a dance removal held by a moderated server is pending review`() {
         seedShown("gavotte", "valse")
-        server.server.enqueue(json(tracks(tag(1, "gavotte", "both"), tag(2, "valse", "learn"))))
-        server.server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
+        server.enqueue(json(tracks(tag(1, "gavotte", "both"), tag(2, "valse", "learn"))))
+        server.enqueue(MockResponse().setResponseCode(202).setBody("""{"change":{"status":"pending"}}"""))
         val repo = edits()
 
         runBlocking { repo.removeDance(mbid, "gavotte") }
@@ -345,7 +353,14 @@ class DanceBrainzEditsTest {
     fun `dismissing a change removes it from the queue`() {
         val repo = edits(token = null)
         runBlocking { repo.addDance(mbid, DanceSuggestion("valse", "valse"), "both") }
-        val id = runBlocking { db.editQueueDao().withStatus(EditStatus.QUEUED).single().id }
+        val id =
+            runBlocking {
+                db
+                    .editQueueDao()
+                    .withStatus(EditStatus.QUEUED)
+                    .single()
+                    .id
+            }
 
         runBlocking { repo.dismiss(id) }
 
@@ -365,10 +380,10 @@ class DanceBrainzEditsTest {
 
     @Test
     fun `suggestions are the values with a path, and nothing when the server answers null`() {
-        server.server.enqueue(
+        server.enqueue(
             json("""[{"tag":{"id":4,"type":"dance","name":"valse"},"distance":0,"path":"valse"}]"""),
         )
-        server.server.enqueue(json("null"))
+        server.enqueue(json("null"))
         val repo = edits()
 
         val found = runBlocking { repo.suggestDances("valse") }

@@ -104,8 +104,8 @@ class BleStudioLinkTest {
                 assertThrows(BleStudioException::class.java) {
                     runBlocking {
                         BleStudioOpener.open(studio, serviceUuid, phoneKey, scope, isStudio = {
-                                _,
-                                _,
+                            _,
+                            _,
                             ->
                             false
                         })

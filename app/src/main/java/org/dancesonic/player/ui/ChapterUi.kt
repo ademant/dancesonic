@@ -135,8 +135,7 @@ private fun ChapterStrip(
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant
                         },
-                    )
-                    .clickable { onSeek(chapter.startMs) },
+                    ).clickable { onSeek(chapter.startMs) },
             )
         }
     }
@@ -220,10 +219,12 @@ private fun ChapterEditDialog(
                         suggestion.path.replace("/", " › "),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier =
-                            Modifier.fillMaxWidth().clickable {
-                                chosen = suggestion
-                                clearDance = false
-                            }.padding(vertical = 6.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    chosen = suggestion
+                                    clearDance = false
+                                }.padding(vertical = 6.dp),
                     )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

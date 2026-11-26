@@ -18,7 +18,8 @@ class MeterMigrationTest {
     @Test
     fun `migration 11 to 12 adds the meter columns and keeps the rows that exist`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(11) {

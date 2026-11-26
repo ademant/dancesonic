@@ -58,7 +58,8 @@ object PairingUri {
 
     /** Splits and percent-decodes a query string. Shared with [ConnectionUri]. */
     internal fun parseQuery(rawQuery: String): Map<String, String> =
-        rawQuery.split('&')
+        rawQuery
+            .split('&')
             .filter { it.isNotEmpty() }
             .associate { pair ->
                 val key = pair.substringBefore('=')

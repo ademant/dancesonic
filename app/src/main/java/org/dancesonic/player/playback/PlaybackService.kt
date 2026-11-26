@@ -42,13 +42,15 @@ class PlaybackService : MediaSessionService() {
         val tracker = StreamTracker()
         val onsets = container.onsetCache
         val player =
-            ExoPlayer.Builder(this, StretchRenderersFactory(this, tracker, onsets::onsetsFor))
+            ExoPlayer
+                .Builder(this, StretchRenderersFactory(this, tracker, onsets::onsetsFor))
                 .setMediaSourceFactory(mediaSourceFactory)
                 .withMusicAudio()
                 .build()
         player.addListener(QueueFollower(tracker, onsets))
         val mediaSession =
-            MediaSession.Builder(this, player)
+            MediaSession
+                .Builder(this, player)
                 .setCallback(ControllerGate(packageName, Process.myUid()))
                 .build()
         session = mediaSession
@@ -77,7 +79,8 @@ class PlaybackService : MediaSessionService() {
             return when (ControllerPolicy.accessFor(caller, ownPackage, ownUid)) {
                 ControllerAccess.FULL -> MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
                 ControllerAccess.TRANSPORT ->
-                    MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    MediaSession.ConnectionResult
+                        .AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(SessionCommands.EMPTY)
                         .setAvailablePlayerCommands(ControllerPolicy.TRANSPORT_COMMANDS)
                         .build()

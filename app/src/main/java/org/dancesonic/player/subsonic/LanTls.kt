@@ -98,7 +98,9 @@ internal object LanTls {
     }
 
     /** Sends each TLS connection to the pinned socket factory when its origin has a pin, else to the platform one. */
-    private class RoutingSocketFactory(private val platform: SSLSocketFactory) : SSLSocketFactory() {
+    private class RoutingSocketFactory(
+        private val platform: SSLSocketFactory,
+    ) : SSLSocketFactory() {
         private val pinned = ConcurrentHashMap<PinOrigin, SSLSocketFactory>()
 
         private fun pick(
@@ -149,7 +151,9 @@ internal object LanTls {
     }
 
     /** Accepts a server certificate only when it matches the pin trusted for [origin]. */
-    private class PinnedTrust(private val origin: PinOrigin) : X509TrustManager {
+    private class PinnedTrust(
+        private val origin: PinOrigin,
+    ) : X509TrustManager {
         override fun checkServerTrusted(
             chain: Array<out X509Certificate>,
             authType: String,
@@ -164,9 +168,7 @@ internal object LanTls {
         override fun checkClientTrusted(
             chain: Array<out X509Certificate>,
             authType: String,
-        ) {
-            throw CertificateException("Client certificates are not used")
-        }
+        ): Unit = throw CertificateException("Client certificates are not used")
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }
@@ -191,7 +193,10 @@ internal object LanTls {
 }
 
 /** A server's host and port: pins belong to one origin, so another service on the same host gets none (#126). */
-internal data class PinOrigin(val host: String, val port: Int) {
+internal data class PinOrigin(
+    val host: String,
+    val port: Int,
+) {
     companion object {
         fun of(
             host: String,
@@ -208,7 +213,10 @@ internal data class PinOrigin(val host: String, val port: Int) {
  * and is forgotten when the setup ends. A cleared or changed connection leaves no pin behind.
  */
 internal object LanPins {
-    private class Pinned(val origin: PinOrigin, val pin: String)
+    private class Pinned(
+        val origin: PinOrigin,
+        val pin: String,
+    )
 
     @Volatile
     private var saved: Pinned? = null

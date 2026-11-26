@@ -23,7 +23,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `lookup answers carry the chapters and their version`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(
+            server.enqueue(
                 json(
                     """{"recordings":[{"mbid":"$mbid","tags":[],"bpm":null,"raters":0,"chapters_version":"v1",
                         "chapters":[
@@ -51,7 +51,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `a lookup from a server without chapters has no version and no chapters`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"recordings":[{"mbid":"$mbid","tags":[],"bpm":null,"raters":0}]}"""))
+            server.enqueue(json("""{"recordings":[{"mbid":"$mbid","tags":[],"bpm":null,"raters":0}]}"""))
             val client = DanceBrainzClient(server.server.url("/"), server.plain)
 
             val dance = runBlocking { client.lookup(listOf(mbid)) }.getValue(mbid)
@@ -64,7 +64,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `reading needs no token and returns the length and version`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(
+            server.enqueue(
                 json("""{"mbid":"$mbid","length_ms":300000,"version":"v2","chapters":[]}"""),
             )
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
@@ -82,7 +82,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `a mark sends its start only and the version as If-Match`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
+            server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             val result =
@@ -107,7 +107,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `an update sends only the fields it changes`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
+            server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             runBlocking {
@@ -130,8 +130,8 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `clearing a title and a dance sends nulls, and moving sends the new start`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
-            server.server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
+            server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
+            server.enqueue(json("""{"change":{"status":"applied"},"chapters":[]}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             runBlocking {
@@ -151,7 +151,13 @@ class DanceBrainzChaptersClientTest {
                 )
             }
 
-            assertEquals("""{"title":null,"tag_id":null}""", server.server.takeRequest().body.readUtf8())
+            assertEquals(
+                """{"title":null,"tag_id":null}""",
+                server.server
+                    .takeRequest()
+                    .body
+                    .readUtf8(),
+            )
             val move = server.server.takeRequest()
             assertEquals("""{"start_ms":115000}""", move.body.readUtf8())
             assertNull(move.getHeader("If-Match"))
@@ -161,7 +167,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `a delete sends the version and a held change reports pending`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(json("""{"change":{"status":"pending"},"chapters":[]}"""))
+            server.enqueue(json("""{"change":{"status":"pending"},"chapters":[]}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             val result = runBlocking { client.delete(mbid, 0, version = "v4", credential = tokenCredential(token)) }
@@ -176,7 +182,7 @@ class DanceBrainzChaptersClientTest {
     @Test
     fun `a refused version is reported with its status and a message for the user`() {
         TestSubsonicServer().use { server ->
-            server.server.enqueue(MockResponse().setResponseCode(412).setBody("""{"error":"version_mismatch"}"""))
+            server.enqueue(MockResponse().setResponseCode(412).setBody("""{"error":"version_mismatch"}"""))
             val client = DanceBrainzChaptersClient(server.server.url("/"), server.plain)
 
             val error =

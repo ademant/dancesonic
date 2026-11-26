@@ -1,6 +1,7 @@
 package org.dancesonic.player.studio
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -110,13 +111,15 @@ class RelayStudioLink internal constructor(
     private val noise: NoiseTransport,
     override val binding: ByteArray,
     scope: CoroutineScope,
+    /** Where the reader runs. Tests pass their own (#137). */
+    io: CoroutineDispatcher = Dispatchers.IO,
 ) : StudioLink {
     override val incoming: Channel<String> = Channel(Channel.UNLIMITED)
     private val writeLock = Mutex()
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private val reader: Job =
-        scope.launch(Dispatchers.IO) {
+        scope.launch(io) {
             val joiner = RelayJoiner(RelayWire.MAX_INCOMING)
             try {
                 for (payload in pipe.incoming) {

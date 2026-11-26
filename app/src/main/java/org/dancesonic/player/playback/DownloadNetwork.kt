@@ -17,15 +17,25 @@ enum class DownloadBlock {
     WaitingForWifi,
 }
 
+/** The network as the downloads see it. [DownloadNetwork] reads the system's; tests pass their own. */
+interface NetworkState {
+    /** Null when a download may run, otherwise the reason it may not. */
+    fun blockReason(allowMobileData: Boolean): DownloadBlock?
+
+    /** Emits when the default network changes. */
+    fun changes(): Flow<Unit>
+}
+
 /**
  * Reads the system's network state to decide whether a download may run. Needs ACCESS_NETWORK_STATE. A connection
  * counts as Wi-Fi when the system reports it as not metered, which is also true of wired networks.
  */
-class DownloadNetwork(context: Context) {
+class DownloadNetwork(
+    context: Context,
+) : NetworkState {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
 
-    /** Null when a download may run, otherwise the reason it may not. */
-    fun blockReason(allowMobileData: Boolean): DownloadBlock? {
+    override fun blockReason(allowMobileData: Boolean): DownloadBlock? {
         val capabilities =
             connectivity.getNetworkCapabilities(connectivity.activeNetwork)
                 ?: return DownloadBlock.Offline
@@ -34,8 +44,8 @@ class DownloadNetwork(context: Context) {
         return if (unmetered || allowMobileData) null else DownloadBlock.WaitingForWifi
     }
 
-    /** Emits when the default network changes, so a paused download can resume. */
-    fun changes(): Flow<Unit> =
+    /** Emits when the default network changes, so the download status follows it. */
+    override fun changes(): Flow<Unit> =
         callbackFlow {
             val callback =
                 object : ConnectivityManager.NetworkCallback() {

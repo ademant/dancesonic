@@ -14,7 +14,10 @@ import org.dancesonic.player.subsonic.LocalNetworkAccess
 import java.util.UUID
 
 /** Why a Studio could not be paired or reached, for the message the user sees. */
-class StudioUnavailable(val reason: Reason, cause: Throwable? = null) : Exception(reason.name, cause) {
+class StudioUnavailable(
+    val reason: Reason,
+    cause: Throwable? = null,
+) : Exception(reason.name, cause) {
     enum class Reason {
         /** The code is not a DanceSonic Studio code, or is for another version. */
         BAD_CODE,

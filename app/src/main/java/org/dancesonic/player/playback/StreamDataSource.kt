@@ -65,7 +65,8 @@ class StreamDataSource private constructor(
         fun withWholeFileRange(dataSpec: DataSpec): DataSpec {
             if (dataSpec.position != 0L || dataSpec.length != C.LENGTH_UNSET.toLong()) return dataSpec
             if (dataSpec.httpRequestHeaders.containsKey(RANGE_HEADER)) return dataSpec
-            return dataSpec.buildUpon()
+            return dataSpec
+                .buildUpon()
                 .setHttpRequestHeaders(dataSpec.httpRequestHeaders + (RANGE_HEADER to WHOLE_FILE_RANGE))
                 .build()
         }

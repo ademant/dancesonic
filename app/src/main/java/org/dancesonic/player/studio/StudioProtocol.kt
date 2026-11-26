@@ -31,19 +31,34 @@ sealed interface StudioCommand {
 
     data object GetState : StudioCommand
 
-    data class Seek(val positionMs: Long) : StudioCommand
+    data class Seek(
+        val positionMs: Long,
+    ) : StudioCommand
 
-    data class SetRate(val rate: Double) : StudioCommand
+    data class SetRate(
+        val rate: Double,
+    ) : StudioCommand
 
-    data class SetBpm(val bpm: Double) : StudioCommand
+    data class SetBpm(
+        val bpm: Double,
+    ) : StudioCommand
 
-    data class PlaySongs(val songs: List<String>, val start: Int = 0) : StudioCommand
+    data class PlaySongs(
+        val songs: List<String>,
+        val start: Int = 0,
+    ) : StudioCommand
 
-    data class Enqueue(val songs: List<String>) : StudioCommand
+    data class Enqueue(
+        val songs: List<String>,
+    ) : StudioCommand
 
-    data class PlayDance(val tagId: Long) : StudioCommand
+    data class PlayDance(
+        val tagId: Long,
+    ) : StudioCommand
 
-    data class NextOfDance(val tagId: Long) : StudioCommand
+    data class NextOfDance(
+        val tagId: Long,
+    ) : StudioCommand
 
     /** The JSON text of the body. Its exact UTF-8 bytes are what the signature covers. */
     fun body(): String =
@@ -97,13 +112,19 @@ data class StudioPlayState(
 
 /** A message from Studio. Unknown types are kept as [Other] so a newer Studio does not break the session. */
 sealed interface StudioMessage {
-    data class Identity(val tlsSpki: String) : StudioMessage
+    data class Identity(
+        val tlsSpki: String,
+    ) : StudioMessage
 
     data object PairPending : StudioMessage
 
-    data class PairAccepted(val device: String) : StudioMessage
+    data class PairAccepted(
+        val device: String,
+    ) : StudioMessage
 
-    data class PairRejected(val reason: String) : StudioMessage
+    data class PairRejected(
+        val reason: String,
+    ) : StudioMessage
 
     data class Welcome(
         val protocol: Int,
@@ -112,17 +133,33 @@ sealed interface StudioMessage {
         val features: List<String>,
     ) : StudioMessage
 
-    data class Result(val id: Long, val ok: Boolean, val error: String?, val data: JsonElement?) : StudioMessage
+    data class Result(
+        val id: Long,
+        val ok: Boolean,
+        val error: String?,
+        val data: JsonElement?,
+    ) : StudioMessage
 
-    data class State(val state: StudioPlayState) : StudioMessage
+    data class State(
+        val state: StudioPlayState,
+    ) : StudioMessage
 
-    data class NetworkHint(val addresses: List<String>, val port: Int) : StudioMessage
+    data class NetworkHint(
+        val addresses: List<String>,
+        val port: Int,
+    ) : StudioMessage
 
-    data class Error(val code: String) : StudioMessage
+    data class Error(
+        val code: String,
+    ) : StudioMessage
 
-    data class Bye(val reason: String) : StudioMessage
+    data class Bye(
+        val reason: String,
+    ) : StudioMessage
 
-    data class Other(val type: String) : StudioMessage
+    data class Other(
+        val type: String,
+    ) : StudioMessage
 
     companion object {
         private fun JsonObject.strings(key: String): List<String> =
@@ -132,7 +169,11 @@ sealed interface StudioMessage {
         @Suppress("ReturnCount", "CyclomaticComplexMethod") // one short branch per message type
         fun parse(text: String): StudioMessage? {
             val obj =
-                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text).jsonObject }.getOrNull()
+                runCatching {
+                    kotlinx.serialization.json.Json
+                        .parseToJsonElement(text)
+                        .jsonObject
+                }.getOrNull()
                     ?: return null
             val type = obj.str("type") ?: return null
             return when (type) {
@@ -183,9 +224,11 @@ sealed interface StudioMessage {
         }
 
         private fun JsonObject.str(key: String): String? =
-            this[key]?.takeUnless {
-                it is JsonNull
-            }?.jsonPrimitive?.contentOrNull
+            this[key]
+                ?.takeUnless {
+                    it is JsonNull
+                }?.jsonPrimitive
+                ?.contentOrNull
 
         private fun JsonObject.long(key: String): Long? =
             this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.longOrNull

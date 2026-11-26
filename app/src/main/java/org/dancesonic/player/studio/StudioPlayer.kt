@@ -76,7 +76,8 @@ class StudioPlayer(
                 MediaItemData.Builder(id).setMediaItem(item).build()
             }
         val index = (studio?.index ?: 0).coerceIn(0, (queue.size - 1).coerceAtLeast(0))
-        return State.Builder()
+        return State
+            .Builder()
             .setAvailableCommands(COMMANDS)
             .setPlaylist(playlist)
             .setCurrentMediaItemIndex(index)
@@ -173,7 +174,8 @@ class StudioPlayer(
 
     companion object {
         private val COMMANDS: Player.Commands =
-            Player.Commands.Builder()
+            Player.Commands
+                .Builder()
                 .addAll(
                     Player.COMMAND_PREPARE,
                     Player.COMMAND_STOP,
@@ -187,7 +189,6 @@ class StudioPlayer(
                     Player.COMMAND_GET_METADATA,
                     Player.COMMAND_SET_MEDIA_ITEM,
                     Player.COMMAND_CHANGE_MEDIA_ITEMS,
-                )
-                .build()
+                ).build()
     }
 }

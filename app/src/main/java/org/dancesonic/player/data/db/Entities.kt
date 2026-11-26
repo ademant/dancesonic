@@ -76,6 +76,8 @@ private const val MAX_TEMPO_BPM = 400
 @Entity(
     tableName = "dance_metadata",
     primaryKeys = ["mbid", "danceType"],
+    // The Dance view filters and counts by dance type; the primary key starts with the MBID (#138).
+    indices = [Index("danceType")],
 )
 data class DanceMetadataEntity(
     val mbid: String,

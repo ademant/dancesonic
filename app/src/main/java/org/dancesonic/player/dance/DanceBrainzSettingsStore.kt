@@ -13,7 +13,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * The DanceBrainz server address. Not secret, so it is kept beside the other settings without encryption.
  * Until one is saved, the public server is used.
  */
-class DanceBrainzSettingsStore(private val dataStore: DataStore<Preferences>) {
+class DanceBrainzSettingsStore(
+    private val dataStore: DataStore<Preferences>,
+) {
     /** The configured server, or [DanceBrainzClient.DEFAULT_BASE_URL] when none is saved. */
     val baseUrl: Flow<HttpUrl> =
         dataStore.data.map { prefs ->

@@ -1,5 +1,7 @@
 package org.dancesonic.player.subsonic
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -7,10 +9,11 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
 
 /** Raised when a request would use plain http to an address the user has not allowed. Names no address. */
-class CleartextRefusedException : IOException(
-    "Unencrypted http is not allowed to this address. Use https, or allow http for a local server in the connection " +
-        "settings.",
-)
+class CleartextRefusedException :
+    IOException(
+        "Unencrypted http is not allowed to this address. Use https, or allow http for a local server in the " +
+            "connection settings.",
+    )
 
 /**
  * The app's single rule for plain http (#84). HTTPS is always allowed. Plain http is allowed only to the one server the
@@ -19,15 +22,21 @@ class CleartextRefusedException : IOException(
  *
  * Android's network security config cannot name a server chosen at runtime, so the platform permits cleartext and this
  * policy restricts it. Every HTTP client of the app is built through [configure]: Subsonic, streaming and cover art,
- * account and pairing, analysis, and DanceBrainz.
+ * account and pairing, analysis, DanceBrainz, and the Studio network transport.
  */
 internal object CleartextPolicy {
-    private data class Origin(val host: String, val port: Int)
+    private data class Origin(
+        val host: String,
+        val port: Int,
+    )
 
     @Volatile
     private var saved: Origin? = null
 
     private val connecting = AtomicReference<Origin?>(null)
+
+    /** One plain http setup at a time, so two setups never open http to both servers at once (#127). */
+    private val setups = Mutex()
 
     private fun HttpUrl.origin() = Origin(host.lowercase(), port)
 
@@ -37,21 +46,30 @@ internal object CleartextPolicy {
     }
 
     /**
-     * Runs [block], a connection setup, while [server] may use http. Only for an address that passed
-     * [ServerUrl.parse] with the opt-in. After [block], the stored connection decides again.
+     * Runs [block], a connection setup, while [server] may use http. After [block], the stored connection decides
+     * again.
+     *
+     * Contract (#140): [allowCleartext] is the user's http opt-in for this setup. An http [server] needs it and must be
+     * a private network address; otherwise nothing runs and [IllegalArgumentException] is thrown. Plain http setups
+     * run one at a time (#127): a second waits until the first ends, so only one setup's server is ever open.
      */
     suspend fun <T> whileConnecting(
         server: HttpUrl,
+        allowCleartext: Boolean,
         block: suspend () -> T,
     ): T {
         if (server.isHttps) return block()
-        require(isPrivateNetworkHost(server.host)) { "Plain http is only possible for a private network address" }
+        require(server.isAllowedServer(allowCleartext)) {
+            "Plain http needs the opt-in and a private network address"
+        }
         val origin = server.origin()
-        connecting.set(origin)
-        try {
-            return block()
-        } finally {
-            connecting.compareAndSet(origin, null)
+        return setups.withLock {
+            connecting.set(origin)
+            try {
+                block()
+            } finally {
+                connecting.set(null)
+            }
         }
     }
 
@@ -78,7 +96,8 @@ internal object CleartextPolicy {
      * network permission ([LocalNetworkAccess]).
      */
     fun configure(builder: OkHttpClient.Builder): OkHttpClient.Builder =
-        LocalNetworkAccess.configure(LanTls.configure(builder))
+        LocalNetworkAccess
+            .configure(LanTls.configure(builder))
             .addInterceptor(interceptor)
             .addNetworkInterceptor(interceptor)
             .followSslRedirects(false)

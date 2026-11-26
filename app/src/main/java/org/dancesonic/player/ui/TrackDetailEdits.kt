@@ -107,7 +107,9 @@ internal class TrackEntries(
 )
 
 /** Where a field's latest change stands while DanceBrainz has not confirmed it. */
-internal enum class FieldChange(val label: String) {
+internal enum class FieldChange(
+    val label: String,
+) {
     /** Waiting in the offline queue. */
     QUEUED("not sent yet"),
 

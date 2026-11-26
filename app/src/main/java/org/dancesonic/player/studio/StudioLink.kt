@@ -1,6 +1,7 @@
 package org.dancesonic.player.studio
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
@@ -18,7 +19,8 @@ import okhttp3.TlsVersion
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.conscrypt.Conscrypt
-import org.dancesonic.player.subsonic.LocalNetworkAccess
+import org.dancesonic.player.subsonic.CleartextPolicy
+import org.dancesonic.player.subsonic.SubsonicHttp
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -60,12 +62,19 @@ data class StudioInfo(
  */
 class StudioConnector(
     private val timeoutSeconds: Long = CONNECT_TIMEOUT_SECONDS,
+    /** Where the blocking HTTP calls run. Tests pass their own (#137). */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /** Reads Studio's info, checks its fingerprint against [expectedFingerprint] (or the one it claims when null). */
     suspend fun info(address: HttpUrl): StudioInfo =
-        withContext(Dispatchers.IO) {
-            val client = httpClient()
-            val request = Request.Builder().url(address.newBuilder().encodedPath("/v1/info").build()).get().build()
+        withContext(io) {
+            val client = httpClient
+            val request =
+                Request
+                    .Builder()
+                    .url(address.newBuilder().encodedPath("/v1/info").build())
+                    .get()
+                    .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("Studio answered HTTP ${response.code}")
                 val spki = peerSpki(response)
@@ -90,10 +99,13 @@ class StudioConnector(
         address: HttpUrl,
         isStudio: (tlsSpki: ByteArray) -> Boolean,
     ): StudioLink =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val capture = SocketCapture()
+            // Each session needs its own listener, which captures its socket for the channel binding. The derived
+            // client shares the connection pool and dispatcher of [httpClient].
             val client =
-                httpClient().newBuilder()
+                httpClient
+                    .newBuilder()
                     .eventListener(capture)
                     .build()
             val opened = CompletableDeferred<NetworkStudioLink>()
@@ -156,26 +168,34 @@ class StudioConnector(
             opened.await()
         }
 
-    private fun httpClient(): OkHttpClient =
-        OkHttpClient.Builder()
+    /**
+     * The client for Studio, built once per connector (#134). It is derived from the app's shared client, which is
+     * built through [CleartextPolicy.configure] (#127): the cleartext rule and Android 17's local network permission
+     * (#124) apply, and only the TLS settings are Studio's own.
+     */
+    private val httpClient: OkHttpClient by lazy {
+        SubsonicHttp.base
+            .newBuilder()
             .sslSocketFactory(tls.socketFactory, TRUST_ALL)
             // The certificate has a fixed name, and it is checked by fingerprint instead.
             .hostnameVerifier { _, _ -> true }
-            // Studio is on the local network: refused at once while Android 17's permission is missing (#124).
-            .dns(LocalNetworkAccess.dns)
             .connectionSpecs(
                 listOf(ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS).tlsVersions(TlsVersion.TLS_1_3).build()),
-            )
-            .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            ).connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
             .build()
+    }
 
     private fun peerSpki(response: Response): ByteArray =
         peerSpkiOrNull(response) ?: error("Studio did not present a certificate")
 
     private fun peerSpkiOrNull(response: Response): ByteArray? =
-        response.handshake?.peerCertificates?.firstOrNull()?.publicKey?.encoded
+        response.handshake
+            ?.peerCertificates
+            ?.firstOrNull()
+            ?.publicKey
+            ?.encoded
 
     private fun JsonObject.str(key: String): String = this[key]?.jsonPrimitive?.content.orEmpty()
 

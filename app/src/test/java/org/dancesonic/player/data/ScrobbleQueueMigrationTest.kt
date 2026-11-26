@@ -17,7 +17,8 @@ class ScrobbleQueueMigrationTest {
     @Test
     fun `migration 14 to 15 adds the scrobble queue, numbered in play order, and keeps existing data`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(14) {

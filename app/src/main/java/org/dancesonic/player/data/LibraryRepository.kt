@@ -2,6 +2,7 @@ package org.dancesonic.player.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -80,6 +81,8 @@ class LibraryRepository(
     private val clock: () -> Long = System::currentTimeMillis,
     private val syncState: SyncStateStore? = null,
     private val timings: SyncTimings = SyncTimings.None,
+    /** Where database and network work runs. Tests pass their own (#137). */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     fun artists(): Flow<List<ArtistEntity>> = db.artistDao().observeAll()
 
@@ -130,7 +133,7 @@ class LibraryRepository(
         client: SubsonicClient,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): SyncResult =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val runStart = clock()
             val checkpoint = timed("checkpoint") { changeCheckpoint(client) }
 
@@ -180,7 +183,7 @@ class LibraryRepository(
         url: String,
         since: Long,
     ): SyncResult =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             if (isUnchanged(client.libraryInfo().lastModified, since)) {
                 store.save(url, serverTime = null, checkedAt = clock())
                 // Nothing changed in the catalog, but DanceBrainz may have data for tracks not looked up yet.
@@ -197,13 +200,29 @@ class LibraryRepository(
             }
         }
 
-    /** True when no full listing has run for [serverUrl] within [maxAgeMillis]. */
-    suspend fun fullSyncDue(
-        serverUrl: String,
-        maxAgeMillis: Long,
-    ): Boolean {
-        val last = syncState?.lastFull(serverUrl) ?: return true
-        return clock() - last >= maxAgeMillis
+    /**
+     * The automatic check (#121), run at most once per [intervalMillis]. Returns null when it did nothing.
+     *
+     * Only a server with the change feed and a saved sync point is checked, and only through the feed: a full listing
+     * runs only when the feed reports that it is needed. A standard Subsonic server is never listed on a schedule;
+     * its tracks are refreshed one at a time when they are opened or played, and Full rebuild lists the whole catalog.
+     */
+    suspend fun scheduledSync(
+        client: SubsonicClient,
+        intervalMillis: Long,
+    ): SyncResult? {
+        val store = syncState
+        val url = client.settings.baseUrl.toString()
+        if (store == null || !incrementalCheckDue(url, intervalMillis)) return null
+        val since = store.serverTime(url)
+        val route = scheduledSyncFor(hasChangeFeed = client.supports(CHANGES_EXTENSION), hasSyncPoint = since != null)
+        return if (route == ScheduledSync.Feed && since != null) {
+            syncFromFeed(client, store, url, since)
+        } else {
+            // Asked again only after the next interval, so a standard server is not asked on every start.
+            store.save(url, serverTime = null, checkedAt = clock())
+            null
+        }
     }
 
     /**
@@ -215,7 +234,7 @@ class LibraryRepository(
         client: SubsonicClient,
         songId: String,
     ) {
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val stored = db.trackDao().get(songId) ?: return@withContext
             val song = client.song(songId)
             val albumId = song.albumId ?: return@withContext
@@ -278,7 +297,7 @@ class LibraryRepository(
      * not to the server, and they survive a reconnect.
      */
     suspend fun clearCatalog() =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             db.withTransaction {
                 db.trackDao().deleteAll()
                 db.albumDao().deleteAll()
@@ -301,7 +320,7 @@ class LibraryRepository(
         full: Boolean,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): DanceRefresh =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             refreshDanceMetadata(
                 db.trackDao().allMbids(),
                 maxAgeMillis = if (full) ALL_DUE else REFRESH_MAX_AGE_MILLIS,
@@ -390,13 +409,23 @@ class LibraryRepository(
         val deletedArtistIds = feed.deleted.idsOf("artist")
         val deletedAlbumIds = feed.deleted.idsOf("album")
         val deletedSongIds = feed.deleted.idsOf("song")
-        val changedAlbumIds = feed.albums.map { it.id }.filter { it !in deletedAlbumIds }.distinct()
-        val changedArtistIds = feed.artists.map { it.id }.filter { it !in deletedArtistIds }.distinct()
+        val changedAlbumIds =
+            feed.albums
+                .map { it.id }
+                .filter { it !in deletedAlbumIds }
+                .distinct()
+        val changedArtistIds =
+            feed.artists
+                .map { it.id }
+                .filter { it !in deletedArtistIds }
+                .distinct()
 
         val albums = fetchEach(changedAlbumIds) { client.album(it) }
         // An album needs its artist row: fetch a parent the feed did not list and the store lacks.
         val missingParentIds =
-            albums.mapNotNull { it.artistId }.distinct()
+            albums
+                .mapNotNull { it.artistId }
+                .distinct()
                 .filter { it !in changedArtistIds && db.artistDao().get(it) == null }
         val artists = fetchEach(changedArtistIds + missingParentIds) { client.artist(it) }
 
@@ -420,7 +449,7 @@ class LibraryRepository(
      * from the listing. Removed artists and albums are deleted.
      */
     private suspend fun syncBySubsonicComparison(client: SubsonicClient): SyncResult =
-        withContext(Dispatchers.IO) {
+        withContext(io) {
             val runStart = clock()
             val serverArtistNames = client.artists().associate { it.id to artistName(it.name) }
             val stubs = client.allAlbums()
@@ -429,11 +458,13 @@ class LibraryRepository(
             val totals = db.trackDao().totalsByAlbum().associateBy { it.albumId }
 
             val artistRows =
-                serverArtistNames.map { (id, name) -> artistRow(id, name, runStart) }
+                serverArtistNames
+                    .map { (id, name) -> artistRow(id, name, runStart) }
                     .filter { storedArtists[it.id]?.copy(syncedAt = runStart) != it }
             val stubById = stubs.associateBy { it.id }
             val changedIds =
-                stubs.filter { it.differsFrom(storedAlbums[it.id], totals[it.id], serverArtistNames) }
+                stubs
+                    .filter { it.differsFrom(storedAlbums[it.id], totals[it.id], serverArtistNames) }
                     .map { it.id }
             val albumRows =
                 fetchEach(changedIds) { id ->
@@ -801,3 +832,18 @@ internal fun DanceChapter.toEntity(mbid: String): ChapterEntity =
         danceTagId = danceTagId,
         danceName = danceName,
     )
+
+/** What the automatic check does for a server (#121). */
+internal enum class ScheduledSync {
+    /** Nothing: the server has no change feed, or no sync point to ask it from. */
+    Skip,
+
+    /** Asks the change feed what changed since the sync point, and fetches only that. */
+    Feed,
+}
+
+/** The automatic check's route: the change feed when the server has one and a sync point exists, else nothing. */
+internal fun scheduledSyncFor(
+    hasChangeFeed: Boolean,
+    hasSyncPoint: Boolean,
+): ScheduledSync = if (hasChangeFeed && hasSyncPoint) ScheduledSync.Feed else ScheduledSync.Skip

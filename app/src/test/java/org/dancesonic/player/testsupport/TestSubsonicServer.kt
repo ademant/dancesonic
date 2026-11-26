@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.QueueDispatcher
@@ -42,32 +43,54 @@ class TestSubsonicServer : AutoCloseable {
     init {
         server.dispatcher = AdvertisingDispatcher()
         val held =
-            HeldCertificate.Builder()
+            HeldCertificate
+                .Builder()
                 .commonName("localhost")
                 .addSubjectAlternativeName("localhost")
                 .addSubjectAlternativeName("127.0.0.1")
                 .build()
-        server.useHttps(HandshakeCertificates.Builder().heldCertificate(held).build().sslSocketFactory(), false)
+        server.useHttps(
+            HandshakeCertificates
+                .Builder()
+                .heldCertificate(held)
+                .build()
+                .sslSocketFactory(),
+            false,
+        )
         server.start()
 
         settings = ServerSettings(server.url("/"), "test-api-key")
         val trust = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
         plain =
-            OkHttpClient.Builder()
+            OkHttpClient
+                .Builder()
                 .sslSocketFactory(trust.sslSocketFactory(), trust.trustManager)
                 .build()
         http = plain.newBuilder().addInterceptor(ApiKeyInterceptor { settings }).build()
         client = SubsonicClient(settings, SubsonicHttp.service(settings.baseUrl, http))
     }
 
+    /** The responses [enqueue] queues, served in order to every request but the extension request. */
+    private val queue = QueueDispatcher()
+
+    /**
+     * Queues [response] for the next request, behind the extension answer this server gives itself.
+     */
+    fun enqueue(response: MockResponse) = queue.enqueueResponse(response)
+
     /** Answers the extension request itself and serves every other request from the queue. */
-    private inner class AdvertisingDispatcher : QueueDispatcher() {
+    private inner class AdvertisingDispatcher : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse =
             if (request.path.orEmpty().startsWith("/rest/getOpenSubsonicExtensions.view")) {
                 extensionsResponse()
             } else {
-                super.dispatch(request)
+                queue.dispatch(request)
             }
+
+        // The server reads a queued response's socket policy, such as a dropped connection, before dispatching.
+        override fun peek(): MockResponse = queue.peek()
+
+        override fun shutdown() = queue.shutdown()
     }
 
     private fun extensionsResponse(): MockResponse {
@@ -78,7 +101,7 @@ class TestSubsonicServer : AutoCloseable {
     }
 
     fun enqueueJson(body: String) {
-        server.enqueue(
+        enqueue(
             MockResponse()
                 .addHeader("Content-Type", "application/json")
                 .setBody(body),
@@ -95,7 +118,7 @@ class TestSubsonicServer : AutoCloseable {
     }
 
     fun enqueueError(code: Int) {
-        server.enqueue(MockResponse().setResponseCode(code))
+        enqueue(MockResponse().setResponseCode(code))
     }
 
     override fun close() {
@@ -121,8 +144,13 @@ fun songPageOf(vararg albumJsons: String): String {
 
 private fun songsOf(albumJson: String): List<JsonElement> {
     val album =
-        Json.parseToJsonElement(albumJson).jsonObject.getValue("subsonic-response").jsonObject
-            .getValue("album").jsonObject
+        Json
+            .parseToJsonElement(albumJson)
+            .jsonObject
+            .getValue("subsonic-response")
+            .jsonObject
+            .getValue("album")
+            .jsonObject
     val albumId = album.getValue("id")
     return album["song"]?.jsonArray.orEmpty().map { JsonObject(it.jsonObject + ("albumId" to albumId)) }
 }

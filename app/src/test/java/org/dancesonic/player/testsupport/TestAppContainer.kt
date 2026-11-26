@@ -22,7 +22,8 @@ internal fun newTestContainer(): AppContainer {
         PreferenceDataStoreFactory.create(
             produceFile = { File(context.cacheDir, "test-${UUID.randomUUID()}.preferences_pb") },
         )
-    return AppContainer(context, dataStore)
+    // WorkManager is not set up in unit tests; downloads are tested through OfflineDownloads directly.
+    return AppContainer(context, dataStore, downloadScheduler = {})
 }
 
 /** Empties every table. Room's clearAllTables is blocking, so it runs off the test thread. */

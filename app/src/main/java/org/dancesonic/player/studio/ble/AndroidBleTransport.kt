@@ -70,15 +70,26 @@ class AndroidBleTransport private constructor(
 
     /** What the GATT callback reports to the code that is waiting for it. */
     sealed interface Control {
-        data class Connected(val status: Int) : Control
+        data class Connected(
+            val status: Int,
+        ) : Control
 
-        data class Mtu(val mtu: Int, val status: Int) : Control
+        data class Mtu(
+            val mtu: Int,
+            val status: Int,
+        ) : Control
 
-        data class Services(val status: Int) : Control
+        data class Services(
+            val status: Int,
+        ) : Control
 
-        data class Subscribed(val status: Int) : Control
+        data class Subscribed(
+            val status: Int,
+        ) : Control
 
-        data class Written(val status: Int) : Control
+        data class Written(
+            val status: Int,
+        ) : Control
 
         data object Lost : Control
     }

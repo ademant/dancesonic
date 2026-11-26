@@ -19,7 +19,8 @@ class KeptCollectionMigrationTest {
     @Test
     fun `migration 8 to 9 adds the kept collections table with one row per album or playlist`() {
         val config =
-            SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
+            SupportSQLiteOpenHelper.Configuration
+                .builder(ApplicationProvider.getApplicationContext())
                 .name(null)
                 .callback(
                     object : SupportSQLiteOpenHelper.Callback(1) {
