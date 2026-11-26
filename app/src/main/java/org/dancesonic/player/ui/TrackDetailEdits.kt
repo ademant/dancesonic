@@ -25,6 +25,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.dancesonic.player.dance.DanceSuggestion
@@ -209,7 +213,12 @@ private fun EntryRow(
     )
 }
 
-/** Five shoes; the ones up to the viewer's rating are lit, the rest empty. Tapping one sets the rating to it. */
+/**
+ * Five shoes; the ones up to the viewer's rating are lit, the rest faded. Tapping one sets the rating to it.
+ *
+ * The shoe is an emoji, and an emoji keeps its own colors whatever text color it is given, so a tint cannot tell lit
+ * from empty: all five once looked full (#145). Fading the empty ones with alpha works on any glyph.
+ */
 @Composable
 private fun ShoesRow(
     shoes: ShoesView?,
@@ -219,19 +228,38 @@ private fun ShoesRow(
 ) {
     val mine = shoes?.mine ?: 0
     val label = if (change == null) "Shoes:" else "Shoes (${change.label}):"
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyLarge)
-        for (value in 1..MAX_SHOES) {
-            TextButton(onClick = { onRate(value) }, enabled = canEdit) {
-                Text(
-                    SHOE,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (value <= mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                )
+    Column {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            for (value in 1..MAX_SHOES) {
+                val lit = value <= mine
+                TextButton(
+                    onClick = { onRate(value) },
+                    enabled = canEdit,
+                    modifier =
+                        Modifier.semantics {
+                            selected = lit
+                            contentDescription = "Rate $value of $MAX_SHOES shoes"
+                        },
+                ) {
+                    Text(SHOE, Modifier.alpha(shoeAlpha(lit)), style = MaterialTheme.typography.bodyLarge)
+                }
             }
+        }
+        if (!canEdit) {
+            Text(
+                "Sign in to DanceBrainz to rate",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
+
+/** How strongly a shoe is drawn: lit ones in full, the ones past the rating faded. */
+internal fun shoeAlpha(lit: Boolean): Float = if (lit) 1f else EMPTY_SHOE_ALPHA
+
+private const val EMPTY_SHOE_ALPHA = 0.25f
 
 /** Assigned dances can be removed and new ones added. Each change is shown until it is sent. */
 @Composable
