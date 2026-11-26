@@ -16,11 +16,12 @@ private const val COUNTDOWN_TICK_MILLIS = 1_000L
 
 /** The line Config shows after a sync. */
 internal fun SyncResult.summary(): String {
-    val danceNote = if (danceLookupsFailed > 0) ", $danceLookupsFailed dance lookups failed" else ""
+    val danceNote = if (danceLookupsFailed > 0) ", ${count(danceLookupsFailed, "dance lookup")} failed" else ""
     return when (mode) {
         SyncMode.Unchanged -> "No changes on the server since the last sync."
-        SyncMode.Changes -> "Applied $rowsWritten changes$danceNote"
-        SyncMode.Full -> "Synced $artists artists, $albums albums, $tracks tracks$danceNote"
+        SyncMode.Changes -> "Applied ${count(rowsWritten, "change")}$danceNote"
+        SyncMode.Full ->
+            "Synced ${count(artists, "artist")}, ${count(albums, "album")}, ${count(tracks, "track")}$danceNote"
     }
 }
 

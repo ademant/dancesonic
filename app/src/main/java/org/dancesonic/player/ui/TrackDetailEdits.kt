@@ -3,6 +3,7 @@ package org.dancesonic.player.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -196,7 +197,7 @@ internal fun withChange(
 internal fun shoesMedianText(view: ShoesView?): String? {
     if (view == null) return null
     val median = view.median ?: return null
-    return "Median ${formatOneDecimal(median)} from ${view.raters} raters"
+    return "Median ${formatOneDecimal(median)} from ${count(view.raters, "rater")}"
 }
 
 @Composable
@@ -228,16 +229,19 @@ private fun ShoesRow(
 ) {
     val mine = shoes?.mine ?: 0
     val label = if (change == null) "Shoes:" else "Shoes (${change.label}):"
+    // The label has a line of its own and the shoes share the full width, so all five fit in a narrow dialog: next to
+    // the label, five full-size buttons pushed the last shoe out of view.
     Column {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
             for (value in 1..MAX_SHOES) {
                 val lit = value <= mine
                 TextButton(
                     onClick = { onRate(value) },
                     enabled = canEdit,
+                    contentPadding = PaddingValues(0.dp),
                     modifier =
-                        Modifier.semantics {
+                        Modifier.weight(1f).semantics {
                             selected = lit
                             contentDescription = "Rate $value of $MAX_SHOES shoes"
                         },
