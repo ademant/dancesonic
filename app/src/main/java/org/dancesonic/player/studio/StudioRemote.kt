@@ -336,6 +336,7 @@ class StudioRemote
                 link = openFor(record, fingerprint, noiseKey, order)
                 val session = sessionOn(link, record, signer)
                 val welcome = session.hello()
+                store.markConnected(record.id, welcome.transport, clock() * MILLIS_PER_SECOND)
                 return OpenStudio(record, session, welcome.transport)
             } catch (e: StudioUnavailable) {
                 link?.close()

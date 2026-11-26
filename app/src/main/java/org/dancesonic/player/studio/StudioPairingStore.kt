@@ -41,7 +41,27 @@ data class StudioPairing(
     val hintAddresses: List<String> = emptyList(),
     /** The HTTPS port Studio last reported with [hintAddresses]. */
     val hintPort: Int? = null,
-)
+    /** When the phone last opened a session with this Studio, epoch milliseconds. Null until it has (#88). */
+    val lastConnectedAtMs: Long? = null,
+    /** The transport of that session: `ble`, `relay` or `network`, as Studio named it. */
+    val lastTransport: String? = null,
+) {
+    /**
+     * The transports this pairing can use, in the order they are tried. The network is always possible; Bluetooth and
+     * folksonic's relay need the phone's Noise key, which pairings made before they existed lack. The relay also needs
+     * a folksonic connection, which is checked when connecting.
+     */
+    fun transports(): List<String> =
+        StudioTransports.initial().filter { transport ->
+            when (transport) {
+                StudioTransports.BLUETOOTH -> phoneNoiseSealed != null && isUuid(bleService)
+                StudioTransports.RELAY -> phoneNoiseSealed != null
+                else -> true
+            }
+        }
+
+    private fun isUuid(text: String): Boolean = runCatching { java.util.UUID.fromString(text) }.isSuccess
+}
 
 /**
  * The paired Studios, kept in the settings DataStore as one JSON list. Not secret, so it is not encrypted; the keys
@@ -86,9 +106,41 @@ class StudioPairingStore(
         }
     }
 
-    /** Removes a pairing from the list. Its Keystore key is removed by the caller. */
+    /**
+     * Removes a pairing from the list, and forgets it as the last Studio played on. Its key is removed by the caller.
+     */
     suspend fun remove(id: String) {
-        dataStore.edit { prefs -> prefs[KEY] = encode(decode(prefs[KEY]).filterNot { it.id == id }) }
+        dataStore.edit { prefs ->
+            prefs[KEY] = encode(decode(prefs[KEY]).filterNot { it.id == id })
+            if (prefs[LAST_ACTIVE] == id) prefs.remove(LAST_ACTIVE)
+        }
+    }
+
+    /** Records that a session with [id] opened over [transport] at [atMs]. A pairing that is gone is left alone. */
+    suspend fun markConnected(
+        id: String,
+        transport: String,
+        atMs: Long,
+    ) {
+        dataStore.edit { prefs ->
+            prefs[KEY] =
+                encode(
+                    decode(prefs[KEY]).map {
+                        if (it.id == id) it.copy(lastConnectedAtMs = atMs, lastTransport = transport) else it
+                    },
+                )
+        }
+    }
+
+    /**
+     * The Studio last chosen with "Play on", or null when the phone was chosen (#88). Remembered across restarts so the
+     * list can point to it; the phone never reconnects to it by itself.
+     */
+    val lastActive: Flow<String?> = dataStore.data.map { it[LAST_ACTIVE] }
+
+    /** Remembers [id] as the Studio last played on, or forgets it when [id] is null. */
+    suspend fun setLastActive(id: String?) {
+        dataStore.edit { prefs -> if (id == null) prefs.remove(LAST_ACTIVE) else prefs[LAST_ACTIVE] = id }
     }
 
     /**
@@ -132,6 +184,7 @@ class StudioPairingStore(
     private companion object {
         val KEY = stringPreferencesKey("studio_pairings")
         val RELAY_ID = stringPreferencesKey("studio_relay_phone_id")
+        val LAST_ACTIVE = stringPreferencesKey("studio_last_active")
         val json = Json { ignoreUnknownKeys = true }
     }
 }
