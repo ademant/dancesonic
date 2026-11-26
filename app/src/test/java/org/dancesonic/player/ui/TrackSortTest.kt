@@ -65,4 +65,19 @@ class TrackSortTest {
         sortTracks(tracks, TrackSort.LENGTH_ASC)
         assertEquals(listOf("a", "b", "c", "d", "e"), ids(tracks))
     }
+
+    @Test
+    fun `randomize keeps every track and gives the same order for the same seed`() {
+        val shuffled = ids(sortTracks(tracks, TrackSort.RANDOM, seed = 7L))
+
+        assertEquals(listOf("a", "b", "c", "d", "e"), shuffled.sorted())
+        assertEquals(shuffled, ids(sortTracks(tracks, TrackSort.RANDOM, seed = 7L)))
+    }
+
+    @Test
+    fun `a new seed deals a new order`() {
+        val orders = (1L..10L).map { ids(sortTracks(tracks, TrackSort.RANDOM, seed = it)) }.toSet()
+
+        assertTrue("ten seeds gave only ${orders.size} orders", orders.size > 1)
+    }
 }

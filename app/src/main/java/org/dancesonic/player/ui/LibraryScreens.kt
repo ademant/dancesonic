@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -46,6 +47,7 @@ import org.dancesonic.player.data.db.DanceTypeCount
 import org.dancesonic.player.data.db.KeptKind
 import org.dancesonic.player.data.db.TrackWithTempo
 import org.dancesonic.player.playback.PlayerController
+import kotlin.random.Random
 
 /** Library hierarchy: Artist → Release → Track. Back navigates up one level. */
 @Composable
@@ -223,12 +225,15 @@ fun DanceScreen(
     player: PlayerController,
     playlistVm: PlaylistViewModel,
     onOpenConfig: () -> Unit,
+    // Starts a list at an index as the new queue. A parameter so tests can see what Play and a row tap start.
+    play: (List<TrackWithTempo>, Int) -> Unit = player::play,
 ) {
     val danceTypes by vm.danceTypes.collectAsStateWithLifecycle()
     var danceType by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = danceType != null) { danceType = null }
 
     var trackSort by rememberSaveable { mutableStateOf(TrackSort.ARTIST_TITLE) }
+    var shuffleSeed by rememberSaveable { mutableLongStateOf(0L) }
     val selected = danceType
     val crumbs =
         buildList {
@@ -237,13 +242,6 @@ fun DanceScreen(
         }
     Column(Modifier.fillMaxSize()) {
         TabHeader("Dance", onOpenConfig)
-        // The header names the tab; the path and the sort only appear once a dance is open.
-        if (selected != null) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { Breadcrumbs(crumbs) }
-                TrackSortButton(trackSort) { trackSort = it }
-            }
-        }
         if (selected == null) {
             if (danceTypes.isEmpty()) {
                 EmptyHint(
@@ -271,10 +269,22 @@ fun DanceScreen(
                 val tracks by remember(
                     selected,
                 ) { vm.tracksForDance(selected) }.collectAsStateWithLifecycle(emptyList())
-                val shown = remember(tracks, trackSort) { sortTracks(tracks, trackSort) }
+                val shown = remember(tracks, trackSort, shuffleSeed) { sortTracks(tracks, trackSort, shuffleSeed) }
+                // The header names the tab; the path, Play and the sort only appear once a dance is open.
+                DanceTracksBar(
+                    crumbs = crumbs,
+                    sort = trackSort,
+                    canPlay = shown.isNotEmpty(),
+                    onPlayAll = { play(shown, 0) },
+                    onSort = { option ->
+                        // Each pick of Randomize deals a new order.
+                        if (option == TrackSort.RANDOM) shuffleSeed = Random.nextLong()
+                        trackSort = option
+                    },
+                )
                 TrackList(
                     tracks = shown,
-                    onPlay = { index -> player.play(shown, index) },
+                    onPlay = { index -> play(shown, index) },
                     playlistVm = playlistVm,
                     libraryVm = vm,
                     listState = keptListState(vm, "dance:$selected"),
@@ -284,7 +294,28 @@ fun DanceScreen(
     }
 }
 
-/** The sort of a dance's tracks, as a button that opens the three orders. */
+/**
+ * The bar over an open dance: the path back, then Play and the sort. Play always starts the list as shown from its
+ * first track and makes it the queue, whatever the player holds now; it is off while the list is empty.
+ */
+@Composable
+internal fun DanceTracksBar(
+    crumbs: List<Crumb>,
+    sort: TrackSort,
+    canPlay: Boolean,
+    onPlayAll: () -> Unit,
+    onSort: (TrackSort) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { Breadcrumbs(crumbs) }
+        TextButton(onClick = onPlayAll, enabled = canPlay) {
+            Text("Play", style = MaterialTheme.typography.labelMedium)
+        }
+        TrackSortButton(sort, onSort)
+    }
+}
+
+/** The sort of a dance's tracks, as a button that opens the orders. */
 @Composable
 private fun TrackSortButton(
     sort: TrackSort,
